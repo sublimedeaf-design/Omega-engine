@@ -1,0 +1,20 @@
+[project]
+name = "omega-engine"
+version = "1.0.3"
+description = "Auditable football probability and market value engine"
+requires-python = ">=3.11"
+dependencies = ["numpy>=2.0", "scipy>=1.16"]
+
+[project.optional-dependencies]
+data = ["duckdb>=1.4"]
+dev = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[project.scripts]
+omega = "omega.cli:main"
+
+[tool.setuptools.package-data]
+"omega.storage" = ["schema.sql"]
