@@ -218,7 +218,11 @@ jobs:
           OMEGA_CODESPACE_NAME: ${{ steps.wake.outputs.codespace_name }}
         run: |
           set +x
-          state_json="$(timeout 30s gh codespace ssh -c "$OMEGA_CODESPACE_NAME" -- bash -s <<'REMOTE'
+          expected="$(tr -d '\r\n' < bootstrap/omega/desired_private_head.txt)"
+          [[ "$expected" =~ ^[0-9a-f]{40}$ ]]
+          state_json="$({
+            printf 'export OMEGA_EXPECTED_PRIVATE_HEAD=%q\n' "$expected"
+            cat <<'REMOTE'
           set -Eeuo pipefail
           STATE="${OMEGA_STATE:-/workspaces/.omega-state}"
           ROOT=""
@@ -229,7 +233,7 @@ jobs:
           done
           [ -n "$ROOT" ] || exit 44
           cd "$ROOT"
-          python3 - "$STATE" "$(git rev-parse HEAD)" <<'PY'
+          python3 - "$STATE" "$OMEGA_EXPECTED_PRIVATE_HEAD" <<'PY'
           import datetime as dt,json,pathlib,sys
           state=pathlib.Path(sys.argv[1]); head=sys.argv[2]
           ev=state/"evidence"
@@ -256,7 +260,7 @@ jobs:
           print(json.dumps({"sha":head,"state":state_value,"description":desc,"running":running},separators=(",",":")))
           PY
           REMOTE
-          )"
+          } | timeout 30s gh codespace ssh -c "$OMEGA_CODESPACE_NAME" -- bash -s)"
           sha="$(python3 -c 'import json,sys; print(json.loads(sys.stdin.read())["sha"])' <<<"$state_json")"
           state="$(python3 -c 'import json,sys; print(json.loads(sys.stdin.read())["state"])' <<<"$state_json")"
           desc="$(python3 -c 'import json,sys; print(json.loads(sys.stdin.read())["description"])' <<<"$state_json")"
