@@ -33,7 +33,7 @@ jobs:
           [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
           need_run=true
           if payload="$(gh api "/repos/sublimedeaf-design/Omega-engines/commits/$sha/status" 2>/dev/null)"; then
-            if printf '%s' "$payload" | python3 -c 'import json,sys; d=json.load(sys.stdin); want={"omega/hosted-ci/python311","omega/hosted-ci/python313","omega/hosted-ci/python314","omega/hosted-ci/storage","omega/hosted-governance"}; got={x.get("context"):x.get("state") for x in d.get("statuses",[])}; raise SystemExit(0 if all(got.get(k)=="success" for k in want) else 1)'; then
+            if printf '%s' "$payload" | python3 -c 'import json,sys; d=json.load(sys.stdin); want={"omega/hosted-ci/python311","omega/hosted-ci/python313","omega/hosted-ci/python314","omega/hosted-ci/storage","omega/hosted-governance","omega/hosted-android"}; got={x.get("context"):x.get("state") for x in d.get("statuses",[])}; raise SystemExit(0 if all(got.get(k)=="success" for k in want) else 1)'; then
               need_run=false
             fi
           fi
@@ -97,6 +97,59 @@ jobs:
           set +x
           state=failure; [ "$RESULT" = success ] && state=success
           gh api --method POST "/repos/sublimedeaf-design/Omega-engines/statuses/$OMEGA_SHA"             -f state="$state" -f context="omega/hosted-ci/$LANE"             -f description="public hosted bridge: $RESULT" >/dev/null
+
+  android:
+    needs: discover
+    if: needs.discover.outputs.need_run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      OMEGA_SOURCE_SHA: ${{ needs.discover.outputs.sha }}
+    steps:
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Checkout exact private Android source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: sublimedeaf-design/Omega-engines
+          ref: ${{ needs.discover.outputs.sha }}
+          token: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          persist-credentials: false
+          fetch-depth: 1
+          path: srcdir
+      - name: Verify exact source
+        working-directory: srcdir
+        run: test "$(git rev-parse HEAD)" = "$OMEGA_SOURCE_SHA"
+      - name: Install Android SDK 36
+        shell: bash
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "platforms;android-36" "build-tools;36.0.0"
+      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb
+        with:
+          gradle-version: "8.13"
+      - name: Compile lint and verify debug signature
+        working-directory: srcdir/android
+        shell: bash
+        run: |
+          gradle --no-daemon --stacktrace lintDebug assembleDebug
+          test -s app/build/outputs/apk/debug/app-debug.apk
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify app/build/outputs/apk/debug/app-debug.apk
+      - name: Publish exact-SHA Android verifier status
+        if: ${{ always() }}
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          RESULT: ${{ job.status }}
+        run: |
+          set +x
+          state=failure; [ "$RESULT" = success ] && state=success
+          gh api --method POST "/repos/sublimedeaf-design/Omega-engines/statuses/$OMEGA_SOURCE_SHA" \
+            -f state="$state" -f context="omega/hosted-android" \
+            -f description="public hosted Android compile/lint verifier: $RESULT" >/dev/null
 
   governance:
     needs: discover
