@@ -94,12 +94,20 @@ jobs:
           if aa.is_file():
               try:
                   raw=json.loads(aa.read_text(encoding="utf-8"))
+                  result=raw.get("result") if isinstance(raw.get("result"),dict) else {}
+                  steps=raw.get("steps") if isinstance(raw.get("steps"),list) else []
                   acceptance_agents={
                       "ok":raw.get("ok"),
                       "reason":raw.get("reason"),
+                      "detail":str(raw.get("detail") or "")[:1200],
+                      "task":raw.get("task"),
                       "task_count":raw.get("task_count"),
                       "resumed":raw.get("resumed"),
                       "failed_tasks":raw.get("failed_tasks"),
+                      "result_status":result.get("status"),
+                      "result_error":str(result.get("error") or "")[:1200],
+                      "last_step_status":(steps[-1].get("status") if steps and isinstance(steps[-1],dict) else None),
+                      "last_step_error":(str(steps[-1].get("error") or "")[:1200] if steps and isinstance(steps[-1],dict) else ""),
                   } if isinstance(raw,dict) else None
               except Exception as exc:
                   acceptance_agents={"parse_error":type(exc).__name__}
