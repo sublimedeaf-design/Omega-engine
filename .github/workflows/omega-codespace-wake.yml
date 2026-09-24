@@ -23,7 +23,7 @@ jobs:
     env:
       OMEGA_BOOTSTRAP_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
       OMEGA_CODESPACE_LIFECYCLE_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
-      OMEGA_FORCE_RESTART: "1"
+      OMEGA_FORCE_RESTART: "0"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
