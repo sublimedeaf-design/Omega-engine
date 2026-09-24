@@ -20,3 +20,5 @@ without a subsequent available/running state.
 
 
 Secret activation verification is performed by the scheduled/push bootstrap workflow; no secret value is logged.
+
+SSH recovery is provided by the devcontainer sshd feature; the normal bootstrap remains non-destructive and converges the existing Codespace to available before remote runner repair.
