@@ -27,6 +27,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
+      - name: Verify Codespaces secret tooling
+        shell: bash
+        run: |
+          gh secret set --help | grep -q codespaces
       - name: Discover and wake existing OMEGA runtime
         shell: bash
         run: |
