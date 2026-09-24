@@ -8,6 +8,7 @@ OWNER="sublimedeaf-design"
 REPO="Omega-engines"
 REF="main"
 TOKEN=os.environ.get("OMEGA_CODESPACE_LIFECYCLE_TOKEN","").strip()
+FORCE_RESTART=os.environ.get("OMEGA_FORCE_RESTART","").strip()=="1"
 
 def request(method,path):
     req=urllib.request.Request(
@@ -56,6 +57,23 @@ def main():
         print(json.dumps({"ok":False,"stage":"detail","http_status":dcode}))
         return 4
     start_http=None
+    stop_http=None
+    if FORCE_RESTART and state in {"available","running"}:
+        stop_http,_=request("POST",f"/user/codespaces/{q}/stop")
+        if stop_http != 200:
+            print(json.dumps({"ok":False,"stage":"stop","http_status":stop_http}))
+            return 7
+        deadline=time.time()+120
+        while time.time()<deadline:
+            time.sleep(5)
+            scode,sbody=request("GET",f"/user/codespaces/{q}")
+            state=str(sbody.get("state") or "").lower()
+            if scode==200 and state not in {"available","running","starting"}:
+                break
+        else:
+            print(json.dumps({"ok":False,"stage":"stop_verify","state":state}))
+            return 6
+
     if state not in {"available","running"}:
         start_http,_=request("POST",f"/user/codespaces/{q}/start")
         if start_http not in {200,202,304,409}:
@@ -70,10 +88,10 @@ def main():
                 break
         else:
             print(json.dumps({"ok":False,"stage":"verify","start_http":start_http,"state":state}))
-            return 6
+            return 8
     print(json.dumps({
         "ok":True,"repository":f"{OWNER}/{REPO}","ref":REF,
-        "codespace_name":name,"state":state,"start_http":start_http,
+        "codespace_name":name,"state":state,"stop_http":stop_http,"start_http":start_http,
         "credential_material_recorded":False,
     },sort_keys=True))
     return 0
