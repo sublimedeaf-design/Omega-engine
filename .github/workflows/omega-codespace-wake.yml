@@ -16,7 +16,7 @@ permissions:
 
 concurrency:
   group: omega-free-codespace-bootstrap-v5
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   wake:
