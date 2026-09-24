@@ -1,0 +1,69 @@
+name: OMEGA Codespace SSH Recovery Probe
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/omega-codespace-ssh-recovery.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: omega-codespace-ssh-recovery
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    env:
+      OMEGA_BOOTSTRAP_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+      CODESPACE_NAME: zany-invention-vpr6jxpxppv4hpvp6
+    steps:
+      - name: Verify headless Codespace SSH and runner state
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+        run: |
+          set +e
+          remote_cmd='bash -lc '"'"'
+            STATE="${OMEGA_STATE:-/workspaces/.omega-state}"
+            echo "OMEGA_REMOTE_HOSTNAME=$(hostname)"
+            echo "OMEGA_REMOTE_CODESPACE_NAME=${CODESPACE_NAME:-unset}"
+            if [ -f "$STATE/actions-runner/.runner" ]; then
+              echo "OMEGA_RUNNER_REGISTRATION=present"
+            else
+              echo "OMEGA_RUNNER_REGISTRATION=missing"
+            fi
+            if [ -x "$STATE/actions-runner/run.sh" ]; then
+              echo "OMEGA_RUNNER_BINARY=present"
+            else
+              echo "OMEGA_RUNNER_BINARY=missing"
+            fi
+            if pgrep -af "$STATE/actions-runner/bin/Runner.Listener" >/dev/null 2>&1; then
+              echo "OMEGA_RUNNER_LISTENER=present"
+              pgrep -af "$STATE/actions-runner/bin/Runner.Listener" || true
+            else
+              echo "OMEGA_RUNNER_LISTENER=missing"
+            fi
+            if pgrep -af "deploy/codespaces/runner-supervisor.sh" >/dev/null 2>&1; then
+              echo "OMEGA_RUNNER_SUPERVISOR=present"
+            else
+              echo "OMEGA_RUNNER_SUPERVISOR=missing"
+            fi
+            if [ -n "${OMEGA_FEDERATION_PAT:-}" ]; then
+              echo "OMEGA_FEDERATION_PAT=present"
+            else
+              echo "OMEGA_FEDERATION_PAT=missing"
+            fi
+            for f in               "$STATE/logs/actions-runner-install.log"               "$STATE/logs/actions-runner-supervisor.log"               "$STATE/logs/actions-runner-supervisor-launch.log"               "$STATE/logs/source-sync.log"               "$STATE/logs/runtime-supervisor.log"
+            do
+              echo "===== $f ====="
+              tail -n 80 "$f" 2>/dev/null || true
+            done
+          '"'"''
+          timeout 90 gh codespace ssh -c "$CODESPACE_NAME" "$remote_cmd"
+          rc=$?
+          echo "OMEGA_SSH_PROBE_RC=$rc"
+          exit 0
