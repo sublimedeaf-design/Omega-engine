@@ -1,0 +1,38 @@
+name: OMEGA Runner Registration Capability Probe
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/omega-runner-registration-recovery.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    env:
+      OMEGA_BOOTSTRAP_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+    steps:
+      - name: Probe repository runner registration capability
+        shell: bash
+        run: |
+          set +x
+          code="$(curl -sS -o /tmp/runner-registration.json -w '%{http_code}' -X POST \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            -H "Authorization: Bearer $OMEGA_BOOTSTRAP_TOKEN" \
+            https://api.github.com/repos/sublimedeaf-design/Omega-engines/actions/runners/registration-token || true)"
+          echo "OMEGA_RUNNER_REGISTRATION_HTTP=$code"
+          python3 - <<'PY'
+          import json
+          p="/tmp/runner-registration.json"
+          try:
+              d=json.load(open(p))
+          except Exception:
+              d={}
+          print("OMEGA_RUNNER_REGISTRATION_TOKEN_PRESENT="+("true" if bool(d.get("token")) else "false"))
+          print("OMEGA_RUNNER_REGISTRATION_MESSAGE="+str(d.get("message",""))[:160])
+          PY
