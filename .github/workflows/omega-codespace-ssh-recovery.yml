@@ -21,6 +21,17 @@ jobs:
       OMEGA_BOOTSTRAP_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
       CODESPACE_NAME: zany-invention-vpr6jxpxppv4hpvp6
     steps:
+      - name: Inspect Codespace creation and startup log
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+        run: |
+          set +e
+          timeout 90 gh codespace logs -c "$CODESPACE_NAME" > /tmp/codespace.log 2>&1
+          rc=$?
+          echo "OMEGA_CODESPACE_LOGS_RC=$rc"
+          grep -Eai 'postStart|start\.sh|OMEGA|runner|remote-admin|source-sync|error|fail|warning' /tmp/codespace.log | tail -n 300 || true
+          exit 0
       - name: Verify headless Codespace SSH and runner state
         shell: bash
         env:
