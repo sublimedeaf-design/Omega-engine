@@ -1,0 +1,126 @@
+name: OMEGA Private CI Hosted Bridge
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "*/10 * * * *"
+  push:
+    paths:
+      - ".github/workflows/omega-private-ci-bridge.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: omega-private-ci-hosted-bridge
+  cancel-in-progress: true
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.head.outputs.sha }}
+    steps:
+      - id: head
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+        shell: bash
+        run: |
+          set +x
+          sha="$(gh api /repos/sublimedeaf-design/Omega-engines/commits/main --jq .sha)"
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "OMEGA_PRIVATE_HEAD=$sha"
+
+  ci:
+    needs: discover
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - lane: python311
+            python: "3.11"
+            extra: "dev"
+            command: "python -m pytest -q && python -m compileall -q src scripts && python -m pip check"
+          - lane: python313
+            python: "3.13"
+            extra: "dev"
+            command: "python -m pytest -q && python -m compileall -q src scripts && python -m pip check && python scripts/repo_audit.py --out reports/repo-audit-ci.json && python -c \"from omega.research.preflight import run_preflight; r=run_preflight('reports/preflight-ci.json'); assert r['passed'], r\" && python scripts/final_audit_gate.py --audit reports/repo-audit-ci.json --out reports/final-audit-gate.json"
+          - lane: python314
+            python: "3.14"
+            extra: "dev"
+            command: "python -m pytest -q && python -m compileall -q src scripts && python -m pip check"
+          - lane: storage
+            python: "3.13"
+            extra: "dev,data"
+            command: "python -m pytest -q tests/test_storage.py tests/test_support_runtime_integrity.py && python -c \"from omega.research.preflight import run_preflight; [(_ for _ in ()).throw(AssertionError(r)) if not (r:=run_preflight(backend=b))['passed'] or r['storage_backend']!=b else None for b in ('sqlite','duckdb')]\" && python -m pip check"
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Fetch exact private source snapshot
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          OMEGA_SHA: ${{ needs.discover.outputs.sha }}
+        shell: bash
+        run: |
+          set +x
+          mkdir srcdir
+          gh api -H 'Accept: application/vnd.github+json'             "/repos/sublimedeaf-design/Omega-engines/tarball/$OMEGA_SHA" > source.tgz
+          tar -xzf source.tgz -C srcdir --strip-components=1
+          rm source.tgz
+          printf '%s\n' "$OMEGA_SHA" > srcdir/.omega-hosted-bridge-sha
+      - name: Run lane
+        working-directory: srcdir
+        shell: bash
+        run: |
+          python -m pip install -c requirements-ci.lock -e '.[${{ matrix.extra }}]'
+          ${{ matrix.command }}
+      - name: Publish exact-SHA lane status
+        if: ${{ always() }}
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          OMEGA_SHA: ${{ needs.discover.outputs.sha }}
+          LANE: ${{ matrix.lane }}
+          RESULT: ${{ job.status }}
+        shell: bash
+        run: |
+          set +x
+          state=failure; [ "$RESULT" = success ] && state=success
+          gh api --method POST "/repos/sublimedeaf-design/Omega-engines/statuses/$OMEGA_SHA"             -f state="$state" -f context="omega/hosted-ci/$LANE"             -f description="public hosted bridge: $RESULT" >/dev/null
+
+  governance:
+    needs: discover
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with: {python-version: "3.13"}
+      - name: Fetch exact private source snapshot
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          OMEGA_SHA: ${{ needs.discover.outputs.sha }}
+        shell: bash
+        run: |
+          set +x
+          mkdir srcdir
+          gh api "/repos/sublimedeaf-design/Omega-engines/tarball/$OMEGA_SHA" > source.tgz
+          tar -xzf source.tgz -C srcdir --strip-components=1
+      - name: Validate governance
+        working-directory: srcdir
+        run: |
+          python scripts/validate_agent_handoff.py --self-check
+          python scripts/agent_orchestrator.py --agents .omega/agents.json --plan .omega/work-plan.json validate
+      - name: Publish governance status
+        if: ${{ always() }}
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          OMEGA_SHA: ${{ needs.discover.outputs.sha }}
+          RESULT: ${{ job.status }}
+        shell: bash
+        run: |
+          set +x
+          state=failure; [ "$RESULT" = success ] && state=success
+          gh api --method POST "/repos/sublimedeaf-design/Omega-engines/statuses/$OMEGA_SHA"             -f state="$state" -f context="omega/hosted-governance"             -f description="public hosted governance: $RESULT" >/dev/null
