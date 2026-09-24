@@ -1,0 +1,187 @@
+name: OMEGA Exact-SHA 2f Proof
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/omega-exact-2f-proof.yml"
+
+permissions:
+  contents: read
+
+env:
+  TARGET_REPOSITORY: sublimedeaf-design/Omega-engines
+  TARGET_SHA: 2f1bc5f80f78b68c872da7459c9d608ddf41dc4f
+  BASE_SHA: be537e7dffde572c038c253c548282cd2e18e799
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: ${{ env.TARGET_REPOSITORY }}
+          ref: ${{ env.TARGET_SHA }}
+          token: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          persist-credentials: false
+          path: omega
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.13"
+      - working-directory: omega
+        run: python -m pip install -c requirements-ci.lock -e '.[dev]'
+      - working-directory: omega
+        run: python -m pytest -q
+      - working-directory: omega
+        run: python -m compileall -q src scripts
+      - working-directory: omega
+        run: python -m pip check
+      - name: Repository integrity audit
+        working-directory: omega
+        run: python scripts/repo_audit.py --out reports/repo-audit-ci.json
+      - name: Runtime preflight
+        working-directory: omega
+        run: python -c "from omega.research.preflight import run_preflight; r=run_preflight('reports/preflight-ci.json'); assert r['passed'], r"
+      - name: Final release audit gate
+        working-directory: omega
+        run: python scripts/final_audit_gate.py --audit reports/repo-audit-ci.json --out reports/final-audit-gate.json
+
+  python311:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: ${{ env.TARGET_REPOSITORY }}
+          ref: ${{ env.TARGET_SHA }}
+          token: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          persist-credentials: false
+          path: omega
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.11"
+      - working-directory: omega
+        run: python -m pip install -c requirements-ci.lock -e '.[dev]'
+      - working-directory: omega
+        run: python -m pytest -q
+      - working-directory: omega
+        run: python -m compileall -q src scripts
+      - working-directory: omega
+        run: python -m pip check
+
+  python314:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: ${{ env.TARGET_REPOSITORY }}
+          ref: ${{ env.TARGET_SHA }}
+          token: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          persist-credentials: false
+          path: omega
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.14"
+      - working-directory: omega
+        run: python -m pip install -c requirements-ci.lock -e '.[dev]'
+      - working-directory: omega
+        run: python -m pytest -q
+      - working-directory: omega
+        run: python -m compileall -q src scripts
+      - working-directory: omega
+        run: python -m pip check
+
+  storage-backends:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: ${{ env.TARGET_REPOSITORY }}
+          ref: ${{ env.TARGET_SHA }}
+          token: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          persist-credentials: false
+          path: omega
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.13"
+      - working-directory: omega
+        run: python -m pip install -c requirements-ci.lock -e '.[dev,data]'
+      - working-directory: omega
+        run: python -m pytest -q tests/test_storage.py tests/test_support_runtime_integrity.py
+      - name: Exercise SQLite and DuckDB preflight
+        working-directory: omega
+        run: |
+          python - <<'PY'
+          from omega.research.preflight import run_preflight
+          for backend in ("sqlite","duckdb"):
+              result=run_preflight(backend=backend)
+              assert result["passed"], result
+              assert result["storage_backend"]==backend, result
+          PY
+      - working-directory: omega
+        run: python -m pip check
+
+  governance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: ${{ env.TARGET_REPOSITORY }}
+          ref: ${{ env.TARGET_SHA }}
+          token: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          persist-credentials: false
+          fetch-depth: 0
+          path: omega
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.13"
+      - name: Build exact PR event
+        working-directory: omega
+        run: |
+          python - <<'PY'
+          import json
+          body = """## Agent / owner
+          Role: release_ci, qa_audit, orchestrator
+
+          ## Scope
+          Exact-SHA federation validation proof.
+
+          ## Base / head
+          Base SHA: be537e7dffde572c038c253c548282cd2e18e799
+          Head SHA: 2f1bc5f80f78b68c872da7459c9d608ddf41dc4f
+
+          ## Risk
+          Fail closed on any governance violation.
+
+          ## Verification
+          Reproduce the exact governance validator.
+
+          ## Evidence
+          Public hosted runner executes the private exact SHA without publishing private artifacts.
+
+          ## Temporal integrity
+          Base and head are pinned immutable commit SHAs.
+
+          ## Security
+          Checkout token is secret-scoped and persist-credentials is false.
+
+          ## Rollback
+          Delete this public proof workflow.
+
+          ## Handoff
+          Continue only after all five exact-SHA proof jobs are green.
+          """
+          event={"pull_request":{"body":body,"base":{"sha":"be537e7dffde572c038c253c548282cd2e18e799"},"head":{"sha":"2f1bc5f80f78b68c872da7459c9d608ddf41dc4f"}}}
+          with open("/tmp/omega-pr-event.json","w",encoding="utf-8") as fh:
+              json.dump(event,fh)
+          PY
+      - name: Validate control plane and handoff
+        working-directory: omega
+        run: python scripts/validate_agent_handoff.py --self-check --event /tmp/omega-pr-event.json
+      - name: Validate executable multi-agent plan
+        working-directory: omega
+        run: python scripts/agent_orchestrator.py --agents .omega/agents.json --plan .omega/work-plan.json validate
