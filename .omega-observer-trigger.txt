@@ -1,2 +1,2 @@
-private_main=02c88ec58eeed982d6dc3565ae5facbc77858860
-purpose=isolated-readonly-acceptance-observer
+probe=multi-agent-result
+private_main=8c9b5ae0b71595064532de80eef19714c18ff083
