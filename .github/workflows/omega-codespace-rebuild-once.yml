@@ -62,7 +62,7 @@ jobs:
             exit 0
           fi
           sentinel="$(python3 -c 'import json,sys; p=json.load(open(sys.argv[1])); print(p.get("sentinel") or "")' "$challenge")"
-          case "$sentinel" in /tmp/omega-full-rebuild-*) ;; *) echo "false:invalid_sentinel"; exit 0;; esac
+          case "$sentinel" in /var/tmp/omega-full-rebuild-*) ;; *) echo "false:invalid_sentinel"; exit 0;; esac
           if [ -e "$sentinel" ]; then
             echo "true:challenge_armed"
           else
