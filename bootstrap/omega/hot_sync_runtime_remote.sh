@@ -27,7 +27,8 @@ export OMEGA_STATE="$STATE"
 # commit stranded HEAD locally, stop that stale validation and converge immediately.
 expected_sha="${OMEGA_EXPECTED_PRIVATE_HEAD:-}"
 current_sha="$(git rev-parse HEAD)"
-if pgrep -f 'deploy/codespaces/acceptance-test.sh' >/dev/null 2>&1 && \
+if { pgrep -f 'deploy/codespaces/acceptance-test.sh' >/dev/null 2>&1 || \
+     pgrep -f 'deploy/vm/omega-cycle.sh' >/dev/null 2>&1; } && \
    [ -n "$expected_sha" ] && [ "$expected_sha" != "$current_sha" ]; then
   timeout 45 git fetch -q origin main >/dev/null 2>&1 || true
   evidence_only_drift=false
@@ -45,7 +46,7 @@ if pgrep -f 'deploy/codespaces/acceptance-test.sh' >/dev/null 2>&1 && \
     git reset --hard -q "$expected_sha"
     current_sha="$expected_sha"
   else
-    echo "OMEGA_REMOTE_SOURCE_SYNC_DEFERRED acceptance_running=true current=$current_sha expected=$expected_sha"
+    echo "OMEGA_REMOTE_SOURCE_SYNC_DEFERRED validated_mutation_running=true current=$current_sha expected=$expected_sha"
     timeout 60 bash deploy/codespaces/publish-evidence.sh || true
     exit 0
   fi
