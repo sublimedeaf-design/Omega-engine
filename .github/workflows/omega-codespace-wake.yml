@@ -48,7 +48,9 @@ jobs:
           OMEGA_CODESPACE_NAME: ${{ steps.wake.outputs.codespace_name }}
         run: |
           set +x
-          expected="$(tr -d '\r\n' < bootstrap/omega/desired_private_head.txt)"
+          expected="$(gh api /repos/sublimedeaf-design/Omega-engines/commits/main --jq '.sha')"
+          [[ "$expected" =~ ^[0-9a-f]{40}$ ]]
+          echo "OMEGA_PRIVATE_TARGET_DISCOVERED sha=$expected"
           {
             printf 'export OMEGA_EXPECTED_PRIVATE_HEAD=%q\n' "$expected"
             cat bootstrap/omega/hot_sync_runtime_remote.sh
@@ -218,7 +220,7 @@ jobs:
           OMEGA_CODESPACE_NAME: ${{ steps.wake.outputs.codespace_name }}
         run: |
           set +x
-          expected="$(tr -d '\r\n' < bootstrap/omega/desired_private_head.txt)"
+          expected="$(gh api /repos/sublimedeaf-design/Omega-engines/commits/main --jq '.sha')"
           [[ "$expected" =~ ^[0-9a-f]{40}$ ]]
           state_json="$({
             printf 'export OMEGA_EXPECTED_PRIVATE_HEAD=%q\n' "$expected"
