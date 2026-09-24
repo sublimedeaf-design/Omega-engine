@@ -7,7 +7,7 @@ on:
       - ".github/workflows/omega-codespace-wake.yml"
       - "bootstrap/omega/**"
   schedule:
-    - cron: "*/10 * * * *"
+    - cron: "3,13,23,33,43,53 * * * *"
 
 permissions:
   actions: write
