@@ -11,7 +11,7 @@ permissions:
 
 env:
   TARGET_REPOSITORY: sublimedeaf-design/Omega-engines
-  TARGET_SHA: e68a0f78d86a214f7aa0d1afa77713ac514e7979
+  TARGET_SHA: e063d346237ec6ff00c3ebf2f9b83cd0d67f817a
   BASE_SHA: 1692f28ecc21a1cd080a7e374d6b99be485dc0ce
   OMEGA_REPOSITORY: sublimedeaf-design/Omega-engines
 
@@ -153,7 +153,7 @@ jobs:
 
           ## Base / head
           Base SHA: 1692f28ecc21a1cd080a7e374d6b99be485dc0ce
-          Head SHA: e68a0f78d86a214f7aa0d1afa77713ac514e7979
+          Head SHA: e063d346237ec6ff00c3ebf2f9b83cd0d67f817a
 
           ## Risk
           Fail closed on any governance violation.
@@ -176,7 +176,7 @@ jobs:
           ## Handoff
           Continue only after all five candidate proof jobs are green.
           """
-          event={"pull_request":{"body":body,"base":{"sha":"1692f28ecc21a1cd080a7e374d6b99be485dc0ce"},"head":{"sha":"e68a0f78d86a214f7aa0d1afa77713ac514e7979"}}}
+          event={"pull_request":{"body":body,"base":{"sha":"1692f28ecc21a1cd080a7e374d6b99be485dc0ce"},"head":{"sha":"e063d346237ec6ff00c3ebf2f9b83cd0d67f817a"}}}
           with open("/tmp/omega-pr-event.json","w",encoding="utf-8") as fh:
               json.dump(event,fh)
           PY
