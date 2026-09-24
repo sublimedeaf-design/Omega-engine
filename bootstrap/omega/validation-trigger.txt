@@ -1,2 +1,2 @@
-private_main=cc88af7e23722f116a18f189be6976d7c63a2099
-purpose=validate-release-ci-readonly-smoke-and-continue-recovery
+private_main=304fca102dd5024e89918194a907266730bc51fe
+purpose=validate-localbrain-final-normalization-and-recovery-hardening
