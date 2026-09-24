@@ -11,8 +11,8 @@ permissions:
 
 env:
   TARGET_REPOSITORY: sublimedeaf-design/Omega-engines
-  TARGET_SHA: 83953d81d94b22d28fd260e64a776b0c24fe5610
-  BASE_SHA: 51a273c163650268e2fb7b308c96afdb70695f33
+  TARGET_SHA: e68a0f78d86a214f7aa0d1afa77713ac514e7979
+  BASE_SHA: 1692f28ecc21a1cd080a7e374d6b99be485dc0ce
   OMEGA_REPOSITORY: sublimedeaf-design/Omega-engines
 
 jobs:
@@ -152,8 +152,8 @@ jobs:
           Exact-SHA federation auth candidate validation proof.
 
           ## Base / head
-          Base SHA: 51a273c163650268e2fb7b308c96afdb70695f33
-          Head SHA: 83953d81d94b22d28fd260e64a776b0c24fe5610
+          Base SHA: 1692f28ecc21a1cd080a7e374d6b99be485dc0ce
+          Head SHA: e68a0f78d86a214f7aa0d1afa77713ac514e7979
 
           ## Risk
           Fail closed on any governance violation.
@@ -176,7 +176,7 @@ jobs:
           ## Handoff
           Continue only after all five candidate proof jobs are green.
           """
-          event={"pull_request":{"body":body,"base":{"sha":"51a273c163650268e2fb7b308c96afdb70695f33"},"head":{"sha":"83953d81d94b22d28fd260e64a776b0c24fe5610"}}}
+          event={"pull_request":{"body":body,"base":{"sha":"1692f28ecc21a1cd080a7e374d6b99be485dc0ce"},"head":{"sha":"e68a0f78d86a214f7aa0d1afa77713ac514e7979"}}}
           with open("/tmp/omega-pr-event.json","w",encoding="utf-8") as fh:
               json.dump(event,fh)
           PY
