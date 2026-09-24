@@ -1,2 +1,2 @@
 private_main=02c88ec58eeed982d6dc3565ae5facbc77858860
-purpose=validate-readonly-qa-agent-acceptance-smoke
+purpose=validate-qa-role-agent-smoke-and-continue-recovery-acceptance
