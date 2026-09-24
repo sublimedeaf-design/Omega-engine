@@ -1,2 +1,2 @@
 private_main=ff76426d2e2ed933c8fe3c2cfac9595d36ae584d
-purpose=validate-bounded-agent-acceptance-and-fast-forward-supersede
+purpose=launch-bounded-agent-acceptance-after-old-cycle-failed-closed
