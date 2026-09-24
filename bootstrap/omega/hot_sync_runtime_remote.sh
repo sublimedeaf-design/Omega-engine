@@ -63,5 +63,12 @@ echo "OMEGA_REMOTE_PREFLIGHT_RC=$preflight_rc"
 # emit phase markers, then publish redacted diagnostics. Failure to publish
 # evidence must not turn runtime hot-sync into a false outage.
 sleep 8
+# Run federation validation synchronously as a bounded convergence gate. This
+# removes the 15-minute supervisor delay after a source/auth repair.
+set +e
+timeout 300 bash deploy/codespaces/federation-autovalidate.sh
+federation_rc=$?
+set -e
+echo "OMEGA_REMOTE_FEDERATION_RC=$federation_rc"
 timeout 60 bash deploy/codespaces/publish-evidence.sh || true
 echo "OMEGA_REMOTE_EVIDENCE_REFRESH_REQUESTED"
