@@ -10,11 +10,11 @@ permissions:
   contents: read
 
 concurrency:
-  group: omega-pr220-exact-head-2a67b113e2a87ff8fc077ac79f505dce08abfdf0
+  group: omega-pr220-exact-head-743f4cab9f356cf02b1c072914ba179b349257f7
   cancel-in-progress: false
 
 env:
-  TARGET_SHA: 2a67b113e2a87ff8fc077ac79f505dce08abfdf0
+  TARGET_SHA: 743f4cab9f356cf02b1c072914ba179b349257f7
   BASE_SHA: be537e7dffde572c038c253c548282cd2e18e799
   PRIVATE_REPOSITORY: sublimedeaf-design/Omega-engines
 
@@ -58,7 +58,7 @@ jobs:
             echo "OMEGA_EXTERNAL_PYTHON311_STAGE_GREEN stage=$stage"
           }
           run_stage install python -m pip install -c requirements-ci.lock -e '.[dev]'
-          run_stage pytest python -m pytest -q
+          run_stage pytest env GITHUB_REPOSITORY="$PRIVATE_REPOSITORY" python -m pytest -q
           run_stage compile python -m compileall -q src scripts
           run_stage pipcheck python -m pip check
           echo "OMEGA_EXTERNAL_PYTHON311_GREEN"
@@ -108,7 +108,7 @@ jobs:
           set +e
           {
             python -m pip install -c requirements-ci.lock -e '.[dev]' &&
-            python -m pytest -q &&
+            env GITHUB_REPOSITORY="$PRIVATE_REPOSITORY" python -m pytest -q &&
             python -m compileall -q src scripts &&
             python -m pip check
           } >"$log" 2>&1
@@ -162,7 +162,7 @@ jobs:
           set +e
           {
             python -m pip install -c requirements-ci.lock -e '.[dev]' &&
-            python -m pytest -q &&
+            env GITHUB_REPOSITORY="$PRIVATE_REPOSITORY" python -m pytest -q &&
             python -m compileall -q src scripts &&
             python -m pip check &&
             python scripts/repo_audit.py --out reports/repo-audit-ci.json &&
@@ -219,7 +219,7 @@ jobs:
           set +e
           {
             python -m pip install -c requirements-ci.lock -e '.[dev,data]' &&
-            python -m pytest -q tests/test_storage.py tests/test_support_runtime_integrity.py &&
+            env GITHUB_REPOSITORY="$PRIVATE_REPOSITORY" python -m pytest -q tests/test_storage.py tests/test_support_runtime_integrity.py &&
             python - <<'PY'
           from omega.research.preflight import run_preflight
           for backend in ("sqlite","duckdb"):
