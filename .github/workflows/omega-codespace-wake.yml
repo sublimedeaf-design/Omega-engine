@@ -33,9 +33,23 @@ jobs:
         run: |
           gh secret set --help | grep -q codespaces
       - name: Discover and converge existing OMEGA runtime
+        id: wake
         shell: bash
         run: |
           python3 bootstrap/omega/codespace_wake.py
+      - name: Repair omega-ci inside the existing Codespace
+        if: ${{ steps.wake.outputs.codespace_name != '' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          OMEGA_CODESPACE_NAME: ${{ steps.wake.outputs.codespace_name }}
+        run: |
+          set +x
+          gh codespace cp -c "$OMEGA_CODESPACE_NAME" \
+            bootstrap/omega/repair_runner_remote.sh \
+            remote:/tmp/omega-repair-runner.sh
+          gh codespace ssh -c "$OMEGA_CODESPACE_NAME" \
+            "bash /tmp/omega-repair-runner.sh"
       - name: Seed private Codespaces federation secret
         if: ${{ always() }}
         shell: bash
