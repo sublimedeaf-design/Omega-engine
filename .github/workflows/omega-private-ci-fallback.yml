@@ -1,0 +1,173 @@
+name: OMEGA Private CI Fallback
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "7,37 * * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: omega-private-ci-fallback
+  cancel-in-progress: false
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      sha: ${{ steps.state.outputs.sha }}
+      need_run: ${{ steps.state.outputs.need_run }}
+    steps:
+      - name: Discover private main and existing fallback statuses
+        id: state
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+        run: |
+          set +x
+          sha="$(gh api repos/sublimedeaf-design/Omega-engines/commits/main --jq '.sha')"
+          [ -n "$sha" ] || exit 41
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          need_run=true
+          if payload="$(gh api "repos/sublimedeaf-design/Omega-engines/commits/$sha/status" 2>/dev/null)"; then
+            if printf '%s' "$payload" | python3 -c '
+import json,sys
+data=json.load(sys.stdin)
+want={"omega/public-ci-py311","omega/public-ci-py313","omega/public-ci-py314","omega/public-storage"}
+got={x.get("context"):x.get("state") for x in data.get("statuses",[])}
+raise SystemExit(0 if all(got.get(k)=="success" for k in want) else 1)
+'; then
+              need_run=false
+            fi
+          fi
+          echo "need_run=$need_run" >> "$GITHUB_OUTPUT"
+          echo "OMEGA_PRIVATE_HEAD=$sha need_run=$need_run"
+
+  python:
+    needs: discover
+    if: needs.discover.outputs.need_run == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.13", "3.14"]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Clone exact private source without persisting credentials
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          PRIVATE_SHA: ${{ needs.discover.outputs.sha }}
+        run: |
+          set +x
+          gh repo clone sublimedeaf-design/Omega-engines "$RUNNER_TEMP/omega-private" -- --filter=blob:none --no-tags
+          cd "$RUNNER_TEMP/omega-private"
+          git fetch --no-tags origin "$PRIVATE_SHA"
+          git checkout --detach "$PRIVATE_SHA"
+          [ "$(git rev-parse HEAD)" = "$PRIVATE_SHA" ]
+          git remote set-url origin https://github.com/sublimedeaf-design/Omega-engines.git
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Run private CI gate
+        id: gate
+        shell: bash
+        working-directory: ${{ runner.temp }}/omega-private
+        run: |
+          set -Eeuo pipefail
+          python -m pip install -c requirements-ci.lock -e '.[dev]'
+          python -m pytest -q
+          python -m compileall -q src scripts
+          python -m pip check
+          if [ "${{ matrix.python }}" = "3.13" ]; then
+            python scripts/repo_audit.py --out reports/repo-audit-public-fallback.json
+            python -c "from omega.research.preflight import run_preflight; r=run_preflight('reports/preflight-public-fallback.json'); assert r['passed'], r"
+            python scripts/final_audit_gate.py --audit reports/repo-audit-public-fallback.json --out reports/final-audit-public-fallback.json
+            python scripts/validate_agent_handoff.py --self-check
+            python scripts/agent_orchestrator.py --agents .omega/agents.json --plan .omega/work-plan.json validate
+          fi
+      - name: Publish bounded fallback status
+        if: always()
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          PRIVATE_SHA: ${{ needs.discover.outputs.sha }}
+          GATE_OUTCOME: ${{ steps.gate.outcome }}
+        run: |
+          set +x
+          state=failure
+          [ "$GATE_OUTCOME" = success ] && state=success
+          py="${{ matrix.python }}"
+          context="omega/public-ci-py${py//./}"
+          body="$(mktemp)"
+          code="$(curl -sS -o "$body" -w '%{http_code}' -X POST \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            "https://api.github.com/repos/sublimedeaf-design/Omega-engines/statuses/$PRIVATE_SHA" \
+            -d "{\"state\":\"$state\",\"context\":\"$context\",\"description\":\"Public hosted private-CI fallback: $state\"}" || true)"
+          rm -f "$body"
+          echo "OMEGA_PUBLIC_STATUS context=$context http=$code state=$state"
+
+  storage:
+    needs: discover
+    if: needs.discover.outputs.need_run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Clone exact private source without persisting credentials
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          PRIVATE_SHA: ${{ needs.discover.outputs.sha }}
+        run: |
+          set +x
+          gh repo clone sublimedeaf-design/Omega-engines "$RUNNER_TEMP/omega-private" -- --filter=blob:none --no-tags
+          cd "$RUNNER_TEMP/omega-private"
+          git fetch --no-tags origin "$PRIVATE_SHA"
+          git checkout --detach "$PRIVATE_SHA"
+          [ "$(git rev-parse HEAD)" = "$PRIVATE_SHA" ]
+          git remote set-url origin https://github.com/sublimedeaf-design/Omega-engines.git
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.13"
+      - name: Run storage fallback gate
+        id: gate
+        shell: bash
+        working-directory: ${{ runner.temp }}/omega-private
+        run: |
+          set -Eeuo pipefail
+          python -m pip install -c requirements-ci.lock -e '.[dev,data]'
+          python -m pytest -q tests/test_storage.py tests/test_support_runtime_integrity.py
+          python - <<'PY'
+          from omega.research.preflight import run_preflight
+          for backend in ("sqlite","duckdb"):
+              result=run_preflight(backend=backend)
+              assert result["passed"], result
+              assert result["storage_backend"]==backend, result
+          PY
+          python -m pip check
+      - name: Publish bounded storage fallback status
+        if: always()
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          PRIVATE_SHA: ${{ needs.discover.outputs.sha }}
+          GATE_OUTCOME: ${{ steps.gate.outcome }}
+        run: |
+          set +x
+          state=failure
+          [ "$GATE_OUTCOME" = success ] && state=success
+          body="$(mktemp)"
+          code="$(curl -sS -o "$body" -w '%{http_code}' -X POST \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            "https://api.github.com/repos/sublimedeaf-design/Omega-engines/statuses/$PRIVATE_SHA" \
+            -d "{\"state\":\"$state\",\"context\":\"omega/public-storage\",\"description\":\"Public hosted storage fallback: $state\"}" || true)"
+          rm -f "$body"
+          echo "OMEGA_PUBLIC_STATUS context=omega/public-storage http=$code state=$state"
