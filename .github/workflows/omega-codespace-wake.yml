@@ -319,8 +319,10 @@ jobs:
               "pre_rebuild_present":exists("acceptance-pre-rebuild.json"),
               "live_present":exists("acceptance-live.json"),
               "pass_markers":safe_tail(state/"logs/codespaces-acceptance.pass",40),
+              "acceptance_autostart_tail":safe_tail(state/"logs/acceptance-autostart.log",50),
               "acceptance_bootstrap_tail":safe_tail(state/"logs/acceptance-bootstrap.log",30),
               "acceptance_retry_tail":safe_tail(state/"logs/acceptance-retry.log",30),
+              "intelligence_refresh_tail":safe_tail(state/"logs/intelligence-refresh.log",30),
               "preflight_tail":safe_tail(state/"logs/preflight.log",30),
               "credential_material_recorded":False,
           }
