@@ -6,6 +6,7 @@ on:
     paths:
       - ".github/workflows/omega-codespace-wake.yml"
       - "bootstrap/omega/**"
+      - "!bootstrap/omega/observer-trigger.txt"
   schedule:
     - cron: "3,13,23,33,43,53 * * * *"
 
