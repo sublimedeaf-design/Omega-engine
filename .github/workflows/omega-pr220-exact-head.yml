@@ -44,20 +44,23 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          log="$RUNNER_TEMP/python311.log"
-          set +e
-          {
-            python -m pip install -c requirements-ci.lock -e '.[dev]' &&
-            python -m pytest -q &&
-            python -m compileall -q src scripts &&
-            python -m pip check
-          } >"$log" 2>&1
-          rc=$?
-          set -e
-          if [ "$rc" -ne 0 ]; then
-            echo "OMEGA_EXTERNAL_PYTHON311_FAIL rc=$rc"
-            exit "$rc"
-          fi
+          run_stage() {
+            stage="$1"; shift
+            log="$RUNNER_TEMP/python311-$stage.log"
+            set +e
+            "$@" >"$log" 2>&1
+            rc=$?
+            set -e
+            if [ "$rc" -ne 0 ]; then
+              echo "OMEGA_EXTERNAL_PYTHON311_FAIL stage=$stage rc=$rc"
+              exit "$rc"
+            fi
+            echo "OMEGA_EXTERNAL_PYTHON311_STAGE_GREEN stage=$stage"
+          }
+          run_stage install python -m pip install -c requirements-ci.lock -e '.[dev]'
+          run_stage pytest python -m pytest -q
+          run_stage compile python -m compileall -q src scripts
+          run_stage pipcheck python -m pip check
           echo "OMEGA_EXTERNAL_PYTHON311_GREEN"
       - name: Publish final status
         if: always()
