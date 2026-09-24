@@ -71,12 +71,57 @@ jobs:
           def exists(name): return (state/"evidence"/name).is_file()
           running=subprocess.run(["pgrep","-f","deploy/codespaces/acceptance-test.sh"],
               stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode==0
+          agent_state=None
+          agent_state_path=state/"agent-autopilot-state.json"
+          if agent_state_path.is_file():
+              try:
+                  raw=json.loads(agent_state_path.read_text(encoding="utf-8"))
+                  tasks=raw.get("tasks") if isinstance(raw,dict) else None
+                  if isinstance(tasks,dict):
+                      agent_state={
+                          "tasks":{k:{
+                              "status":v.get("status"),
+                              "attempts":v.get("attempts"),
+                              "worker_id":v.get("worker_id"),
+                              "last_error":str(v.get("last_error") or "")[:300],
+                          } for k,v in tasks.items() if isinstance(v,dict)}
+                      }
+              except Exception as exc:
+                  agent_state={"parse_error":type(exc).__name__}
+          acceptance_agents=None
+          aa=state/"evidence/acceptance-agents.json"
+          if aa.is_file():
+              try:
+                  raw=json.loads(aa.read_text(encoding="utf-8"))
+                  acceptance_agents={
+                      "ok":raw.get("ok"),
+                      "reason":raw.get("reason"),
+                      "task_count":raw.get("task_count"),
+                      "resumed":raw.get("resumed"),
+                      "failed_tasks":raw.get("failed_tasks"),
+                  } if isinstance(raw,dict) else None
+              except Exception as exc:
+                  acceptance_agents={"parse_error":type(exc).__name__}
+          try:
+              ps=subprocess.check_output(
+                  ["ps","-eo","pid=,etimes=,comm=,args="],text=True,errors="replace"
+              ).splitlines()
+              process_snapshot=[
+                  re.sub(r'(?i)(github_pat_[A-Za-z0-9_]+|ghp_[A-Za-z0-9]+|bearer\\s+\\S+)',"[REDACTED]",line)[:600]
+                  for line in ps
+                  if any(x in line for x in ("run_trained_plan.py","omega_local_agent_executor.py","pytest","repo_audit.py","final_audit_gate.py","promote-agent-work.sh"))
+              ][-30:]
+          except Exception:
+              process_snapshot=[]
           payload={
               "runtime_head":head,
               "acceptance_running":running,
               "pre_rebuild_present":exists("acceptance-pre-rebuild.json"),
               "live_present":exists("acceptance-live.json"),
               "pass_markers":safe_tail(state/"logs/codespaces-acceptance.pass",60),
+              "agent_state":agent_state,
+              "acceptance_agents":acceptance_agents,
+              "agent_processes":process_snapshot,
               "acceptance_autostart_tail":safe_tail(state/"logs/acceptance-autostart.log",100),
               "acceptance_retry_tail":safe_tail(state/"logs/acceptance-retry.log",60),
               "intelligence_refresh_tail":safe_tail(state/"logs/intelligence-refresh.log",50),
