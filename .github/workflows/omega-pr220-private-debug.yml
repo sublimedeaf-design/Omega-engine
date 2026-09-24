@@ -1,0 +1,83 @@
+name: OMEGA PR220 Private Pytest Diagnostic
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/omega-pr220-private-debug.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      TARGET_SHA: 2a67b113e2a87ff8fc077ac79f505dce08abfdf0
+      PRIVATE_REPOSITORY: sublimedeaf-design/Omega-engines
+      OMEGA_BOOTSTRAP_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: sublimedeaf-design/Omega-engines
+          ref: ${{ env.TARGET_SHA }}
+          token: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          persist-credentials: false
+          fetch-depth: 1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.13"
+      - name: Run private diagnostic
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python -m pip install -q -c requirements-ci.lock -e '.[dev]' >"$RUNNER_TEMP/install.log" 2>&1
+          set +e
+          python -m pytest -q >"$RUNNER_TEMP/pytest.log" 2>&1
+          rc=$?
+          set -e
+          PYTEST_RC="$rc" python - "$RUNNER_TEMP/pytest.log" <<'PY'
+          import json,os,re,sys,urllib.request,urllib.error
+          path=sys.argv[1]
+          lines=open(path,encoding="utf-8",errors="replace").read().splitlines()
+          nodes=[]
+          for line in lines:
+              if line.startswith("FAILED "):
+                  node=line[7:].split(" - ",1)[0].strip()
+                  if node and node not in nodes:
+                      nodes.append(node)
+              elif line.startswith("ERROR "):
+                  node=line[6:].split(" - ",1)[0].strip()
+                  if node and node not in nodes:
+                      nodes.append(node)
+          token=os.environ["OMEGA_BOOTSTRAP_TOKEN"]
+          repo=os.environ["PRIVATE_REPOSITORY"]
+          sha=os.environ["TARGET_SHA"]
+          for i,node in enumerate(nodes[:10],1):
+              safe=re.sub(r"[^A-Za-z0-9._-]+","-",node).strip("-")
+              context=("omega-debug-"+safe)[:95]
+              payload=json.dumps({"state":"failure","context":context,"description":"private pytest diagnostic"}).encode()
+              req=urllib.request.Request(
+                  f"https://api.github.com/repos/{repo}/statuses/{sha}",
+                  method="POST",data=payload,
+                  headers={
+                    "Accept":"application/vnd.github+json",
+                    "Authorization":f"Bearer {token}",
+                    "X-GitHub-Api-Version":"2022-11-28",
+                    "Content-Type":"application/json",
+                  })
+              with urllib.request.urlopen(req,timeout=30) as r:
+                  if r.status not in (200,201): raise RuntimeError(r.status)
+          summary={"state":"failure" if int(os.environ["PYTEST_RC"]) else "success",
+                   "context":"omega-debug-summary",
+                   "description":f"private pytest rc={os.environ['PYTEST_RC']} failures={len(nodes)}"}
+          req=urllib.request.Request(
+              f"https://api.github.com/repos/{repo}/statuses/{sha}",
+              method="POST",data=json.dumps(summary).encode(),
+              headers={"Accept":"application/vnd.github+json","Authorization":f"Bearer {token}",
+                       "X-GitHub-Api-Version":"2022-11-28","Content-Type":"application/json"})
+          with urllib.request.urlopen(req,timeout=30):
+              pass
+          print(f"OMEGA_PRIVATE_DIAGNOSTIC_PUBLISHED count={len(nodes)} rc={os.environ['PYTEST_RC']}")
+          PY
