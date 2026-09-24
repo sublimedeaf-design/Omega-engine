@@ -11,7 +11,7 @@ permissions:
 
 env:
   TARGET_REPOSITORY: sublimedeaf-design/Omega-engines
-  TARGET_SHA: e68a0f78d86a214f7aa0d1afa77713ac514e7979
+  TARGET_SHA: e063d346237ec6ff00c3ebf2f9b83cd0d67f817a
   SOURCE_PIN: 6e151ab75d7bf8eecb5e0714568aa7502808a987
   OMEGA_REPOSITORY: sublimedeaf-design/Omega-engines
 
