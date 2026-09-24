@@ -43,7 +43,7 @@ jobs:
     timeout-minutes: 20
     env:
       OMEGA_FEDERATION_PAT: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
-      OMEGA_STATE: ${{ runner.temp }}/omega-state
+      OMEGA_STATE: /tmp/omega-state
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
