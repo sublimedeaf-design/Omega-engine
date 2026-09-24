@@ -10,10 +10,11 @@ on:
     - cron: "*/5 * * * *"
 
 permissions:
+  actions: write
   contents: read
 
 concurrency:
-  group: omega-free-codespace-bootstrap
+  group: omega-free-codespace-bootstrap-v2
   cancel-in-progress: true
 
 jobs:
@@ -25,6 +26,25 @@ jobs:
       OMEGA_CODESPACE_LIFECYCLE_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
       OMEGA_FORCE_RESTART: "0"
     steps:
+      - name: Cancel superseded bootstrap runs
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set +x
+          current="$GITHUB_RUN_ID"
+          mapfile -t stale < <(
+            gh api -X GET "/repos/$GITHUB_REPOSITORY/actions/runs" -f per_page=50 \
+              --jq '.workflow_runs[]
+                | select(.name=="OMEGA Free Codespace Bootstrap")
+                | select(.status=="in_progress" or .status=="queued" or .status=="pending")
+                | .id' \
+              | grep -vx "$current" || true
+          )
+          for run_id in "${stale[@]}"; do
+            gh api --method POST "/repos/$GITHUB_REPOSITORY/actions/runs/$run_id/cancel" >/dev/null 2>&1 || true
+            echo "OMEGA_BOOTSTRAP_CANCELLED_SUPERSEDED run_id=$run_id"
+          done
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
