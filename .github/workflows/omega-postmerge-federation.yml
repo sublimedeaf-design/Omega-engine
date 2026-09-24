@@ -1,0 +1,79 @@
+name: OMEGA Post-Merge Federation Gate
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/omega-postmerge-federation.yml"
+      - "bootstrap/omega/postmerge_federation_remote.sh"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: omega-postmerge-federation-ab3793fc
+  cancel-in-progress: false
+
+env:
+  EXPECTED_MAIN_SHA: ab3793fc8bd62ee49c3959846518c3ba6a7ef45e
+  PRIVATE_REPOSITORY: sublimedeaf-design/Omega-engines
+
+jobs:
+  federation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+      OMEGA_CODESPACE_LIFECYCLE_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Discover and wake canonical runtime
+        id: wake
+        shell: bash
+        run: python3 bootstrap/omega/codespace_wake.py
+      - name: Run private main-runtime federation gate
+        id: gate
+        shell: bash
+        env:
+          OMEGA_CODESPACE_NAME: ${{ steps.wake.outputs.codespace_name }}
+        run: |
+          set +x
+          set +e
+          output="$(gh codespace ssh -c "$OMEGA_CODESPACE_NAME" --             env OMEGA_EXPECTED_MAIN_SHA="$EXPECTED_MAIN_SHA" bash -s             < bootstrap/omega/postmerge_federation_remote.sh 2>&1)"
+          rc=$?
+          set -e
+          printf '%s\n' "$output" | grep '^OMEGA_STAGE_' || true
+          printf '%s\n' "$output" > "$RUNNER_TEMP/postmerge-private-result.log"
+          echo "remote_rc=$rc" >> "$GITHUB_OUTPUT"
+      - name: Publish private stage statuses
+        if: always()
+        shell: bash
+        env:
+          TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+        run: |
+          set +x
+          log="$RUNNER_TEMP/postmerge-private-result.log"
+          post_status() {
+            stage="$1"; context="$2"
+            state=failure
+            [ -f "$log" ] && grep -qx "OMEGA_STAGE_$stage=success" "$log" && state=success
+            payload="$(python - "$state" "$context" "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" <<'PY'
+          import json,sys
+          print(json.dumps({"state":sys.argv[1],"context":sys.argv[2],"description":"post-merge federation "+sys.argv[1],"target_url":sys.argv[3]}))
+          PY
+          )"
+            curl -fsS -o /dev/null -X POST               -H 'Accept: application/vnd.github+json'               -H 'X-GitHub-Api-Version: 2022-11-28'               -H "Authorization: Bearer $TOKEN"               -H 'Content-Type: application/json'               -d "$payload"               "https://api.github.com/repos/$PRIVATE_REPOSITORY/statuses/$EXPECTED_MAIN_SHA"
+          }
+          post_status RUNTIME_MAIN omega-runtime/main-exact
+          post_status PEER_HTTP omega-federation/peer-http-5x
+          post_status EXECUTOR omega-federation/exact-sha-executor
+          post_status VERIFIER omega-federation/evidence-verifier
+          post_status PUBLISH omega-federation/evidence-publish
+      - name: Enforce remote result
+        shell: bash
+        env:
+          RC: ${{ steps.gate.outputs.remote_rc }}
+        run: |
+          [ "${RC:-99}" = 0 ] || exit "${RC:-1}"
