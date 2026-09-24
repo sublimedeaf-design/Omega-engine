@@ -59,11 +59,8 @@ jobs:
           OMEGA_CODESPACE_NAME: ${{ steps.wake.outputs.codespace_name }}
         run: |
           set +x
-          gh codespace cp -c "$OMEGA_CODESPACE_NAME" \
-            bootstrap/omega/repair_runner_remote.sh \
-            remote:/tmp/omega-repair-runner.sh
-          gh codespace ssh -c "$OMEGA_CODESPACE_NAME" \
-            "bash /tmp/omega-repair-runner.sh"
+          gh codespace ssh -c "$OMEGA_CODESPACE_NAME" -- bash -s \
+            < bootstrap/omega/repair_runner_remote.sh
       - name: Seed private Codespaces federation secret
         if: ${{ always() }}
         shell: bash
