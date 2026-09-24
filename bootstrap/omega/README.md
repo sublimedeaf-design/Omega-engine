@@ -17,3 +17,6 @@ Target selection is deterministic: repository `sublimedeaf-design/Omega-engines`
 prefer ref `main`, then the most recently used existing Codespace. GitHub API
 state is verified after any start request; a 409 is not treated as recovery proof
 without a subsequent available/running state.
+
+
+Secret activation verification is performed by the scheduled/push bootstrap workflow; no secret value is logged.
