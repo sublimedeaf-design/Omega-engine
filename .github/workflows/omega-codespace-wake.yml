@@ -90,7 +90,10 @@ jobs:
           done
 
           reused=false
+          stopped_probes=0
+          deadline=$((SECONDS+180))
           for name in "${candidates[@]}"; do
+            [ "$SECONDS" -lt "$deadline" ] || { echo "OMEGA_RUNNER_REUSE_BUDGET_EXHAUSTED"; break; }
             [ -n "$name" ] || continue
             echo "OMEGA_RUNNER_REUSE_PROBE codespace=$name"
 
@@ -98,8 +101,13 @@ jobs:
             case "${state,,}" in
               available|running) ;;
               *)
+                stopped_probes=$((stopped_probes+1))
+                if [ "$stopped_probes" -gt 2 ]; then
+                  echo "OMEGA_RUNNER_REUSE_SKIP codespace=$name reason=stopped_probe_limit"
+                  continue
+                fi
                 gh api --method POST "/user/codespaces/$name/start" >/dev/null 2>&1 || true
-                for _ in $(seq 1 18); do
+                for _ in $(seq 1 8); do
                   sleep 5
                   state="$(gh api -X GET "/user/codespaces/$name" --jq '.state' 2>/dev/null || true)"
                   case "${state,,}" in
@@ -118,7 +126,7 @@ jobs:
             esac
 
             set +e
-            output="$(timeout 35s gh codespace ssh -c "$name" -- bash -s \
+            output="$(timeout 25s gh codespace ssh -c "$name" -- bash -s \
               < bootstrap/omega/resume_registered_runner_remote.sh 2>&1)"
             rc=$?
             set -e
