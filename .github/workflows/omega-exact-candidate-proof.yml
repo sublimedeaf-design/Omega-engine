@@ -11,8 +11,8 @@ permissions:
 
 env:
   TARGET_REPOSITORY: sublimedeaf-design/Omega-engines
-  TARGET_SHA: e063d346237ec6ff00c3ebf2f9b83cd0d67f817a
-  BASE_SHA: 1692f28ecc21a1cd080a7e374d6b99be485dc0ce
+  TARGET_SHA: 4b1d827022f7046b994cf238f3603d03709c6507
+  BASE_SHA: 187a857cbdd0d48c8a6209dc210438dfd24cd5b9
   OMEGA_REPOSITORY: sublimedeaf-design/Omega-engines
 
 jobs:
@@ -152,8 +152,8 @@ jobs:
           Exact-SHA federation auth candidate validation proof.
 
           ## Base / head
-          Base SHA: 1692f28ecc21a1cd080a7e374d6b99be485dc0ce
-          Head SHA: e063d346237ec6ff00c3ebf2f9b83cd0d67f817a
+          Base SHA: 187a857cbdd0d48c8a6209dc210438dfd24cd5b9
+          Head SHA: 4b1d827022f7046b994cf238f3603d03709c6507
 
           ## Risk
           Fail closed on any governance violation.
