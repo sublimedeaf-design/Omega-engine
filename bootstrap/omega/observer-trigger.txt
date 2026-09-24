@@ -1,3 +1,3 @@
-probe=3
+probe=4
 private_head=02c88ec58eeed982d6dc3565ae5facbc77858860
-purpose=observe-qa-agent-smoke-fix
+purpose=observe-current-qa-smoke-only
