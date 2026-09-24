@@ -50,6 +50,15 @@ echo "OMEGA_REMOTE_SOURCE_SYNCED sha=$new_sha expected=${expected_sha:-unset}"
 timeout 120 bash .devcontainer/start.sh
 echo "OMEGA_REMOTE_RUNTIME_HOT_RELOADED sha=$(git rev-parse HEAD)"
 
+# Preflight emits only check names + OK/FAIL; command outputs are suppressed by
+# the private script, so this is safe diagnostic material for the public controller.
+set +e
+preflight_out="$(bash deploy/codespaces/preflight.sh 2>&1)"
+preflight_rc=$?
+set -e
+printf '%s\n' "$preflight_out"
+echo "OMEGA_REMOTE_PREFLIGHT_RC=$preflight_rc"
+
 # Give asynchronous acceptance/federation workers a short bounded window to
 # emit phase markers, then publish redacted diagnostics. Failure to publish
 # evidence must not turn runtime hot-sync into a false outage.
