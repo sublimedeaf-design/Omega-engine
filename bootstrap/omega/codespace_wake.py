@@ -125,6 +125,11 @@ def main():
         "start_attempts":start_attempts,
         "credential_material_recorded":False,
     }
+    output_path=os.environ.get("GITHUB_OUTPUT","").strip()
+    if output_path:
+        with open(output_path,"a",encoding="utf-8") as fh:
+            fh.write(f"codespace_name={name}\n")
+            fh.write(f"codespace_state={state}\n")
     print(json.dumps(payload,sort_keys=True))
     return 0 if ok else 8
 
