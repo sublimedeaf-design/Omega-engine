@@ -1,4 +1,4 @@
-name: OMEGA Exact-SHA 2f Proof
+name: OMEGA Exact-SHA PR220 Head Proof
 
 on:
   workflow_dispatch:
@@ -11,7 +11,7 @@ permissions:
 
 env:
   TARGET_REPOSITORY: sublimedeaf-design/Omega-engines
-  TARGET_SHA: 2f1bc5f80f78b68c872da7459c9d608ddf41dc4f
+  TARGET_SHA: 743f4cab9f356cf02b1c072914ba179b349257f7
   BASE_SHA: be537e7dffde572c038c253c548282cd2e18e799
 
 jobs:
@@ -148,11 +148,11 @@ jobs:
           Role: release_ci, qa_audit, orchestrator
 
           ## Scope
-          Exact-SHA federation validation proof.
+          Exact-SHA final PR #220 head validation proof.
 
           ## Base / head
           Base SHA: be537e7dffde572c038c253c548282cd2e18e799
-          Head SHA: 2f1bc5f80f78b68c872da7459c9d608ddf41dc4f
+          Head SHA: 743f4cab9f356cf02b1c072914ba179b349257f7
 
           ## Risk
           Fail closed on any governance violation.
@@ -173,9 +173,9 @@ jobs:
           Delete this public proof workflow.
 
           ## Handoff
-          Continue only after all five exact-SHA proof jobs are green.
+          Continue only after all five final-head proof jobs are green.
           """
-          event={"pull_request":{"body":body,"base":{"sha":"be537e7dffde572c038c253c548282cd2e18e799"},"head":{"sha":"2f1bc5f80f78b68c872da7459c9d608ddf41dc4f"}}}
+          event={"pull_request":{"body":body,"base":{"sha":"be537e7dffde572c038c253c548282cd2e18e799"},"head":{"sha":"743f4cab9f356cf02b1c072914ba179b349257f7"}}}
           with open("/tmp/omega-pr-event.json","w",encoding="utf-8") as fh:
               json.dump(event,fh)
           PY
