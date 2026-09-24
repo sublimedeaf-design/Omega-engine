@@ -2,9 +2,15 @@
 
 This public repository contains no OMEGA private source, data or credentials.
 
-The scheduled workflow only needs one repository secret named
-`OMEGA_CODESPACE_LIFECYCLE_TOKEN`. The token must be able to list the user's
-Codespaces and start an existing Codespace. The script never creates, stops,
+The scheduled workflow only needs one Actions repository secret named
+`OMEGA_BOOTSTRAP_TOKEN`. The token must be able to list/start the existing
+Omega-engines Codespace, read the five private federation peers, write commit
+statuses, and write the Omega-engines Codespaces repository secret.
+
+After every wake attempt the workflow uses GitHub CLI to store the same value,
+encrypted, as the private Omega-engines Codespaces secret
+`OMEGA_FEDERATION_PAT`. This is the shortest bootstrap path; the token can be
+split into separate least-privilege lifecycle/federation tokens after recovery. The script never creates, stops,
 deletes or renames a Codespace and never prints credential material.
 
 Target selection is deterministic: repository `sublimedeaf-design/Omega-engines`,
