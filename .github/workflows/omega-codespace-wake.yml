@@ -14,7 +14,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: omega-free-codespace-bootstrap-v4
+  group: omega-free-codespace-bootstrap-v5
   cancel-in-progress: true
 
 jobs:
@@ -25,6 +25,7 @@ jobs:
       OMEGA_BOOTSTRAP_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
       OMEGA_CODESPACE_LIFECYCLE_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
       OMEGA_FORCE_RESTART: "0"
+      OMEGA_ENABLE_RUNNER_REPAIR: "0"
     steps:
       - name: Cancel superseded bootstrap runs
         shell: bash
@@ -58,7 +59,7 @@ jobs:
         run: |
           python3 bootstrap/omega/codespace_wake.py
       - name: Hot-sync and reload private OMEGA runtime
-        if: ${{ steps.wake.outputs.codespace_name != '' && env.OMEGA_FORCE_RESTART != '1' }}
+        if: ${{ steps.wake.outputs.codespace_name != '' && env.OMEGA_FORCE_RESTART != '1' && env.OMEGA_ENABLE_RUNNER_REPAIR == '1' }}
         continue-on-error: true
         shell: bash
         env:
@@ -159,7 +160,7 @@ jobs:
           fi
 
       - name: Repair omega-ci inside the existing Codespace
-        if: ${{ steps.wake.outputs.codespace_name != '' && env.OMEGA_FORCE_RESTART != '1' && steps.reuse.outputs.runner_reused != 'true' }}
+        if: ${{ steps.wake.outputs.codespace_name != '' && env.OMEGA_FORCE_RESTART != '1' && env.OMEGA_ENABLE_RUNNER_REPAIR == '1' && steps.reuse.outputs.runner_reused != 'true' }}
         continue-on-error: true
         shell: bash
         env:
