@@ -85,6 +85,24 @@ if [ "$executor_ok" = true ] && [ "$federation_rc" = 0 ]; then
   echo "OMEGA_STAGE_EXECUTOR=success"
 else
   echo "OMEGA_STAGE_EXECUTOR=failure"
+  if [ -s "$executor" ]; then
+    python3 - "$executor" <<'PY'
+import json,sys
+p=json.load(open(sys.argv[1]))
+for row in p.get("peers") or []:
+    fields={
+      "repo":row.get("repository"),
+      "repository_http":row.get("repository_http"),
+      "source_pin_match":row.get("source_pin_match"),
+      "validator_rc":row.get("validator_rc"),
+      "tests_rc":row.get("tests_rc"),
+      "status_http":row.get("status_http"),
+      "ok":row.get("ok"),
+      "error":row.get("error"),
+    }
+    print("OMEGA_DIAG_EXECUTOR "+" ".join(f"{k}={v}" for k,v in fields.items()))
+PY
+  fi
 fi
 
 set +e
