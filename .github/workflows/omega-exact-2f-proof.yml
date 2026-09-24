@@ -13,6 +13,7 @@ env:
   TARGET_REPOSITORY: sublimedeaf-design/Omega-engines
   TARGET_SHA: 743f4cab9f356cf02b1c072914ba179b349257f7
   BASE_SHA: be537e7dffde572c038c253c548282cd2e18e799
+  OMEGA_REPOSITORY: sublimedeaf-design/Omega-engines
 
 jobs:
   test:
