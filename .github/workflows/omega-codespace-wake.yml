@@ -19,7 +19,7 @@ concurrency:
 jobs:
   wake:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 12
     env:
       OMEGA_BOOTSTRAP_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
       OMEGA_CODESPACE_LIFECYCLE_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
@@ -69,7 +69,7 @@ jobs:
               available|running) ;;
               *)
                 gh api --method POST "/user/codespaces/$name/start" >/dev/null 2>&1 || true
-                for _ in $(seq 1 36); do
+                for _ in $(seq 1 18); do
                   sleep 5
                   state="$(gh api -X GET "/user/codespaces/$name" --jq '.state' 2>/dev/null || true)"
                   case "${state,,}" in
@@ -88,7 +88,7 @@ jobs:
             esac
 
             set +e
-            output="$(gh codespace ssh -c "$name" -- bash -s \
+            output="$(timeout 35s gh codespace ssh -c "$name" -- bash -s \
               < bootstrap/omega/resume_existing_runner_remote.sh 2>&1)"
             rc=$?
             set -e
