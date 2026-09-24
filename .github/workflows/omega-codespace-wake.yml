@@ -209,6 +209,61 @@ jobs:
           print("OMEGA_EXTERNAL_FEDERATION_GREEN source_pin="+str(exe.get("source_pin")))
           PY
 
+      - name: Bridge exact acceptance state to private commit status
+        if: ${{ always() && steps.wake.outputs.codespace_name != '' }}
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          OMEGA_CODESPACE_NAME: ${{ steps.wake.outputs.codespace_name }}
+        run: |
+          set +x
+          state_json="$(timeout 30s gh codespace ssh -c "$OMEGA_CODESPACE_NAME" -- bash -s <<'REMOTE'
+          set -Eeuo pipefail
+          STATE="${OMEGA_STATE:-/workspaces/.omega-state}"
+          ROOT=""
+          for candidate in /workspaces/*; do
+            [ -d "$candidate/.git" ] || continue
+            remote="$(git -C "$candidate" remote get-url origin 2>/dev/null || true)"
+            case "$remote" in *sublimedeaf-design/Omega-engines*) ROOT="$candidate"; break;; esac
+          done
+          [ -n "$ROOT" ] || exit 44
+          cd "$ROOT"
+          python3 - "$STATE" "$(git rev-parse HEAD)" <<'PY'
+          import datetime as dt,json,pathlib,sys
+          state=pathlib.Path(sys.argv[1]); head=sys.argv[2]
+          ev=state/"evidence"
+          def load(name):
+              p=ev/name
+              try: return json.loads(p.read_text()) if p.is_file() else {}
+              except Exception: return {}
+          live=load("acceptance-live.json")
+          pre=load("acceptance-pre-rebuild.json")
+          runtime=load("acceptance-runtime-status.json")
+          running=False
+          import subprocess
+          running=subprocess.run(
+              ["pgrep","-f","deploy/codespaces/acceptance-test.sh"],
+              stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,
+          ).returncode==0
+          state_value="pending"; desc="acceptance running or awaiting exact evidence"
+          if live.get("ok") is True and live.get("source_sha")==head:
+              state_value="success"; desc="Codespace acceptance/recovery exact-SHA passed"
+          elif runtime.get("sha")==head and runtime.get("state")=="failure" and not running:
+              state_value="failure"; desc="Codespace acceptance/recovery exact-SHA failed"
+          elif pre.get("ok") is True and pre.get("source_sha")==head:
+              state_value="pending"; desc="Codespace acceptance pre-rebuild green; final recovery pending"
+          print(json.dumps({"sha":head,"state":state_value,"description":desc,"running":running},separators=(",",":")))
+          PY
+          REMOTE
+          )"
+          sha="$(python3 -c 'import json,sys; print(json.loads(sys.stdin.read())["sha"])' <<<"$state_json")"
+          state="$(python3 -c 'import json,sys; print(json.loads(sys.stdin.read())["state"])' <<<"$state_json")"
+          desc="$(python3 -c 'import json,sys; print(json.loads(sys.stdin.read())["description"])' <<<"$state_json")"
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
+          gh api --method POST "/repos/sublimedeaf-design/Omega-engines/statuses/$sha"             -f state="$state"             -f context="omega/acceptance-hosted"             -f description="$desc" >/dev/null
+          echo "OMEGA_ACCEPTANCE_STATUS_BRIDGED sha=$sha state=$state"
+
       - name: Seed private Codespaces federation secret
         if: ${{ always() }}
         shell: bash
