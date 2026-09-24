@@ -23,15 +23,32 @@ done
 cd "$ROOT"
 export OMEGA_STATE="$STATE"
 
-# Do not reset a working tree underneath an exact-SHA acceptance run. A later
-# bootstrap/supervisor pass will converge the desired head once validation exits.
+# Keep acceptance on a GitHub-known source SHA. If a historical evidence-only
+# commit stranded HEAD locally, stop that stale validation and converge immediately.
 expected_sha="${OMEGA_EXPECTED_PRIVATE_HEAD:-}"
 current_sha="$(git rev-parse HEAD)"
 if pgrep -f 'deploy/codespaces/acceptance-test.sh' >/dev/null 2>&1 && \
    [ -n "$expected_sha" ] && [ "$expected_sha" != "$current_sha" ]; then
-  echo "OMEGA_REMOTE_SOURCE_SYNC_DEFERRED acceptance_running=true current=$current_sha expected=$expected_sha"
-  timeout 60 bash deploy/codespaces/publish-evidence.sh || true
-  exit 0
+  timeout 45 git fetch -q origin main >/dev/null 2>&1 || true
+  evidence_only_drift=false
+  if git cat-file -e "$expected_sha^{commit}" 2>/dev/null && \
+     git merge-base --is-ancestor "$expected_sha" "$current_sha" >/dev/null 2>&1; then
+    changed="$(git diff --name-only "$expected_sha..$current_sha" 2>/dev/null || true)"
+    if [ -n "$changed" ] && ! printf '%s\n' "$changed" | grep -Ev '^evidence/codespaces-live/' >/dev/null; then
+      evidence_only_drift=true
+    fi
+  fi
+  if [ "$evidence_only_drift" = true ]; then
+    echo "OMEGA_LOCAL_EVIDENCE_DRIFT_RECOVERY current=$current_sha expected=$expected_sha"
+    pkill -f 'deploy/codespaces/acceptance-test.sh' >/dev/null 2>&1 || true
+    rm -f "$STATE/acceptance.lock" "$STATE/acceptance.last-attempt"
+    git reset --hard -q "$expected_sha"
+    current_sha="$expected_sha"
+  else
+    echo "OMEGA_REMOTE_SOURCE_SYNC_DEFERRED acceptance_running=true current=$current_sha expected=$expected_sha"
+    timeout 60 bash deploy/codespaces/publish-evidence.sh || true
+    exit 0
+  fi
 fi
 
 # The private repository owns all sync/runtime logic. This public bootstrap only
