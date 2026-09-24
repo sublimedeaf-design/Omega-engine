@@ -59,7 +59,7 @@ jobs:
         run: |
           python3 bootstrap/omega/codespace_wake.py
       - name: Hot-sync and reload private OMEGA runtime
-        if: ${{ steps.wake.outputs.codespace_name != '' && env.OMEGA_FORCE_RESTART != '1' && env.OMEGA_ENABLE_RUNNER_REPAIR == '1' }}
+        if: ${{ steps.wake.outputs.codespace_name != '' && env.OMEGA_FORCE_RESTART != '1' }}
         continue-on-error: true
         shell: bash
         env:
@@ -72,7 +72,7 @@ jobs:
 
       - name: Reuse any existing configured omega-ci runner
         id: reuse
-        if: ${{ steps.wake.outputs.codespace_name != '' && env.OMEGA_FORCE_RESTART != '1' }}
+        if: ${{ steps.wake.outputs.codespace_name != '' && env.OMEGA_FORCE_RESTART != '1' && env.OMEGA_ENABLE_RUNNER_REPAIR == '1' }}
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
