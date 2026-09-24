@@ -1,6 +1,9 @@
-name: OMEGA One-Shot Codespace Recovery Rebuild
+name: OMEGA External Recovery Rebuild Fallback
 
 on:
+  workflow_dispatch:
+  schedule:
+    - cron: "*/5 * * * *"
   push:
     paths:
       - ".github/workflows/omega-codespace-rebuild-once.yml"
@@ -9,42 +12,76 @@ permissions:
   contents: read
 
 concurrency:
-  group: omega-one-shot-codespace-rebuild
+  group: omega-external-recovery-rebuild
   cancel-in-progress: false
 
 jobs:
   rebuild:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 8
     env:
-      OMEGA_BOOTSTRAP_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
-      OMEGA_CODESPACE_LIFECYCLE_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
-      OMEGA_FORCE_RESTART: "1"
+      GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+      PRIVATE_REPOSITORY: sublimedeaf-design/Omega-engines
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          persist-credentials: false
-      - name: Controlled restart so postStart syncs the patched runtime branch
-        id: wake
+      - name: Discover available OMEGA Codespace
+        id: runtime
         shell: bash
-        run: |
-          python3 bootstrap/omega/codespace_wake.py
-      - name: Allow postStart source sync to apply devcontainer change
-        shell: bash
-        run: sleep 30
-      - name: Request full rebuild with the synchronized devcontainer
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
-          OMEGA_CODESPACE_NAME: ${{ steps.wake.outputs.codespace_name }}
         run: |
           set +x
-          if [ -z "${OMEGA_CODESPACE_NAME:-}" ]; then
-            echo "OMEGA_REBUILD_CODESPACE_NAME_MISSING"
-            exit 2
-          fi
-          gh codespace rebuild -c "$OMEGA_CODESPACE_NAME" --full || {
-            echo "OMEGA_EXTERNAL_REBUILD_REQUEST_NOT_ACCEPTED; internal postStart rebuild may already be active"
+          payload="$(gh api -X GET /user/codespaces -f per_page=100)"
+          name="$(python3 -c 'import json,sys; p=json.load(sys.stdin); rows=[x for x in p.get("codespaces",[]) if (x.get("repository") or {}).get("full_name")=="sublimedeaf-design/Omega-engines" and str((x.get("git_status") or {}).get("ref") or "").replace("refs/heads/","")=="main" and str(x.get("state") or "").lower() in {"available","running"}]; rows.sort(key=lambda x:x.get("last_used_at") or x.get("created_at") or "",reverse=True); print(rows[0]["name"] if rows else "")' <<<"$payload")"
+          if [ -z "$name" ]; then
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "OMEGA_EXTERNAL_REBUILD_RUNTIME_NOT_AVAILABLE"
             exit 0
-          }
+          fi
+          echo "available=true" >> "$GITHUB_OUTPUT"
+          echo "codespace_name=$name" >> "$GITHUB_OUTPUT"
+          echo "OMEGA_EXTERNAL_REBUILD_RUNTIME_FOUND"
+
+      - name: Check durable rebuild challenge
+        id: challenge
+        if: ${{ steps.runtime.outputs.available == 'true' }}
+        env:
+          OMEGA_CODESPACE_NAME: ${{ steps.runtime.outputs.codespace_name }}
+        shell: bash
+        run: |
+          set +x
+          result="$(timeout 40s gh codespace ssh -c "$OMEGA_CODESPACE_NAME" -- bash -s <<'REMOTE'
+          set -Eeuo pipefail
+          STATE="${OMEGA_STATE:-/workspaces/.omega-state}"
+          challenge="$STATE/evidence/rebuild-challenge.json"
+          pre="$STATE/evidence/acceptance-pre-rebuild.json"
+          arm="$STATE/acceptance-rebuild-armed"
+          if [ ! -s "$challenge" ] || [ ! -s "$pre" ] || [ ! -f "$arm" ]; then
+            echo "false:no_challenge"
+            exit 0
+          fi
+          if pgrep -f 'deploy/codespaces/acceptance-test.sh' >/dev/null 2>&1; then
+            echo "false:acceptance_running"
+            exit 0
+          fi
+          sentinel="$(python3 -c 'import json,sys; p=json.load(open(sys.argv[1])); print(p.get("sentinel") or "")' "$challenge")"
+          case "$sentinel" in /tmp/omega-full-rebuild-*) ;; *) echo "false:invalid_sentinel"; exit 0;; esac
+          if [ -e "$sentinel" ]; then
+            echo "true:challenge_armed"
+          else
+            echo "false:container_already_recreated"
+          fi
+          REMOTE
+          )"
+          case "$result" in
+            true:*) echo "needs_rebuild=true" >> "$GITHUB_OUTPUT" ;;
+            *) echo "needs_rebuild=false" >> "$GITHUB_OUTPUT" ;;
+          esac
+          echo "OMEGA_EXTERNAL_REBUILD_CHECK $result"
+
+      - name: Request full rebuild externally
+        if: ${{ steps.challenge.outputs.needs_rebuild == 'true' }}
+        env:
+          OMEGA_CODESPACE_NAME: ${{ steps.runtime.outputs.codespace_name }}
+        shell: bash
+        run: |
+          set +x
+          gh codespace rebuild -c "$OMEGA_CODESPACE_NAME" --full
           echo "OMEGA_EXTERNAL_FULL_REBUILD_REQUESTED"
