@@ -10,11 +10,11 @@ permissions:
   contents: read
 
 concurrency:
-  group: omega-pr220-exact-head-e87f910302052a570531fc7a1f5bce3c2628b7c6
+  group: omega-pr220-exact-head-2a67b113e2a87ff8fc077ac79f505dce08abfdf0
   cancel-in-progress: false
 
 env:
-  TARGET_SHA: e87f910302052a570531fc7a1f5bce3c2628b7c6
+  TARGET_SHA: 2a67b113e2a87ff8fc077ac79f505dce08abfdf0
   BASE_SHA: be537e7dffde572c038c253c548282cd2e18e799
   PRIVATE_REPOSITORY: sublimedeaf-design/Omega-engines
 
