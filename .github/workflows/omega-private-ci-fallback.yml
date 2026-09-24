@@ -2,6 +2,9 @@ name: OMEGA Private CI Fallback
 
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/omega-private-ci-fallback.yml"
   schedule:
     - cron: "7,37 * * * *"
 
