@@ -185,7 +185,7 @@ jobs:
           python - <<'PY'
           import json,os
           body = f"""## Agent / owner
-          Role: qa_audit, orchestrator
+          Role: qa_audit, orchestrator, release_ci
 
           ## Scope
           Exact-SHA federation auth candidate validation proof.
