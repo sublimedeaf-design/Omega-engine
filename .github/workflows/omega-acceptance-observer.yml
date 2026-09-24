@@ -95,7 +95,8 @@ jobs:
               try:
                   raw=json.loads(aa.read_text(encoding="utf-8"))
                   result=raw.get("result") if isinstance(raw.get("result"),dict) else {}
-                  nested=result.get("result") if isinstance(result.get("result"),dict) else {}
+                  output=result.get("output") if isinstance(result.get("output"),dict) else {}
+                  nested=output.get("result") if isinstance(output.get("result"),dict) else {}
                   evaluator=nested.get("evaluator") if isinstance(nested.get("evaluator"),dict) else {}
                   steps=raw.get("steps") if isinstance(raw.get("steps"),list) else []
                   acceptance_agents={
@@ -107,11 +108,12 @@ jobs:
                       "resumed":raw.get("resumed"),
                       "failed_tasks":raw.get("failed_tasks"),
                       "result_status":result.get("status"),
+                      "worker_status":output.get("status"),
                       "result_error":str(result.get("error") or nested.get("error") or "")[:1200],
                       "reward":nested.get("reward"),
                       "evaluator_decision":evaluator.get("decision"),
                       "evaluator_evidence":[str(x)[:500] for x in (evaluator.get("evidence") or [])[:8]],
-                      "worker_evidence":[str(x)[:500] for x in (result.get("evidence") or [])[:8]],
+                      "worker_evidence":[str(x)[:500] for x in (output.get("evidence") or [])[:8]],
                       "last_step_status":(steps[-1].get("status") if steps and isinstance(steps[-1],dict) else None),
                       "last_step_error":(str(steps[-1].get("error") or "")[:1200] if steps and isinstance(steps[-1],dict) else ""),
                   } if isinstance(raw,dict) else None
