@@ -81,7 +81,7 @@ jobs:
                     (if ((.state // "")|ascii_downcase)=="available" or ((.state // "")|ascii_downcase)=="running" then 0 else 1 end),
                     (.last_used_at // .created_at)
                   )
-                | .[0:6]
+                | .[0:20]
                 | .[].name'
           )
           candidates=("$OMEGA_PRIMARY_CODESPACE")
@@ -90,28 +90,24 @@ jobs:
           done
 
           reused=false
-          stopped_probes=0
-          deadline=$((SECONDS+180))
+          deadline=$((SECONDS+420))
           for name in "${candidates[@]}"; do
             [ "$SECONDS" -lt "$deadline" ] || { echo "OMEGA_RUNNER_REUSE_BUDGET_EXHAUSTED"; break; }
             [ -n "$name" ] || continue
             echo "OMEGA_RUNNER_REUSE_PROBE codespace=$name"
 
             state="$(gh api -X GET "/user/codespaces/$name" --jq '.state' 2>/dev/null || true)"
-            case "${state,,}" in
+            original_state="${state,,}"
+            started_for_probe=false
+            case "$original_state" in
               available|running) ;;
               *)
-                stopped_probes=$((stopped_probes+1))
-                if [ "$stopped_probes" -gt 2 ]; then
-                  echo "OMEGA_RUNNER_REUSE_SKIP codespace=$name reason=stopped_probe_limit"
-                  continue
-                fi
                 gh api --method POST "/user/codespaces/$name/start" >/dev/null 2>&1 || true
-                for _ in $(seq 1 8); do
+                for _ in $(seq 1 18); do
                   sleep 5
                   state="$(gh api -X GET "/user/codespaces/$name" --jq '.state' 2>/dev/null || true)"
                   case "${state,,}" in
-                    available|running) break ;;
+                    available|running) started_for_probe=true; break ;;
                   esac
                 done
                 ;;
@@ -126,7 +122,7 @@ jobs:
             esac
 
             set +e
-            output="$(timeout 25s gh codespace ssh -c "$name" -- bash -s \
+            output="$(timeout 30s gh codespace ssh -c "$name" -- bash -s \
               < bootstrap/omega/resume_registered_runner_remote.sh 2>&1)"
             rc=$?
             set -e
@@ -137,6 +133,11 @@ jobs:
               echo "OMEGA_RUNNER_REUSE_SUCCESS codespace=$name"
               reused=true
               break
+            fi
+
+            if [ "$started_for_probe" = true ] && [ "$name" != "$OMEGA_PRIMARY_CODESPACE" ]; then
+              gh api --method POST "/user/codespaces/$name/stop" >/dev/null 2>&1 || true
+              echo "OMEGA_RUNNER_REUSE_CLEANUP_STOP codespace=$name"
             fi
           done
 
