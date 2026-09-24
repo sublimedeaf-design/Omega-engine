@@ -1,0 +1,80 @@
+name: OMEGA Federation Git Auth Proof
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/omega-federation-git-auth-proof.yml"
+
+permissions:
+  contents: read
+
+env:
+  TARGET_REPOSITORY: sublimedeaf-design/Omega-engines
+  TARGET_SHA: f91b5d82d6e59a6beed8cbc6643ce3df82f28568
+  SOURCE_PIN: 6e151ab75d7bf8eecb5e0714568aa7502808a987
+  OMEGA_REPOSITORY: sublimedeaf-design/Omega-engines
+
+jobs:
+  contract-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: ${{ env.TARGET_REPOSITORY }}
+          ref: ${{ env.TARGET_SHA }}
+          token: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          persist-credentials: false
+          path: omega
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.13"
+      - working-directory: omega
+        run: python -m pip install -c requirements-ci.lock -e '.[dev]'
+      - working-directory: omega
+        run: python -m pytest -q tests/test_federation_runner_capability.py tests/test_federation_evidence_verifier.py
+      - working-directory: omega
+        run: python -m compileall -q scripts/federation_executor.py
+
+  live-five-peer-executor:
+    needs: contract-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      OMEGA_FEDERATION_PAT: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+      OMEGA_STATE: ${{ runner.temp }}/omega-state
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: ${{ env.TARGET_REPOSITORY }}
+          ref: ${{ env.TARGET_SHA }}
+          token: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          persist-credentials: false
+          path: omega
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.13"
+      - name: Run actual five-peer exact-SHA executor
+        working-directory: omega
+        run: |
+          mkdir -p "$OMEGA_STATE/evidence"
+          python scripts/federation_executor.py             --source-pin "$SOURCE_PIN"             --report "$OMEGA_STATE/evidence/federation-executor.json"
+      - name: Verify report contract
+        run: |
+          python - <<'PY'
+          import json, os, pathlib
+          p=pathlib.Path(os.environ["OMEGA_STATE"])/"evidence/federation-executor.json"
+          d=json.loads(p.read_text())
+          assert d["ok"] is True, d
+          assert d["source_pin"] == os.environ["SOURCE_PIN"], d
+          assert len(d["peers"]) == 5, d
+          for row in d["peers"]:
+              assert row["repository_http"] == 200, row
+              assert row["source_pin_match"] is True, row
+              assert row["validator_rc"] == 0, row
+              assert row["tests_rc"] == 0, row
+              assert row["status_http"] in (200,201), row
+          assert d["credential_material_recorded"] is False, d
+          print("OMEGA_FEDERATION_GIT_AUTH_PROOF_GREEN")
+          PY
