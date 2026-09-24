@@ -50,10 +50,9 @@ jobs:
           set +x
           expected="$(tr -d '\r\n' < bootstrap/omega/desired_private_head.txt)"
           {
-            printf '%s\n' "$expected"
+            printf 'export OMEGA_EXPECTED_PRIVATE_HEAD=%q\n' "$expected"
             cat bootstrap/omega/hot_sync_runtime_remote.sh
-          } | timeout 180s gh codespace ssh -c "$OMEGA_CODESPACE_NAME" -- bash -c \
-            'IFS= read -r OMEGA_EXPECTED_PRIVATE_HEAD; export OMEGA_EXPECTED_PRIVATE_HEAD; exec bash -s'
+          } | timeout 180s gh codespace ssh -c "$OMEGA_CODESPACE_NAME" -- bash -s
 
       - name: Reuse any existing configured omega-ci runner
         id: reuse
