@@ -278,6 +278,56 @@ jobs:
           gh api --method POST "/repos/sublimedeaf-design/Omega-engines/statuses/$sha"             -f state="$state"             -f context="omega/acceptance-hosted"             -f description="$desc" >/dev/null
           echo "OMEGA_ACCEPTANCE_STATUS_BRIDGED sha=$sha state=$state"
 
+      - name: Observe private acceptance diagnostics
+        if: ${{ always() && steps.wake.outputs.codespace_name != '' }}
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          OMEGA_CODESPACE_NAME: ${{ steps.wake.outputs.codespace_name }}
+        run: |
+          set +x
+          timeout 30s gh codespace ssh -c "$OMEGA_CODESPACE_NAME" -- bash -s <<'REMOTE'
+          set -Eeuo pipefail
+          STATE="${OMEGA_STATE:-/workspaces/.omega-state}"
+          ROOT=""
+          for candidate in /workspaces/*; do
+            [ -d "$candidate/.git" ] || continue
+            remote="$(git -C "$candidate" remote get-url origin 2>/dev/null || true)"
+            case "$remote" in *sublimedeaf-design/Omega-engines*) ROOT="$candidate"; break;; esac
+          done
+          [ -n "$ROOT" ] || exit 44
+          cd "$ROOT"
+          python3 - "$STATE" "$(git rev-parse HEAD)" <<'PY'
+          import json,pathlib,re,subprocess,sys
+          state=pathlib.Path(sys.argv[1]); head=sys.argv[2]
+          def safe_tail(path,limit=30):
+              p=pathlib.Path(path)
+              if not p.is_file(): return []
+              out=[]
+              for line in p.read_text(encoding="utf-8",errors="replace").splitlines()[-limit:]:
+                  if re.search(r'(?i)(authorization:|bearer\s+|github_pat_|ghp_|api[_-]?key\s*=|token\s*=)',line):
+                      out.append("[REDACTED_SECRET_BEARING_LINE]")
+                  else:
+                      out.append("".join(ch if ch=="\t" or ord(ch)>=32 else "?" for ch in line)[:500])
+              return out
+          def exists(name): return (state/"evidence"/name).is_file()
+          running=subprocess.run(["pgrep","-f","deploy/codespaces/acceptance-test.sh"],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode==0
+          payload={
+              "runtime_head":head,
+              "acceptance_running":running,
+              "pre_rebuild_present":exists("acceptance-pre-rebuild.json"),
+              "live_present":exists("acceptance-live.json"),
+              "pass_markers":safe_tail(state/"logs/codespaces-acceptance.pass",40),
+              "acceptance_bootstrap_tail":safe_tail(state/"logs/acceptance-bootstrap.log",30),
+              "acceptance_retry_tail":safe_tail(state/"logs/acceptance-retry.log",30),
+              "preflight_tail":safe_tail(state/"logs/preflight.log",30),
+              "credential_material_recorded":False,
+          }
+          print("OMEGA_ACCEPTANCE_OBSERVER "+json.dumps(payload,separators=(",",":")))
+          PY
+          REMOTE
+
       - name: Seed private Codespaces federation secret
         if: ${{ always() }}
         shell: bash
