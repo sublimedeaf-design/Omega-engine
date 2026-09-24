@@ -23,19 +23,28 @@ done
 cd "$ROOT"
 export OMEGA_STATE="$STATE"
 
-# Keep acceptance on a GitHub-known source SHA. If a historical evidence-only
-# commit stranded HEAD locally, stop that stale validation and converge immediately.
+# Keep acceptance on a GitHub-known source SHA. Local-only evidence drift is
+# repaired immediately. A running acceptance may also be superseded only when
+# the requested SHA is a verified fast-forward descendant of the current remote
+# SHA. VM/autonomous mutation cycles are never killed by this controller.
 expected_sha="${OMEGA_EXPECTED_PRIVATE_HEAD:-}"
 current_sha="$(git rev-parse HEAD)"
-if { pgrep -f 'deploy/codespaces/acceptance-test.sh' >/dev/null 2>&1 || \
-     pgrep -f 'deploy/vm/omega-cycle.sh' >/dev/null 2>&1; } && \
+acceptance_running=false
+cycle_running=false
+pgrep -f 'deploy/codespaces/acceptance-test.sh' >/dev/null 2>&1 && acceptance_running=true
+pgrep -f 'deploy/vm/omega-cycle.sh' >/dev/null 2>&1 && cycle_running=true
+
+if { [ "$acceptance_running" = true ] || [ "$cycle_running" = true ]; } && \
    [ -n "$expected_sha" ] && [ "$expected_sha" != "$current_sha" ]; then
   timeout 45 git fetch -q origin main >/dev/null 2>&1 || true
   evidence_only_drift=false
   remote_knows_current=false
+  supersedable_acceptance=false
+
   if git branch -r --contains "$current_sha" 2>/dev/null | grep -q .; then
     remote_knows_current=true
   fi
+
   if [ "$remote_knows_current" = false ]; then
     base="$(git merge-base "$current_sha" "origin/main" 2>/dev/null || true)"
     if [ -n "$base" ]; then
@@ -44,11 +53,26 @@ if { pgrep -f 'deploy/codespaces/acceptance-test.sh' >/dev/null 2>&1 || \
         evidence_only_drift=true
       fi
     fi
+  elif [ "$acceptance_running" = true ] && [ "$cycle_running" = false ] && \
+       [ "${OMEGA_ALLOW_ACCEPTANCE_SUPERSEDE:-1}" = "1" ] && \
+       git cat-file -e "$expected_sha^{commit}" 2>/dev/null && \
+       git merge-base --is-ancestor "$current_sha" "$expected_sha" >/dev/null 2>&1; then
+    supersedable_acceptance=true
   fi
+
   if [ "$evidence_only_drift" = true ]; then
     echo "OMEGA_LOCAL_EVIDENCE_DRIFT_RECOVERY current=$current_sha expected=$expected_sha"
     pkill -f 'deploy/codespaces/acceptance-test.sh' >/dev/null 2>&1 || true
     rm -f "$STATE/acceptance.lock" "$STATE/acceptance.last-attempt"
+    git reset --hard -q "$expected_sha"
+    current_sha="$expected_sha"
+  elif [ "$supersedable_acceptance" = true ]; then
+    echo "OMEGA_ACCEPTANCE_SUPERSEDED current=$current_sha expected=$expected_sha"
+    pkill -f 'deploy/codespaces/acceptance-test.sh' >/dev/null 2>&1 || true
+    rm -f "$STATE/acceptance.lock" "$STATE/acceptance.last-attempt" \
+          "$STATE/acceptance-rebuild-armed" \
+          "$STATE/evidence/acceptance-pre-rebuild.json" \
+          "$STATE/evidence/acceptance-live.json"
     git reset --hard -q "$expected_sha"
     current_sha="$expected_sha"
   else
