@@ -49,9 +49,19 @@ jobs:
           mapfile -t discovered < <(
             gh api -X GET /user/codespaces -f per_page=100 \
               --jq '.codespaces
-                | map(select(.repository.full_name=="sublimedeaf-design/Omega-engines"))
-                | sort_by(.last_used_at // .created_at)
-                | reverse
+                | map(select(
+                    .repository.full_name=="sublimedeaf-design/Omega-engines" or
+                    .repository.full_name=="sublimedeaf-design/Omega-release" or
+                    .repository.full_name=="sublimedeaf-design/Omega-validation" or
+                    .repository.full_name=="sublimedeaf-design/Omega-agents" or
+                    .repository.full_name=="sublimedeaf-design/Omega-recovery" or
+                    .repository.full_name=="sublimedeaf-design/Jarv"
+                  ))
+                | sort_by(
+                    (if ((.state // "")|ascii_downcase)=="available" or ((.state // "")|ascii_downcase)=="running" then 0 else 1 end),
+                    (.last_used_at // .created_at)
+                  )
+                | .[0:6]
                 | .[].name'
           )
           candidates=("$OMEGA_PRIMARY_CODESPACE")
@@ -89,7 +99,7 @@ jobs:
 
             set +e
             output="$(timeout 35s gh codespace ssh -c "$name" -- bash -s \
-              < bootstrap/omega/resume_existing_runner_remote.sh 2>&1)"
+              < bootstrap/omega/resume_registered_runner_remote.sh 2>&1)"
             rc=$?
             set -e
             printf '%s\n' "$output"
