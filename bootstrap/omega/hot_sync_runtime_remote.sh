@@ -23,6 +23,17 @@ done
 cd "$ROOT"
 export OMEGA_STATE="$STATE"
 
+# Do not reset a working tree underneath an exact-SHA acceptance run. A later
+# bootstrap/supervisor pass will converge the desired head once validation exits.
+expected_sha="${OMEGA_EXPECTED_PRIVATE_HEAD:-}"
+current_sha="$(git rev-parse HEAD)"
+if pgrep -f 'deploy/codespaces/acceptance-test.sh' >/dev/null 2>&1 && \
+   [ -n "$expected_sha" ] && [ "$expected_sha" != "$current_sha" ]; then
+  echo "OMEGA_REMOTE_SOURCE_SYNC_DEFERRED acceptance_running=true current=$current_sha expected=$expected_sha"
+  timeout 60 bash deploy/codespaces/publish-evidence.sh || true
+  exit 0
+fi
+
 # The private repository owns all sync/runtime logic. This public bootstrap only
 # invokes those checked-in scripts; it never copies private source into public CI.
 timeout 90 bash deploy/codespaces/sync-source.sh
