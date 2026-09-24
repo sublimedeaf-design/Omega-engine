@@ -10,6 +10,7 @@ permissions:
   contents: read
 
 env:
+  PROOF_SCHEMA_REV: "3"
   TARGET_REPOSITORY: sublimedeaf-design/Omega-engines
   OMEGA_REPOSITORY: sublimedeaf-design/Omega-engines
 
