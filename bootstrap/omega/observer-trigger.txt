@@ -1,0 +1,3 @@
+probe=2
+private_head=6d635e2bafb5a5e6aaeb6fc39c548b8a060f01a7
+purpose=observe-multi-agent-acceptance
