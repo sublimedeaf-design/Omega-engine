@@ -235,9 +235,10 @@ jobs:
           done
           [ -n "$ROOT" ] || exit 44
           cd "$ROOT"
-          python3 - "$STATE" "$OMEGA_EXPECTED_PRIVATE_HEAD" <<'PY'
+          actual_head="$(git rev-parse HEAD)"
+          python3 - "$STATE" "$actual_head" "$OMEGA_EXPECTED_PRIVATE_HEAD" <<'PY'
           import datetime as dt,json,pathlib,sys
-          state=pathlib.Path(sys.argv[1]); head=sys.argv[2]
+          state=pathlib.Path(sys.argv[1]); head=sys.argv[2]; expected=sys.argv[3]
           ev=state/"evidence"
           def load(name):
               p=ev/name
@@ -259,14 +260,21 @@ jobs:
               state_value="failure"; desc="Codespace acceptance/recovery exact-SHA failed"
           elif pre.get("ok") is True and pre.get("source_sha")==head:
               state_value="pending"; desc="Codespace acceptance pre-rebuild green; final recovery pending"
-          print(json.dumps({"sha":head,"state":state_value,"description":desc,"running":running},separators=(",",":")))
+          print(json.dumps({"sha":head,"expected_sha":expected,"state":state_value,"description":desc,"running":running},separators=(",",":")))
           PY
           REMOTE
           } | timeout 30s gh codespace ssh -c "$OMEGA_CODESPACE_NAME" -- bash -s)"
           sha="$(python3 -c 'import json,sys; print(json.loads(sys.stdin.read())["sha"])' <<<"$state_json")"
+          expected_sha="$(python3 -c 'import json,sys; print(json.loads(sys.stdin.read())["expected_sha"])' <<<"$state_json")"
           state="$(python3 -c 'import json,sys; print(json.loads(sys.stdin.read())["state"])' <<<"$state_json")"
           desc="$(python3 -c 'import json,sys; print(json.loads(sys.stdin.read())["description"])' <<<"$state_json")"
           [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$expected_sha" =~ ^[0-9a-f]{40}$ ]]
+          if ! gh api "/repos/sublimedeaf-design/Omega-engines/commits/$sha" >/dev/null 2>&1; then
+            sha="$expected_sha"
+            state="pending"
+            desc="runtime local-only SHA detected; convergence pending"
+          fi
           gh api --method POST "/repos/sublimedeaf-design/Omega-engines/statuses/$sha"             -f state="$state"             -f context="omega/acceptance-hosted"             -f description="$desc" >/dev/null
           echo "OMEGA_ACCEPTANCE_STATUS_BRIDGED sha=$sha state=$state"
 
