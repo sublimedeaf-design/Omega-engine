@@ -187,6 +187,43 @@ jobs:
           } | gh codespace ssh -c "$OMEGA_CODESPACE_NAME" -- bash -c \
             'IFS= read -r OMEGA_RUNNER_REGISTRATION_TOKEN; export OMEGA_RUNNER_REGISTRATION_TOKEN; exec bash -s'
           unset registration_token
+      - name: Verify private federation evidence externally
+        if: ${{ always() && steps.wake.outputs.codespace_name != '' }}
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+        run: |
+          set +x
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+          for file in federation-access.json federation-executor.json; do
+            code="$(curl -sS -o "$tmp/$file" -w '%{http_code}'               -H 'Accept: application/vnd.github.raw+json'               -H 'X-GitHub-Api-Version: 2026-03-10'               -H "Authorization: Bearer $GH_TOKEN"               "https://api.github.com/repos/sublimedeaf-design/Omega-engines/contents/evidence/codespaces-live/$file?ref=main" || true)"
+            [ "$code" = 200 ] || { echo "OMEGA_EXTERNAL_EVIDENCE_HTTP_$code:$file" >&2; exit 41; }
+          done
+          python3 - "$tmp/federation-access.json" "$tmp/federation-executor.json" <<'PY'
+          import datetime as dt,json,sys
+          access=json.load(open(sys.argv[1])); exe=json.load(open(sys.argv[2]))
+          expected={"Omega-release","Omega-validation","Omega-agents","Omega-recovery","Jarv"}
+          assert access.get("authorized") is True
+          assert set(access.get("peer_http",{}))==expected
+          assert all(access["peer_http"][x]==200 for x in expected)
+          assert exe.get("ok") is True
+          assert exe.get("credential_material_recorded") is False
+          assert {x.get("repository") for x in exe.get("peers",[])}==expected
+          for row in exe["peers"]:
+              assert row.get("repository_http")==200
+              assert row.get("source_pin_match") is True
+              assert row.get("validator_rc")==0
+              assert row.get("tests_rc")==0
+              assert row.get("status_http") in (200,201)
+              assert row.get("ok") is True
+          checked=dt.datetime.fromisoformat(exe["checked_at"].replace("Z","+00:00"))
+          age=(dt.datetime.now(dt.timezone.utc)-checked).total_seconds()
+          assert -60 <= age <= 1800, age
+          print("OMEGA_EXTERNAL_FEDERATION_GREEN source_pin="+str(exe.get("source_pin")))
+          PY
+
       - name: Seed private Codespaces federation secret
         if: ${{ always() }}
         shell: bash
