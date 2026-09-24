@@ -36,21 +36,45 @@ jobs:
         run: |
           set -Eeuo pipefail
           row=""
-          mode="pull"
+          pr_rc=0
           set +e
           row="$(gh api "/repos/$PRIVATE_REPOSITORY/pulls?state=open&per_page=100" 2>/tmp/omega-pr-discovery.err \
             --jq '[.[] | select(.head.ref|startswith("agent/orchestrator/vm-autonomous-"))] | sort_by(.updated_at) | reverse | .[0] // empty')"
           pr_rc=$?
           set -e
+
           if [ "$pr_rc" -eq 0 ] && [ -n "$row" ]; then
             sha="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["head"]["sha"])' <<<"$row")"
             base_sha="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["base"]["sha"])' <<<"$row")"
             number="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["number"])' <<<"$row")"
+            mode="pull"
           else
-            mode="branch"
+            branch_row="$(gh api --paginate "/repos/$PRIVATE_REPOSITORY/branches?per_page=100" \
+              --jq '[.[] | select(.name|startswith("agent/orchestrator/vm-autonomous-"))] | sort_by(.name) | reverse | .[0] // empty')"
+            if [ -z "$branch_row" ]; then
+              echo "found=false" >> "$GITHUB_OUTPUT"
+              echo "OMEGA_HOSTED_PR_NONE pr_rc=$pr_rc"
+              exit 0
+            fi
+            sha="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["commit"]["sha"])' <<<"$branch_row")"
             base_sha="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/main" --jq '.sha')"
-            best=""
-            while IFS=          {
+            number="0"
+            mode="branch"
+          fi
+
+          [[ "$sha" =~ ^[0-9a-f]{40}$ && "$base_sha" =~ ^[0-9a-f]{40}$ ]]
+          android=false
+          if [ "$number" != "0" ]; then
+            if gh api --paginate "/repos/$PRIVATE_REPOSITORY/pulls/$number/files?per_page=100" --jq '.[].filename' \
+              | grep -Eq '^(android/|\.github/workflows/android-(ci|apk)\.yml$)'; then
+              android=true
+            fi
+          elif gh api "/repos/$PRIVATE_REPOSITORY/compare/$base_sha...$sha" --jq '.files[].filename' \
+            | grep -Eq '^(android/|\.github/workflows/android-(ci|apk)\.yml$)'; then
+            android=true
+          fi
+
+          {
             echo "found=true"
             echo "sha=$sha"
             echo "base_sha=$base_sha"
@@ -112,8 +136,11 @@ jobs:
         shell: bash
         run: |
           set +x
-          state=failure; [ "$RESULT" = success ] && state=success
-          gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$OMEGA_SHA"             -f state="$state" -f context="omega/hosted-ci/$LANE"             -f description="public hosted exact-PR lane: $RESULT" >/dev/null
+          state=failure
+          [ "$RESULT" = success ] && state=success
+          gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$OMEGA_SHA" \
+            -f state="$state" -f context="omega/hosted-ci/$LANE" \
+            -f description="public hosted exact-PR lane: $RESULT" >/dev/null
 
   governance:
     needs: discover
@@ -153,6 +180,7 @@ jobs:
           PY
       - name: Validate exact governance
         working-directory: omega
+        shell: bash
         run: |
           if [ -s /tmp/omega-pr-event.json ]; then
             python scripts/validate_agent_handoff.py --self-check --event /tmp/omega-pr-event.json
@@ -169,8 +197,11 @@ jobs:
         shell: bash
         run: |
           set +x
-          state=failure; [ "$RESULT" = success ] && state=success
-          gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$OMEGA_SHA"             -f state="$state" -f context="omega/hosted-governance"             -f description="public hosted exact-PR governance: $RESULT" >/dev/null
+          state=failure
+          [ "$RESULT" = success ] && state=success
+          gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$OMEGA_SHA" \
+            -f state="$state" -f context="omega/hosted-governance" \
+            -f description="public hosted exact-PR governance: $RESULT" >/dev/null
 
   android:
     needs: discover
@@ -191,6 +222,7 @@ jobs:
           distribution: temurin
           java-version: "17"
       - name: Install Android SDK 36
+        shell: bash
         run: |
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "platforms;android-36" "build-tools;36.0.0"
@@ -199,6 +231,7 @@ jobs:
           gradle-version: "8.13"
       - name: Build, lint and verify debug APK
         working-directory: omega/android
+        shell: bash
         run: |
           gradle --no-daemon --stacktrace lintDebug assembleDebug
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify app/build/outputs/apk/debug/app-debug.apk
@@ -211,664 +244,8 @@ jobs:
         shell: bash
         run: |
           set +x
-          state=failure; [ "$RESULT" = success ] && state=success
-          gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$OMEGA_SHA"             -f state="$state" -f context="omega/hosted-android"             -f description="public hosted exact-PR Android: $RESULT" >/dev/null
-\t' read -r branch candidate; do
-              [ -n "$branch" ] && [ -n "$candidate" ] || continue
-              date="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/$candidate" --jq '.commit.committer.date // .commit.author.date')"
-              row_key="$date"          {
-            echo "found=true"
-            echo "sha=$sha"
-            echo "base_sha=$base_sha"
-            echo "number=$number"
-            echo "android=$android"
-          } >> "$GITHUB_OUTPUT"
-          echo "OMEGA_HOSTED_PR_PIN number=$number sha=$sha android=$android"
-
-  ci:
-    needs: discover
-    if: ${{ needs.discover.outputs.found == 'true' }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - lane: python311
-            python: "3.11"
-            extra: "dev"
-            command: "python -m pytest -q && python -m compileall -q src scripts && python -m pip check"
-          - lane: python313
-            python: "3.13"
-            extra: "dev"
-            command: "python -m pytest -q && python -m compileall -q src scripts && python -m pip check && python scripts/repo_audit.py --out reports/repo-audit-ci.json && python -c \"from omega.research.preflight import run_preflight; r=run_preflight('reports/preflight-ci.json'); assert r['passed'], r\" && python scripts/final_audit_gate.py --audit reports/repo-audit-ci.json --out reports/final-audit-gate.json"
-          - lane: python314
-            python: "3.14"
-            extra: "dev"
-            command: "python -m pytest -q && python -m compileall -q src scripts && python -m pip check"
-          - lane: storage
-            python: "3.13"
-            extra: "dev,data"
-            command: "python -m pytest -q tests/test_storage.py tests/test_support_runtime_integrity.py && python -c \"from omega.research.preflight import run_preflight; [(_ for _ in ()).throw(AssertionError(r)) if not (r:=run_preflight(backend=b))['passed'] or r['storage_backend']!=b else None for b in ('sqlite','duckdb')]\" && python -m pip check"
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          repository: ${{ env.PRIVATE_REPOSITORY }}
-          ref: ${{ needs.discover.outputs.sha }}
-          token: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
-          persist-credentials: false
-          fetch-depth: 0
-          path: omega
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
-        with:
-          python-version: ${{ matrix.python }}
-      - name: Run exact private PR lane
-        working-directory: omega
-        shell: bash
-        run: |
-          python -m pip install -c requirements-ci.lock -e '.[${{ matrix.extra }}]'
-          ${{ matrix.command }}
-      - name: Publish exact-SHA hosted lane status
-        if: ${{ always() }}
-        env:
-          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
-          OMEGA_SHA: ${{ needs.discover.outputs.sha }}
-          LANE: ${{ matrix.lane }}
-          RESULT: ${{ job.status }}
-        shell: bash
-        run: |
-          set +x
-          state=failure; [ "$RESULT" = success ] && state=success
-          gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$OMEGA_SHA"             -f state="$state" -f context="omega/hosted-ci/$LANE"             -f description="public hosted exact-PR lane: $RESULT" >/dev/null
-
-  governance:
-    needs: discover
-    if: ${{ needs.discover.outputs.found == 'true' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          repository: ${{ env.PRIVATE_REPOSITORY }}
-          ref: ${{ needs.discover.outputs.sha }}
-          token: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
-          persist-credentials: false
-          fetch-depth: 0
-          path: omega
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
-        with:
-          python-version: "3.13"
-      - name: Build actual PR event
-        env:
-          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
-          PR_NUMBER: ${{ needs.discover.outputs.number }}
-        shell: bash
-        run: |
-          set +x
-          gh api "/repos/$PRIVATE_REPOSITORY/pulls/$PR_NUMBER" > /tmp/private-pr.json
-          python3 - <<'PY'
-          import json
-          pr=json.load(open("/tmp/private-pr.json"))
-          event={"pull_request":{
-              "body":pr.get("body") or "",
-              "base":{"sha":pr["base"]["sha"]},
-              "head":{"sha":pr["head"]["sha"]},
-          }}
-          json.dump(event,open("/tmp/omega-pr-event.json","w"))
-          PY
-      - name: Validate exact governance
-        working-directory: omega
-        run: |
-          python scripts/validate_agent_handoff.py --self-check --event /tmp/omega-pr-event.json
-          python scripts/agent_orchestrator.py --agents .omega/agents.json --plan .omega/work-plan.json validate
-      - name: Publish hosted governance status
-        if: ${{ always() }}
-        env:
-          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
-          OMEGA_SHA: ${{ needs.discover.outputs.sha }}
-          RESULT: ${{ job.status }}
-        shell: bash
-        run: |
-          set +x
-          state=failure; [ "$RESULT" = success ] && state=success
-          gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$OMEGA_SHA"             -f state="$state" -f context="omega/hosted-governance"             -f description="public hosted exact-PR governance: $RESULT" >/dev/null
-
-  android:
-    needs: discover
-    if: ${{ needs.discover.outputs.found == 'true' && needs.discover.outputs.android == 'true' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          repository: ${{ env.PRIVATE_REPOSITORY }}
-          ref: ${{ needs.discover.outputs.sha }}
-          token: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
-          persist-credentials: false
-          fetch-depth: 0
-          path: omega
-      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6
-        with:
-          distribution: temurin
-          java-version: "17"
-      - name: Install Android SDK 36
-        run: |
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "platforms;android-36" "build-tools;36.0.0"
-      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb
-        with:
-          gradle-version: "8.13"
-      - name: Build, lint and verify debug APK
-        working-directory: omega/android
-        run: |
-          gradle --no-daemon --stacktrace lintDebug assembleDebug
-          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify app/build/outputs/apk/debug/app-debug.apk
-      - name: Publish hosted Android status
-        if: ${{ always() }}
-        env:
-          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
-          OMEGA_SHA: ${{ needs.discover.outputs.sha }}
-          RESULT: ${{ job.status }}
-        shell: bash
-        run: |
-          set +x
-          state=failure; [ "$RESULT" = success ] && state=success
-          gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$OMEGA_SHA"             -f state="$state" -f context="omega/hosted-android"             -f description="public hosted exact-PR Android: $RESULT" >/dev/null
-\t'"$candidate"          {
-            echo "found=true"
-            echo "sha=$sha"
-            echo "base_sha=$base_sha"
-            echo "number=$number"
-            echo "android=$android"
-          } >> "$GITHUB_OUTPUT"
-          echo "OMEGA_HOSTED_PR_PIN number=$number sha=$sha android=$android"
-
-  ci:
-    needs: discover
-    if: ${{ needs.discover.outputs.found == 'true' }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - lane: python311
-            python: "3.11"
-            extra: "dev"
-            command: "python -m pytest -q && python -m compileall -q src scripts && python -m pip check"
-          - lane: python313
-            python: "3.13"
-            extra: "dev"
-            command: "python -m pytest -q && python -m compileall -q src scripts && python -m pip check && python scripts/repo_audit.py --out reports/repo-audit-ci.json && python -c \"from omega.research.preflight import run_preflight; r=run_preflight('reports/preflight-ci.json'); assert r['passed'], r\" && python scripts/final_audit_gate.py --audit reports/repo-audit-ci.json --out reports/final-audit-gate.json"
-          - lane: python314
-            python: "3.14"
-            extra: "dev"
-            command: "python -m pytest -q && python -m compileall -q src scripts && python -m pip check"
-          - lane: storage
-            python: "3.13"
-            extra: "dev,data"
-            command: "python -m pytest -q tests/test_storage.py tests/test_support_runtime_integrity.py && python -c \"from omega.research.preflight import run_preflight; [(_ for _ in ()).throw(AssertionError(r)) if not (r:=run_preflight(backend=b))['passed'] or r['storage_backend']!=b else None for b in ('sqlite','duckdb')]\" && python -m pip check"
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          repository: ${{ env.PRIVATE_REPOSITORY }}
-          ref: ${{ needs.discover.outputs.sha }}
-          token: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
-          persist-credentials: false
-          fetch-depth: 0
-          path: omega
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
-        with:
-          python-version: ${{ matrix.python }}
-      - name: Run exact private PR lane
-        working-directory: omega
-        shell: bash
-        run: |
-          python -m pip install -c requirements-ci.lock -e '.[${{ matrix.extra }}]'
-          ${{ matrix.command }}
-      - name: Publish exact-SHA hosted lane status
-        if: ${{ always() }}
-        env:
-          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
-          OMEGA_SHA: ${{ needs.discover.outputs.sha }}
-          LANE: ${{ matrix.lane }}
-          RESULT: ${{ job.status }}
-        shell: bash
-        run: |
-          set +x
-          state=failure; [ "$RESULT" = success ] && state=success
-          gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$OMEGA_SHA"             -f state="$state" -f context="omega/hosted-ci/$LANE"             -f description="public hosted exact-PR lane: $RESULT" >/dev/null
-
-  governance:
-    needs: discover
-    if: ${{ needs.discover.outputs.found == 'true' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          repository: ${{ env.PRIVATE_REPOSITORY }}
-          ref: ${{ needs.discover.outputs.sha }}
-          token: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
-          persist-credentials: false
-          fetch-depth: 0
-          path: omega
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
-        with:
-          python-version: "3.13"
-      - name: Build actual PR event
-        env:
-          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
-          PR_NUMBER: ${{ needs.discover.outputs.number }}
-        shell: bash
-        run: |
-          set +x
-          gh api "/repos/$PRIVATE_REPOSITORY/pulls/$PR_NUMBER" > /tmp/private-pr.json
-          python3 - <<'PY'
-          import json
-          pr=json.load(open("/tmp/private-pr.json"))
-          event={"pull_request":{
-              "body":pr.get("body") or "",
-              "base":{"sha":pr["base"]["sha"]},
-              "head":{"sha":pr["head"]["sha"]},
-          }}
-          json.dump(event,open("/tmp/omega-pr-event.json","w"))
-          PY
-      - name: Validate exact governance
-        working-directory: omega
-        run: |
-          python scripts/validate_agent_handoff.py --self-check --event /tmp/omega-pr-event.json
-          python scripts/agent_orchestrator.py --agents .omega/agents.json --plan .omega/work-plan.json validate
-      - name: Publish hosted governance status
-        if: ${{ always() }}
-        env:
-          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
-          OMEGA_SHA: ${{ needs.discover.outputs.sha }}
-          RESULT: ${{ job.status }}
-        shell: bash
-        run: |
-          set +x
-          state=failure; [ "$RESULT" = success ] && state=success
-          gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$OMEGA_SHA"             -f state="$state" -f context="omega/hosted-governance"             -f description="public hosted exact-PR governance: $RESULT" >/dev/null
-
-  android:
-    needs: discover
-    if: ${{ needs.discover.outputs.found == 'true' && needs.discover.outputs.android == 'true' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          repository: ${{ env.PRIVATE_REPOSITORY }}
-          ref: ${{ needs.discover.outputs.sha }}
-          token: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
-          persist-credentials: false
-          fetch-depth: 0
-          path: omega
-      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6
-        with:
-          distribution: temurin
-          java-version: "17"
-      - name: Install Android SDK 36
-        run: |
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "platforms;android-36" "build-tools;36.0.0"
-      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb
-        with:
-          gradle-version: "8.13"
-      - name: Build, lint and verify debug APK
-        working-directory: omega/android
-        run: |
-          gradle --no-daemon --stacktrace lintDebug assembleDebug
-          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify app/build/outputs/apk/debug/app-debug.apk
-      - name: Publish hosted Android status
-        if: ${{ always() }}
-        env:
-          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
-          OMEGA_SHA: ${{ needs.discover.outputs.sha }}
-          RESULT: ${{ job.status }}
-        shell: bash
-        run: |
-          set +x
-          state=failure; [ "$RESULT" = success ] && state=success
-          gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$OMEGA_SHA"             -f state="$state" -f context="omega/hosted-android"             -f description="public hosted exact-PR Android: $RESULT" >/dev/null
-\t'"$branch"
-              if [ -z "$best" ] || [[ "$row_key" > "$best" ]]; then best="$row_key"; fi
-            done < <(gh api --paginate "/repos/$PRIVATE_REPOSITORY/branches?per_page=100" \
-              --jq '.[] | select(.name|startswith("agent/orchestrator/vm-autonomous-")) | [.name,.commit.sha] | @tsv')
-            if [ -z "$best" ]; then
-              echo "found=false" >> "$GITHUB_OUTPUT"
-              echo "OMEGA_HOSTED_PR_NONE mode=$mode pr_rc=$pr_rc"
-              exit 0
-            fi
-            IFS=          {
-            echo "found=true"
-            echo "sha=$sha"
-            echo "base_sha=$base_sha"
-            echo "number=$number"
-            echo "android=$android"
-          } >> "$GITHUB_OUTPUT"
-          echo "OMEGA_HOSTED_PR_PIN number=$number sha=$sha android=$android"
-
-  ci:
-    needs: discover
-    if: ${{ needs.discover.outputs.found == 'true' }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - lane: python311
-            python: "3.11"
-            extra: "dev"
-            command: "python -m pytest -q && python -m compileall -q src scripts && python -m pip check"
-          - lane: python313
-            python: "3.13"
-            extra: "dev"
-            command: "python -m pytest -q && python -m compileall -q src scripts && python -m pip check && python scripts/repo_audit.py --out reports/repo-audit-ci.json && python -c \"from omega.research.preflight import run_preflight; r=run_preflight('reports/preflight-ci.json'); assert r['passed'], r\" && python scripts/final_audit_gate.py --audit reports/repo-audit-ci.json --out reports/final-audit-gate.json"
-          - lane: python314
-            python: "3.14"
-            extra: "dev"
-            command: "python -m pytest -q && python -m compileall -q src scripts && python -m pip check"
-          - lane: storage
-            python: "3.13"
-            extra: "dev,data"
-            command: "python -m pytest -q tests/test_storage.py tests/test_support_runtime_integrity.py && python -c \"from omega.research.preflight import run_preflight; [(_ for _ in ()).throw(AssertionError(r)) if not (r:=run_preflight(backend=b))['passed'] or r['storage_backend']!=b else None for b in ('sqlite','duckdb')]\" && python -m pip check"
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          repository: ${{ env.PRIVATE_REPOSITORY }}
-          ref: ${{ needs.discover.outputs.sha }}
-          token: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
-          persist-credentials: false
-          fetch-depth: 0
-          path: omega
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
-        with:
-          python-version: ${{ matrix.python }}
-      - name: Run exact private PR lane
-        working-directory: omega
-        shell: bash
-        run: |
-          python -m pip install -c requirements-ci.lock -e '.[${{ matrix.extra }}]'
-          ${{ matrix.command }}
-      - name: Publish exact-SHA hosted lane status
-        if: ${{ always() }}
-        env:
-          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
-          OMEGA_SHA: ${{ needs.discover.outputs.sha }}
-          LANE: ${{ matrix.lane }}
-          RESULT: ${{ job.status }}
-        shell: bash
-        run: |
-          set +x
-          state=failure; [ "$RESULT" = success ] && state=success
-          gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$OMEGA_SHA"             -f state="$state" -f context="omega/hosted-ci/$LANE"             -f description="public hosted exact-PR lane: $RESULT" >/dev/null
-
-  governance:
-    needs: discover
-    if: ${{ needs.discover.outputs.found == 'true' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          repository: ${{ env.PRIVATE_REPOSITORY }}
-          ref: ${{ needs.discover.outputs.sha }}
-          token: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
-          persist-credentials: false
-          fetch-depth: 0
-          path: omega
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
-        with:
-          python-version: "3.13"
-      - name: Build actual PR event
-        env:
-          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
-          PR_NUMBER: ${{ needs.discover.outputs.number }}
-        shell: bash
-        run: |
-          set +x
-          gh api "/repos/$PRIVATE_REPOSITORY/pulls/$PR_NUMBER" > /tmp/private-pr.json
-          python3 - <<'PY'
-          import json
-          pr=json.load(open("/tmp/private-pr.json"))
-          event={"pull_request":{
-              "body":pr.get("body") or "",
-              "base":{"sha":pr["base"]["sha"]},
-              "head":{"sha":pr["head"]["sha"]},
-          }}
-          json.dump(event,open("/tmp/omega-pr-event.json","w"))
-          PY
-      - name: Validate exact governance
-        working-directory: omega
-        run: |
-          python scripts/validate_agent_handoff.py --self-check --event /tmp/omega-pr-event.json
-          python scripts/agent_orchestrator.py --agents .omega/agents.json --plan .omega/work-plan.json validate
-      - name: Publish hosted governance status
-        if: ${{ always() }}
-        env:
-          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
-          OMEGA_SHA: ${{ needs.discover.outputs.sha }}
-          RESULT: ${{ job.status }}
-        shell: bash
-        run: |
-          set +x
-          state=failure; [ "$RESULT" = success ] && state=success
-          gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$OMEGA_SHA"             -f state="$state" -f context="omega/hosted-governance"             -f description="public hosted exact-PR governance: $RESULT" >/dev/null
-
-  android:
-    needs: discover
-    if: ${{ needs.discover.outputs.found == 'true' && needs.discover.outputs.android == 'true' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          repository: ${{ env.PRIVATE_REPOSITORY }}
-          ref: ${{ needs.discover.outputs.sha }}
-          token: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
-          persist-credentials: false
-          fetch-depth: 0
-          path: omega
-      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6
-        with:
-          distribution: temurin
-          java-version: "17"
-      - name: Install Android SDK 36
-        run: |
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "platforms;android-36" "build-tools;36.0.0"
-      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb
-        with:
-          gradle-version: "8.13"
-      - name: Build, lint and verify debug APK
-        working-directory: omega/android
-        run: |
-          gradle --no-daemon --stacktrace lintDebug assembleDebug
-          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify app/build/outputs/apk/debug/app-debug.apk
-      - name: Publish hosted Android status
-        if: ${{ always() }}
-        env:
-          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
-          OMEGA_SHA: ${{ needs.discover.outputs.sha }}
-          RESULT: ${{ job.status }}
-        shell: bash
-        run: |
-          set +x
-          state=failure; [ "$RESULT" = success ] && state=success
-          gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$OMEGA_SHA"             -f state="$state" -f context="omega/hosted-android"             -f description="public hosted exact-PR Android: $RESULT" >/dev/null
-\t' read -r _date sha branch <<<"$best"
-            number="0"
-            echo "OMEGA_HOSTED_PR_BRANCH_FALLBACK branch=$branch"
-          fi
-          [[ "$sha" =~ ^[0-9a-f]{40}$ && "$base_sha" =~ ^[0-9a-f]{40}$ ]]
-          android=false
-          if [ "$number" != "0" ]; then
-            if gh api --paginate "/repos/$PRIVATE_REPOSITORY/pulls/$number/files?per_page=100" --jq '.[].filename' \
-              | grep -Eq '^(android/|\.github/workflows/android-(ci|apk)\.yml$)'; then
-              android=true
-            fi
-          elif gh api "/repos/$PRIVATE_REPOSITORY/compare/$base_sha...$sha" --jq '.files[].filename' \
-            | grep -Eq '^(android/|\.github/workflows/android-(ci|apk)\.yml$)'; then
-            android=true
-          fi
-          {
-            echo "found=true"
-            echo "sha=$sha"
-            echo "base_sha=$base_sha"
-            echo "number=$number"
-            echo "android=$android"
-          } >> "$GITHUB_OUTPUT"
-          echo "OMEGA_HOSTED_PR_PIN number=$number sha=$sha android=$android"
-
-  ci:
-    needs: discover
-    if: ${{ needs.discover.outputs.found == 'true' }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - lane: python311
-            python: "3.11"
-            extra: "dev"
-            command: "python -m pytest -q && python -m compileall -q src scripts && python -m pip check"
-          - lane: python313
-            python: "3.13"
-            extra: "dev"
-            command: "python -m pytest -q && python -m compileall -q src scripts && python -m pip check && python scripts/repo_audit.py --out reports/repo-audit-ci.json && python -c \"from omega.research.preflight import run_preflight; r=run_preflight('reports/preflight-ci.json'); assert r['passed'], r\" && python scripts/final_audit_gate.py --audit reports/repo-audit-ci.json --out reports/final-audit-gate.json"
-          - lane: python314
-            python: "3.14"
-            extra: "dev"
-            command: "python -m pytest -q && python -m compileall -q src scripts && python -m pip check"
-          - lane: storage
-            python: "3.13"
-            extra: "dev,data"
-            command: "python -m pytest -q tests/test_storage.py tests/test_support_runtime_integrity.py && python -c \"from omega.research.preflight import run_preflight; [(_ for _ in ()).throw(AssertionError(r)) if not (r:=run_preflight(backend=b))['passed'] or r['storage_backend']!=b else None for b in ('sqlite','duckdb')]\" && python -m pip check"
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          repository: ${{ env.PRIVATE_REPOSITORY }}
-          ref: ${{ needs.discover.outputs.sha }}
-          token: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
-          persist-credentials: false
-          fetch-depth: 0
-          path: omega
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
-        with:
-          python-version: ${{ matrix.python }}
-      - name: Run exact private PR lane
-        working-directory: omega
-        shell: bash
-        run: |
-          python -m pip install -c requirements-ci.lock -e '.[${{ matrix.extra }}]'
-          ${{ matrix.command }}
-      - name: Publish exact-SHA hosted lane status
-        if: ${{ always() }}
-        env:
-          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
-          OMEGA_SHA: ${{ needs.discover.outputs.sha }}
-          LANE: ${{ matrix.lane }}
-          RESULT: ${{ job.status }}
-        shell: bash
-        run: |
-          set +x
-          state=failure; [ "$RESULT" = success ] && state=success
-          gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$OMEGA_SHA"             -f state="$state" -f context="omega/hosted-ci/$LANE"             -f description="public hosted exact-PR lane: $RESULT" >/dev/null
-
-  governance:
-    needs: discover
-    if: ${{ needs.discover.outputs.found == 'true' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          repository: ${{ env.PRIVATE_REPOSITORY }}
-          ref: ${{ needs.discover.outputs.sha }}
-          token: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
-          persist-credentials: false
-          fetch-depth: 0
-          path: omega
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
-        with:
-          python-version: "3.13"
-      - name: Build actual PR event
-        env:
-          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
-          PR_NUMBER: ${{ needs.discover.outputs.number }}
-        shell: bash
-        run: |
-          set +x
-          gh api "/repos/$PRIVATE_REPOSITORY/pulls/$PR_NUMBER" > /tmp/private-pr.json
-          python3 - <<'PY'
-          import json
-          pr=json.load(open("/tmp/private-pr.json"))
-          event={"pull_request":{
-              "body":pr.get("body") or "",
-              "base":{"sha":pr["base"]["sha"]},
-              "head":{"sha":pr["head"]["sha"]},
-          }}
-          json.dump(event,open("/tmp/omega-pr-event.json","w"))
-          PY
-      - name: Validate exact governance
-        working-directory: omega
-        run: |
-          python scripts/validate_agent_handoff.py --self-check --event /tmp/omega-pr-event.json
-          python scripts/agent_orchestrator.py --agents .omega/agents.json --plan .omega/work-plan.json validate
-      - name: Publish hosted governance status
-        if: ${{ always() }}
-        env:
-          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
-          OMEGA_SHA: ${{ needs.discover.outputs.sha }}
-          RESULT: ${{ job.status }}
-        shell: bash
-        run: |
-          set +x
-          state=failure; [ "$RESULT" = success ] && state=success
-          gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$OMEGA_SHA"             -f state="$state" -f context="omega/hosted-governance"             -f description="public hosted exact-PR governance: $RESULT" >/dev/null
-
-  android:
-    needs: discover
-    if: ${{ needs.discover.outputs.found == 'true' && needs.discover.outputs.android == 'true' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          repository: ${{ env.PRIVATE_REPOSITORY }}
-          ref: ${{ needs.discover.outputs.sha }}
-          token: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
-          persist-credentials: false
-          fetch-depth: 0
-          path: omega
-      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6
-        with:
-          distribution: temurin
-          java-version: "17"
-      - name: Install Android SDK 36
-        run: |
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "platforms;android-36" "build-tools;36.0.0"
-      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb
-        with:
-          gradle-version: "8.13"
-      - name: Build, lint and verify debug APK
-        working-directory: omega/android
-        run: |
-          gradle --no-daemon --stacktrace lintDebug assembleDebug
-          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify app/build/outputs/apk/debug/app-debug.apk
-      - name: Publish hosted Android status
-        if: ${{ always() }}
-        env:
-          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
-          OMEGA_SHA: ${{ needs.discover.outputs.sha }}
-          RESULT: ${{ job.status }}
-        shell: bash
-        run: |
-          set +x
-          state=failure; [ "$RESULT" = success ] && state=success
-          gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$OMEGA_SHA"             -f state="$state" -f context="omega/hosted-android"             -f description="public hosted exact-PR Android: $RESULT" >/dev/null
+          state=failure
+          [ "$RESULT" = success ] && state=success
+          gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$OMEGA_SHA" \
+            -f state="$state" -f context="omega/hosted-android" \
+            -f description="public hosted exact-PR Android: $RESULT" >/dev/null
