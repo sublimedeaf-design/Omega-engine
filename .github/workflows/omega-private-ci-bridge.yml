@@ -3,7 +3,7 @@ name: OMEGA Private CI Hosted Bridge
 on:
   workflow_dispatch:
   schedule:
-    - cron: "*/10 * * * *"
+    - cron: "17,47 * * * *"
   push:
     paths:
       - ".github/workflows/omega-private-ci-bridge.yml"
@@ -13,13 +13,14 @@ permissions:
 
 concurrency:
   group: omega-private-ci-hosted-bridge
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   discover:
     runs-on: ubuntu-latest
     outputs:
       sha: ${{ steps.head.outputs.sha }}
+      need_run: ${{ steps.head.outputs.need_run }}
     steps:
       - id: head
         env:
@@ -29,11 +30,25 @@ jobs:
           set +x
           sha="$(gh api /repos/sublimedeaf-design/Omega-engines/commits/main --jq .sha)"
           [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
+          need_run=true
+          if payload="$(gh api "/repos/sublimedeaf-design/Omega-engines/commits/$sha/status" 2>/dev/null)"; then
+            if printf '%s' "$payload" | python3 -c '
+import json,sys
+d=json.load(sys.stdin)
+want={"omega/hosted-ci/python311","omega/hosted-ci/python313","omega/hosted-ci/python314","omega/hosted-ci/storage","omega/hosted-governance"}
+got={x.get("context"):x.get("state") for x in d.get("statuses",[])}
+raise SystemExit(0 if all(got.get(k)=="success" for k in want) else 1)
+'; then
+              need_run=false
+            fi
+          fi
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
-          echo "OMEGA_PRIVATE_HEAD=$sha"
+          echo "need_run=$need_run" >> "$GITHUB_OUTPUT"
+          echo "OMEGA_PRIVATE_HEAD=$sha need_run=$need_run"
 
   ci:
     needs: discover
+    if: needs.discover.outputs.need_run == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -90,6 +105,7 @@ jobs:
 
   governance:
     needs: discover
+    if: needs.discover.outputs.need_run == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
