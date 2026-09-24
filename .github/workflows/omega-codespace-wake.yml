@@ -2,6 +2,10 @@ name: OMEGA Free Codespace Bootstrap
 
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/omega-codespace-wake.yml"
+      - "bootstrap/omega/**"
   schedule:
     - cron: "*/5 * * * *"
 
