@@ -60,18 +60,15 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: ${{ matrix.python }}
-      - name: Fetch exact private source snapshot
-        env:
-          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
-          OMEGA_SHA: ${{ needs.discover.outputs.sha }}
-        shell: bash
-        run: |
-          set +x
-          mkdir srcdir
-          gh api -H 'Accept: application/vnd.github+json'             "/repos/sublimedeaf-design/Omega-engines/tarball/$OMEGA_SHA" > source.tgz
-          tar -xzf source.tgz -C srcdir --strip-components=1
-          rm source.tgz
-          printf '%s\n' "$OMEGA_SHA" > srcdir/.omega-hosted-bridge-sha
+      - name: Checkout exact private source with git provenance
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: sublimedeaf-design/Omega-engines
+          ref: ${{ needs.discover.outputs.sha }}
+          token: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          persist-credentials: false
+          fetch-depth: 0
+          path: srcdir
       - name: Run lane
         working-directory: srcdir
         shell: bash
@@ -98,16 +95,15 @@ jobs:
     steps:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with: {python-version: "3.13"}
-      - name: Fetch exact private source snapshot
-        env:
-          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
-          OMEGA_SHA: ${{ needs.discover.outputs.sha }}
-        shell: bash
-        run: |
-          set +x
-          mkdir srcdir
-          gh api "/repos/sublimedeaf-design/Omega-engines/tarball/$OMEGA_SHA" > source.tgz
-          tar -xzf source.tgz -C srcdir --strip-components=1
+      - name: Checkout exact private source with git provenance
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: sublimedeaf-design/Omega-engines
+          ref: ${{ needs.discover.outputs.sha }}
+          token: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          persist-credentials: false
+          fetch-depth: 0
+          path: srcdir
       - name: Validate governance
         working-directory: srcdir
         run: |
