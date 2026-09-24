@@ -59,6 +59,15 @@ set -e
 printf '%s\n' "$preflight_out"
 echo "OMEGA_REMOTE_PREFLIGHT_RC=$preflight_rc"
 
+# If acceptance is absent, launch it through bash rather than relying on the
+# workspace executable bit/mount semantics. The private runtime owns the lock.
+if [ ! -s "$STATE/evidence/acceptance-pre-rebuild.json" ] && [ ! -s "$STATE/evidence/acceptance-live.json" ] && \
+   ! pgrep -f 'deploy/codespaces/acceptance-test.sh' >/dev/null 2>&1; then
+  nohup bash deploy/codespaces/acceptance-test.sh \
+    >"$STATE/logs/acceptance-bootstrap.log" 2>&1 &
+  echo "OMEGA_REMOTE_ACCEPTANCE_LAUNCHED"
+fi
+
 # Give asynchronous acceptance/federation workers a short bounded window to
 # emit phase markers, then publish redacted diagnostics. Failure to publish
 # evidence must not turn runtime hot-sync into a false outage.
