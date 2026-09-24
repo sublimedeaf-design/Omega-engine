@@ -67,8 +67,12 @@ jobs:
           OMEGA_CODESPACE_NAME: ${{ steps.wake.outputs.codespace_name }}
         run: |
           set +x
-          timeout 180s gh codespace ssh -c "$OMEGA_CODESPACE_NAME" -- bash -s \
-            < bootstrap/omega/hot_sync_runtime_remote.sh
+          expected="$(tr -d '\r\n' < bootstrap/omega/desired_private_head.txt)"
+          {
+            printf '%s\n' "$expected"
+            cat bootstrap/omega/hot_sync_runtime_remote.sh
+          } | timeout 180s gh codespace ssh -c "$OMEGA_CODESPACE_NAME" -- bash -c \
+            'IFS= read -r OMEGA_EXPECTED_PRIVATE_HEAD; export OMEGA_EXPECTED_PRIVATE_HEAD; exec bash -s'
 
       - name: Reuse any existing configured omega-ci runner
         id: reuse
