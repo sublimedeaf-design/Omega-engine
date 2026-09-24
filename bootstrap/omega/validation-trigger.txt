@@ -1,2 +1,2 @@
-private_main=7537b842a42a28ce5e0ebf081b4161ff7911191e
-purpose=validate-t24-openliga-and-t60-no-bet-fallback
+private_main=6d635e2bafb5a5e6aaeb6fc39c548b8a060f01a7
+purpose=reconverge-local-only-sha-and-revalidate-t24-t60-fallbacks
