@@ -179,49 +179,23 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: "3.13"
-      - name: Build exact PR event
+      - name: Build exact push event
         working-directory: omega
         run: |
           python - <<'PY'
           import json,os
-          body = f"""## Agent / owner
-          Role: qa_audit, orchestrator, release_ci
-
-          ## Scope
-          Exact-SHA federation auth candidate validation proof.
-
-          ## Base / head
-          Base SHA: {os.environ['BASE_SHA']}
-          Head SHA: {os.environ['TARGET_SHA']}
-
-          ## Risk
-          Fail closed on any governance violation.
-
-          ## Verification
-          Reproduce the exact governance validator.
-
-          ## Evidence
-          Public hosted runner executes the private exact SHA without publishing private artifacts.
-
-          ## Temporal integrity
-          Base and head are pinned immutable commit SHAs.
-
-          ## Security
-          Checkout token is secret-scoped and persist-credentials is false.
-
-          ## Rollback
-          Delete this public proof workflow.
-
-          ## Handoff
-          Continue only after all five candidate proof jobs are green.
-          """
-          event={"pull_request":{"body":body,"base":{"sha":os.environ["BASE_SHA"]},"head":{"sha":os.environ["TARGET_SHA"]}}}
-          with open("/tmp/omega-pr-event.json","w",encoding="utf-8") as fh:
+          event={
+              "ref":"refs/heads/main",
+              "before":os.environ["BASE_SHA"],
+              "after":os.environ["TARGET_SHA"],
+              "repository":{"full_name":os.environ["TARGET_REPOSITORY"]},
+          }
+          with open("/tmp/omega-push-event.json","w",encoding="utf-8") as fh:
               json.dump(event,fh)
           PY
       - name: Validate control plane and handoff
         working-directory: omega
-        run: python scripts/validate_agent_handoff.py --self-check --event /tmp/omega-pr-event.json
+        run: python scripts/validate_agent_handoff.py --self-check --event /tmp/omega-push-event.json
       - name: Validate executable multi-agent plan
         working-directory: omega
         run: python scripts/agent_orchestrator.py --agents .omega/agents.json --plan .omega/work-plan.json validate
