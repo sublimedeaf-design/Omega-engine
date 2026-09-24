@@ -22,3 +22,12 @@ without a subsequent available/running state.
 Secret activation verification is performed by the scheduled/push bootstrap workflow; no secret value is logged.
 
 SSH recovery is provided by the devcontainer sshd feature; the normal bootstrap remains non-destructive and converges the existing Codespace to available before remote runner repair.
+
+
+## Runner registration permission
+
+The bootstrap PAT also needs repository permission **Administration: Read and write**
+for `sublimedeaf-design/Omega-engines`. GitHub requires this permission only to
+mint the short-lived self-hosted runner registration token. The permanent PAT is
+not copied into the Codespace; only the one-hour registration token is streamed
+over Codespaces SSH stdin to the installer.
