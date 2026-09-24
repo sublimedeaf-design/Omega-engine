@@ -32,11 +32,17 @@ if { pgrep -f 'deploy/codespaces/acceptance-test.sh' >/dev/null 2>&1 || \
    [ -n "$expected_sha" ] && [ "$expected_sha" != "$current_sha" ]; then
   timeout 45 git fetch -q origin main >/dev/null 2>&1 || true
   evidence_only_drift=false
-  if git cat-file -e "$expected_sha^{commit}" 2>/dev/null && \
-     git merge-base --is-ancestor "$expected_sha" "$current_sha" >/dev/null 2>&1; then
-    changed="$(git diff --name-only "$expected_sha..$current_sha" 2>/dev/null || true)"
-    if [ -n "$changed" ] && ! printf '%s\n' "$changed" | grep -Ev '^evidence/codespaces-live/' >/dev/null; then
-      evidence_only_drift=true
+  remote_knows_current=false
+  if git branch -r --contains "$current_sha" 2>/dev/null | grep -q .; then
+    remote_knows_current=true
+  fi
+  if [ "$remote_knows_current" = false ]; then
+    base="$(git merge-base "$current_sha" "origin/main" 2>/dev/null || true)"
+    if [ -n "$base" ]; then
+      changed="$(git diff --name-only "$base..$current_sha" 2>/dev/null || true)"
+      if [ -n "$changed" ] && ! printf '%s\n' "$changed" | grep -Ev '^evidence/codespaces-live/' >/dev/null; then
+        evidence_only_drift=true
+      fi
     fi
   fi
   if [ "$evidence_only_drift" = true ]; then
