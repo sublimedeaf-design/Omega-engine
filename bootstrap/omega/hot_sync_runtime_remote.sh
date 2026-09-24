@@ -34,3 +34,10 @@ echo "OMEGA_REMOTE_SOURCE_SYNCED sha=$new_sha"
 # runner-independent federation validator.
 timeout 120 bash .devcontainer/start.sh
 echo "OMEGA_REMOTE_RUNTIME_HOT_RELOADED sha=$(git rev-parse HEAD)"
+
+# Give asynchronous acceptance/federation workers a short bounded window to
+# emit phase markers, then publish redacted diagnostics. Failure to publish
+# evidence must not turn runtime hot-sync into a false outage.
+sleep 8
+timeout 60 bash deploy/codespaces/publish-evidence.sh || true
+echo "OMEGA_REMOTE_EVIDENCE_REFRESH_REQUESTED"
