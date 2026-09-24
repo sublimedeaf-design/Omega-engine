@@ -1,2 +1,2 @@
-private_main=02c88ec58eeed982d6dc3565ae5facbc77858860
-purpose=validate-qa-role-agent-smoke-and-continue-recovery-acceptance
+private_main=cc88af7e23722f116a18f189be6976d7c63a2099
+purpose=validate-release-ci-readonly-smoke-and-continue-recovery
