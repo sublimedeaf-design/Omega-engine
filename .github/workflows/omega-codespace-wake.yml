@@ -23,7 +23,7 @@ jobs:
     env:
       OMEGA_BOOTSTRAP_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
       OMEGA_CODESPACE_LIFECYCLE_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
-      OMEGA_FORCE_RESTART: ${{ github.event_name == 'push' && '1' || '0' }}
+      OMEGA_FORCE_RESTART: "0"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -32,7 +32,13 @@ jobs:
         shell: bash
         run: |
           gh secret set --help | grep -q codespaces
+      - name: Diagnose start conflict on bootstrap changes
+        if: ${{ github.event_name == 'push' }}
+        shell: bash
+        run: |
+          python3 bootstrap/omega/codespace_diagnostic.py
       - name: Discover and wake existing OMEGA runtime
+        if: ${{ github.event_name != 'push' }}
         shell: bash
         run: |
           python3 bootstrap/omega/codespace_wake.py
