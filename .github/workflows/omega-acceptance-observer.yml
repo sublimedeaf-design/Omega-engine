@@ -6,7 +6,7 @@ on:
   push:
     paths:
       - ".github/workflows/omega-acceptance-observer.yml"
-      - "bootstrap/omega/observer-trigger.txt"
+      - ".omega-observer-trigger.txt"
   schedule:
     - cron: "*/5 * * * *"
 
