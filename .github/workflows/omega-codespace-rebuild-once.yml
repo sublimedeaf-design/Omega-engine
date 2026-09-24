@@ -1,0 +1,50 @@
+name: OMEGA One-Shot Codespace Recovery Rebuild
+
+on:
+  push:
+    paths:
+      - ".github/workflows/omega-codespace-rebuild-once.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: omega-one-shot-codespace-rebuild
+  cancel-in-progress: false
+
+jobs:
+  rebuild:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      OMEGA_BOOTSTRAP_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+      OMEGA_CODESPACE_LIFECYCLE_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+      OMEGA_FORCE_RESTART: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Controlled restart so postStart syncs the patched runtime branch
+        id: wake
+        shell: bash
+        run: |
+          python3 bootstrap/omega/codespace_wake.py
+      - name: Allow postStart source sync to apply devcontainer change
+        shell: bash
+        run: sleep 30
+      - name: Request full rebuild with the synchronized devcontainer
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          OMEGA_CODESPACE_NAME: ${{ steps.wake.outputs.codespace_name }}
+        run: |
+          set +x
+          if [ -z "${OMEGA_CODESPACE_NAME:-}" ]; then
+            echo "OMEGA_REBUILD_CODESPACE_NAME_MISSING"
+            exit 2
+          fi
+          gh codespace rebuild -c "$OMEGA_CODESPACE_NAME" --full || {
+            echo "OMEGA_EXTERNAL_REBUILD_REQUEST_NOT_ACCEPTED; internal postStart rebuild may already be active"
+            exit 0
+          }
+          echo "OMEGA_EXTERNAL_FULL_REBUILD_REQUESTED"
