@@ -11,12 +11,34 @@ permissions:
 
 env:
   TARGET_REPOSITORY: sublimedeaf-design/Omega-engines
-  TARGET_SHA: 4b1d827022f7046b994cf238f3603d03709c6507
-  BASE_SHA: 187a857cbdd0d48c8a6209dc210438dfd24cd5b9
   OMEGA_REPOSITORY: sublimedeaf-design/Omega-engines
 
 jobs:
+  pin:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    outputs:
+      target_sha: ${{ steps.pin.outputs.target_sha }}
+      base_sha: ${{ steps.pin.outputs.base_sha }}
+    env:
+      GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+    steps:
+      - id: pin
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          target_sha="$(gh api /repos/sublimedeaf-design/Omega-engines/commits/main --jq '.sha')"
+          base_sha="$(gh api "/repos/sublimedeaf-design/Omega-engines/commits/$target_sha" --jq '.parents[0].sha')"
+          [ -n "$target_sha" ] && [ -n "$base_sha" ]
+          echo "target_sha=$target_sha" >> "$GITHUB_OUTPUT"
+          echo "base_sha=$base_sha" >> "$GITHUB_OUTPUT"
+          echo "OMEGA_EXACT_PIN target=$target_sha base=$base_sha"
+
   test:
+    needs: pin
+    env:
+      TARGET_SHA: ${{ needs.pin.outputs.target_sha }}
+      BASE_SHA: ${{ needs.pin.outputs.base_sha }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -49,6 +71,10 @@ jobs:
         run: python scripts/final_audit_gate.py --audit reports/repo-audit-ci.json --out reports/final-audit-gate.json
 
   python311:
+    needs: pin
+    env:
+      TARGET_SHA: ${{ needs.pin.outputs.target_sha }}
+      BASE_SHA: ${{ needs.pin.outputs.base_sha }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -72,6 +98,10 @@ jobs:
         run: python -m pip check
 
   python314:
+    needs: pin
+    env:
+      TARGET_SHA: ${{ needs.pin.outputs.target_sha }}
+      BASE_SHA: ${{ needs.pin.outputs.base_sha }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -95,6 +125,10 @@ jobs:
         run: python -m pip check
 
   storage-backends:
+    needs: pin
+    env:
+      TARGET_SHA: ${{ needs.pin.outputs.target_sha }}
+      BASE_SHA: ${{ needs.pin.outputs.base_sha }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -126,6 +160,10 @@ jobs:
         run: python -m pip check
 
   governance:
+    needs: pin
+    env:
+      TARGET_SHA: ${{ needs.pin.outputs.target_sha }}
+      BASE_SHA: ${{ needs.pin.outputs.base_sha }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -144,16 +182,16 @@ jobs:
         working-directory: omega
         run: |
           python - <<'PY'
-          import json
-          body = """## Agent / owner
+          import json,os
+          body = f"""## Agent / owner
           Role: qa_audit, orchestrator
 
           ## Scope
           Exact-SHA federation auth candidate validation proof.
 
           ## Base / head
-          Base SHA: 187a857cbdd0d48c8a6209dc210438dfd24cd5b9
-          Head SHA: 4b1d827022f7046b994cf238f3603d03709c6507
+          Base SHA: {os.environ['BASE_SHA']}
+          Head SHA: {os.environ['TARGET_SHA']}
 
           ## Risk
           Fail closed on any governance violation.
@@ -176,7 +214,7 @@ jobs:
           ## Handoff
           Continue only after all five candidate proof jobs are green.
           """
-          event={"pull_request":{"body":body,"base":{"sha":"1692f28ecc21a1cd080a7e374d6b99be485dc0ce"},"head":{"sha":"e063d346237ec6ff00c3ebf2f9b83cd0d67f817a"}}}
+          event={"pull_request":{"body":body,"base":{"sha":os.environ["BASE_SHA"]},"head":{"sha":os.environ["TARGET_SHA"]}}}
           with open("/tmp/omega-pr-event.json","w",encoding="utf-8") as fh:
               json.dump(event,fh)
           PY
