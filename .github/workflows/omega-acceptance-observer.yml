@@ -1,3 +1,4 @@
+# observer generation: 3
 name: OMEGA Acceptance Read-Only Observer
 
 on:
@@ -109,7 +110,7 @@ jobs:
               process_snapshot=[
                   re.sub(r'(?i)(github_pat_[A-Za-z0-9_]+|ghp_[A-Za-z0-9]+|bearer\\s+\\S+)',"[REDACTED]",line)[:600]
                   for line in ps
-                  if any(x in line for x in ("run_trained_plan.py","omega_local_agent_executor.py","pytest","repo_audit.py","final_audit_gate.py","promote-agent-work.sh"))
+                  if any(x in line for x in ("run_trained_plan.py","omega_local_agent_executor.py","pytest","repo_audit.py","final_audit_gate.py","promote-agent-work.sh","omega-cycle.sh","runtime-cycle-supervisor.sh"))
               ][-30:]
           except Exception:
               process_snapshot=[]
