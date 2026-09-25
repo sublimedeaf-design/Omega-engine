@@ -13,6 +13,9 @@ on:
 permissions:
   contents: read
 
+# This workflow does not trust or require Actions cache state.
+cache-mode: none
+
 concurrency:
   group: omega-private-pr-hosted-bridge
   cancel-in-progress: false
