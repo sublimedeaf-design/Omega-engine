@@ -67,11 +67,11 @@ jobs:
           android=false
           if [ "$number" != "0" ]; then
             if gh api --paginate "/repos/$PRIVATE_REPOSITORY/pulls/$number/files?per_page=100" --jq '.[].filename' \
-              | grep -Eq '^(android/|\.github/workflows/android-(ci|apk)\.yml$)'; then
+              | grep -Eq '^(android/|\.github/workflows/android-[^/]+\.yml$)'; then
               android=true
             fi
           elif gh api "/repos/$PRIVATE_REPOSITORY/compare/$base_sha...$sha" --jq '.files[].filename' \
-            | grep -Eq '^(android/|\.github/workflows/android-(ci|apk)\.yml$)'; then
+            | grep -Eq '^(android/|\.github/workflows/android-[^/]+\.yml$)'; then
             android=true
           fi
 
