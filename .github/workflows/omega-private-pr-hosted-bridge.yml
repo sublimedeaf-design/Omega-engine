@@ -15,7 +15,7 @@ permissions:
 
 concurrency:
   group: omega-private-pr-hosted-bridge
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 env:
   PRIVATE_REPOSITORY: sublimedeaf-design/Omega-engines
