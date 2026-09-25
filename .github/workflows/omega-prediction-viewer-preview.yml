@@ -122,6 +122,15 @@ jobs:
               print(name,data.get("generated_at"),data.get("engine_health"),len(data.get("results") or []))
           PY
 
+      - name: Keep bundled predictions visible before optional GitHub linking
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          file=omega/android/app/src/main/java/com/omega/app/MainActivity.java
+          grep -Fq 'if (github.canSync()) sync(false); else startAutomaticConnection();' "$file"
+          sed -i 's/if (github.canSync()) sync(false); else startAutomaticConnection();/if (github.canSync()) sync(false);/' "$file"
+          grep -Fq 'if (github.canSync()) sync(false);' "$file"
+
       - name: Install Android SDK 36
         shell: bash
         run: |
