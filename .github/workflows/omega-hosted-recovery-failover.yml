@@ -13,11 +13,12 @@ permissions:
   contents: read
 
 concurrency:
-  # Routine probes never cancel each other. Explicit exact-candidate probes
-  # supersede stale candidate runs so obsolete SHAs cannot block the newest
-  # failproof validation for tens of minutes.
-  group: omega-hosted-recovery-${{ github.event_name == 'schedule' && 'routine' || 'exact-candidate' }}
-  cancel-in-progress: ${{ github.event_name != 'schedule' }}
+  # Routine schedules serialize together. Explicit push probes are isolated by
+  # their immutable public trigger SHA: a newer probe can never cancel or evict
+  # a frozen release-candidate proof.
+  group: omega-hosted-recovery-${{ github.event_name == 'schedule' && 'routine' || github.sha }}
+  cancel-in-progress: false
+  queue: max
 
 env:
   PRIVATE_REPOSITORY: sublimedeaf-design/Omega-engines
