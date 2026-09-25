@@ -63,7 +63,7 @@ jobs:
                 (.name | startswith("fix/signer-")) or
                 (.name | startswith("hotfix/signer-")) or
                 (.name | startswith("hardening/hosted-signer-continuity-"))
-              )] | .[0] |
+              )] | sort_by(.name) | reverse | .[0] |
               if . == null then "" else [.commit.sha] | @tsv end')"
             if [ -z "$branch_selected" ]; then
               echo "found=false" >> "$GITHUB_OUTPUT"
