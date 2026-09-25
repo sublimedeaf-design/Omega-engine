@@ -56,26 +56,6 @@ jobs:
             exit 0
           fi
 
-          branches="$(gh api "/repos/$PRIVATE_REPOSITORY/branches?per_page=100")"
-          selected_branch="$(printf '%s' "$branches" | jq -r --arg sha "$requested_sha" '
-            [.[] | select(type=="object")
-              | select(.commit.sha==$sha)
-              | select(
-                  (.name|startswith("agent/orchestrator/vm-autonomous-")) or
-                  (.name|startswith("hardening/failproof-")) or
-                  (.name|startswith("fix/signer-")) or
-                  (.name|startswith("hotfix/signer-")) or
-                  (.name|startswith("hardening/hosted-signer-continuity-"))
-                )]
-            | if length==1 then .[0].name
-              elif length==0 then ""
-              else error("OMEGA_EXACT_TRIGGER_BRANCH_AMBIGUOUS") end
-          ')"
-          if [ -z "$selected_branch" ]; then
-            echo "OMEGA_EXACT_TRIGGER_NOT_ON_ALLOWED_BRANCH:$requested_sha" >&2
-            exit 65
-          fi
-
           base_sha="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/main" --jq '.sha')"
           [[ "$base_sha" =~ ^[0-9a-f]{40}$ ]]
           compare="$(gh api "/repos/$PRIVATE_REPOSITORY/compare/$base_sha...$requested_sha")"
@@ -99,7 +79,7 @@ jobs:
             echo "number=0"
             echo "android=$android"
           } >> "$GITHUB_OUTPUT"
-          echo "OMEGA_HOSTED_PR_PIN mode=exact_branch branch=$selected_branch number=0 sha=$requested_sha android=$android"
+          echo "OMEGA_HOSTED_PR_PIN mode=exact_sha number=0 sha=$requested_sha android=$android"
 
   ci:
     needs: discover
