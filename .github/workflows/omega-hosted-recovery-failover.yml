@@ -15,7 +15,7 @@ permissions:
 
 concurrency:
   group: omega-hosted-recovery-failover
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 env:
   PRIVATE_REPOSITORY: sublimedeaf-design/Omega-engines
@@ -204,7 +204,7 @@ jobs:
 
   pre_recovery_failure_status:
     needs: [pin, pre_recovery]
-    if: ${{ always() && needs.pin.outputs.need_run == 'true' && needs.pre_recovery.result != 'success' }}
+    if: ${{ always() && needs.pin.outputs.need_run == 'true' && needs.pre_recovery.result == 'failure' }}
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
