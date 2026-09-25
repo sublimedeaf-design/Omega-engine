@@ -1,0 +1,207 @@
+name: OMEGA Hosted Recovery Failover
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "7,37 * * * *"
+  push:
+    paths:
+      - ".github/workflows/omega-hosted-recovery-failover.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: omega-hosted-recovery-failover
+  cancel-in-progress: false
+
+env:
+  PRIVATE_REPOSITORY: sublimedeaf-design/Omega-engines
+
+jobs:
+  pin:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    outputs:
+      sha: ${{ steps.pin.outputs.sha }}
+      need_run: ${{ steps.pin.outputs.need_run }}
+    steps:
+      - id: pin
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+        shell: bash
+        run: |
+          set +x
+          sha="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/main" --jq '.sha')"
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
+          payload="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/$sha/status")"
+          need_run=true
+          if printf '%s' "$payload" | python3 -c 'import json,sys; d=json.load(sys.stdin); s={x.get("context"):x.get("state") for x in d.get("statuses",[])}; raise SystemExit(0 if s.get("omega/hosted-recovery")=="success" else 1)'; then
+            need_run=false
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "need_run=$need_run" >> "$GITHUB_OUTPUT"
+          echo "OMEGA_HOSTED_RECOVERY_PIN sha=$sha need_run=$need_run"
+
+  pre_recovery:
+    needs: pin
+    if: ${{ needs.pin.outputs.need_run == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+      OMEGA_SOURCE_SHA: ${{ needs.pin.outputs.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: ${{ env.PRIVATE_REPOSITORY }}
+          ref: ${{ env.OMEGA_SOURCE_SHA }}
+          token: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          persist-credentials: false
+          fetch-depth: 0
+          path: omega
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb
+        with:
+          gradle-version: "8.13"
+      - name: Prepare exact hosted runtime
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends build-essential cmake ninja-build pkg-config libcurl4-openssl-dev zstd
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "platforms;android-36" "build-tools;36.0.0" >/dev/null
+          cd omega
+          test "$(git rev-parse HEAD)" = "$OMEGA_SOURCE_SHA"
+          python -m venv .venv
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/python -m pip install -c requirements-ci.lock -e '.[dev,data]'
+          {
+            echo "OMEGA_STATE=$RUNNER_TEMP/omega-state"
+            echo "OMEGA_AUTO_REBUILD=0"
+            echo "OMEGA_LOCAL_BRAIN_CONTEXT=4096"
+            echo "OMEGA_LOCAL_BRAIN_THREADS=4"
+          } >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/omega-state/evidence" "$RUNNER_TEMP/omega-state/logs"
+      - name: Run full exact-SHA pre-recovery acceptance
+        working-directory: omega
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          bash deploy/codespaces/acceptance-test.sh
+          test -s "$OMEGA_STATE/evidence/acceptance-pre-rebuild.json"
+      - name: Record source and VM identity
+        working-directory: omega
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import datetime,json,os,pathlib,subprocess
+          state=pathlib.Path(os.environ["OMEGA_STATE"])/"evidence"
+          source=subprocess.check_output(["git","rev-parse","HEAD"],text=True).strip()
+          payload={
+              "schema_version":1,
+              "source_sha":source,
+              "boot_id":pathlib.Path("/proc/sys/kernel/random/boot_id").read_text().strip(),
+              "github_run_id":os.environ["GITHUB_RUN_ID"],
+              "github_job":os.environ["GITHUB_JOB"],
+              "at":datetime.datetime.now(datetime.timezone.utc).isoformat(),
+          }
+          (state/"hosted-pre-recovery.json").write_text(json.dumps(payload,indent=2)+"\n",encoding="utf-8")
+          PY
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: omega-hosted-recovery-${{ needs.pin.outputs.sha }}
+          path: |
+            ${{ runner.temp }}/omega-state/evidence
+            ${{ runner.temp }}/omega-state/logs/codespaces-acceptance.pass
+          retention-days: 2
+          if-no-files-found: error
+
+  post_recovery:
+    needs: [pin, pre_recovery]
+    if: ${{ always() && needs.pin.outputs.need_run == 'true' && needs.pre_recovery.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+      OMEGA_SOURCE_SHA: ${{ needs.pin.outputs.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: ${{ env.PRIVATE_REPOSITORY }}
+          ref: ${{ env.OMEGA_SOURCE_SHA }}
+          token: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          persist-credentials: false
+          fetch-depth: 0
+          path: omega
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb
+        with:
+          gradle-version: "8.13"
+      - name: Prepare clean recovery VM
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends build-essential cmake ninja-build pkg-config libcurl4-openssl-dev zstd
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "platforms;android-36" "build-tools;36.0.0" >/dev/null
+          cd omega
+          test "$(git rev-parse HEAD)" = "$OMEGA_SOURCE_SHA"
+          python -m venv .venv
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/python -m pip install -c requirements-ci.lock -e '.[dev,data]'
+          echo "OMEGA_STATE=$RUNNER_TEMP/omega-state" >> "$GITHUB_ENV"
+          echo "OMEGA_LOCAL_BRAIN_CONTEXT=4096" >> "$GITHUB_ENV"
+          echo "OMEGA_LOCAL_BRAIN_THREADS=4" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/omega-state/evidence"
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: omega-hosted-recovery-${{ needs.pin.outputs.sha }}
+          path: ${{ runner.temp }}/omega-state
+      - name: Verify clean-environment recovery
+        working-directory: omega
+        shell: bash
+        run: bash deploy/hosted/verify-recovery.sh
+      - name: Publish hosted recovery status
+        if: ${{ always() }}
+        env:
+          RESULT: ${{ job.status }}
+        shell: bash
+        run: |
+          set +x
+          state=failure
+          [ "$RESULT" = success ] && state=success
+          gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$OMEGA_SOURCE_SHA" \
+            -f state="$state" \
+            -f context="omega/hosted-recovery" \
+            -f description="clean two-VM hosted recovery: $RESULT" >/dev/null
+
+  pre_recovery_failure_status:
+    needs: [pin, pre_recovery]
+    if: ${{ always() && needs.pin.outputs.need_run == 'true' && needs.pre_recovery.result != 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Publish pre-recovery failure
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          OMEGA_SOURCE_SHA: ${{ needs.pin.outputs.sha }}
+        shell: bash
+        run: |
+          set +x
+          gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$OMEGA_SOURCE_SHA" \
+            -f state=failure \
+            -f context="omega/hosted-recovery" \
+            -f description="hosted pre-recovery acceptance failed" >/dev/null
