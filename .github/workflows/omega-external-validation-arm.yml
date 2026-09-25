@@ -53,15 +53,25 @@ jobs:
           sha="$(private_api "/repos/$PRIVATE_REPOSITORY/commits/main" | jq -r '.sha // empty')"
           [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "OMEGA_EXTERNAL_ARM_MAIN_SHA_INVALID" >&2; exit 64; }
 
+          policy="$(private_api "/repos/$PRIVATE_REPOSITORY/contents/.omega/external-validation.json?ref=$sha" | jq -r '.content // empty' | tr -d '\n' | base64 -d)"
+          max_age_minutes="$(printf '%s' "$policy" | jq -r '.max_status_age_minutes // 180')"
+          [[ "$max_age_minutes" =~ ^[0-9]+$ ]] && [ "$max_age_minutes" -ge 1 ] && [ "$max_age_minutes" -le 1440 ] || {
+            echo "OMEGA_EXTERNAL_ARM_MAX_AGE_INVALID:$max_age_minutes" >&2
+            exit 65
+          }
+
           statuses="$(private_api "/repos/$PRIVATE_REPOSITORY/commits/$sha/status?per_page=100")"
-          read -r core_green external_complete < <(printf '%s' "$statuses" | python3 -c '
-          import json,sys
-          p=json.load(sys.stdin)
+          read -r core_green external_complete < <(STATUS_PAYLOAD="$statuses" MAX_AGE_MINUTES="$max_age_minutes" python3 <<'PY'
+          import datetime,json,os
+          p=json.loads(os.environ["STATUS_PAYLOAD"])
+          max_age=int(os.environ["MAX_AGE_MINUTES"])
+          now=datetime.datetime.now(datetime.timezone.utc)
           latest={}
           for row in p.get("statuses",[]):
-              c=str(row.get("context") or "")
-              if c and c not in latest:
-                  latest[c]=str(row.get("state") or "")
+              context=str(row.get("context") or "")
+              stamp=str(row.get("updated_at") or row.get("created_at") or "")
+              if context and (context not in latest or stamp > str(latest[context].get("_stamp") or "")):
+                  latest[context]={**row,"_stamp":stamp}
           hosted=[
               "omega/hosted-ci/python311","omega/hosted-ci/python313",
               "omega/hosted-ci/python314","omega/hosted-ci/storage",
@@ -76,10 +86,22 @@ jobs:
               "omega/external/render/python314","omega/external/render/storage",
               "omega/external/render/governance",
           ]
-          core=all(latest.get(x)=="success" for x in hosted)
-          complete=core and all(latest.get(x)=="success" for x in external)
+          def fresh_success(context):
+              row=latest.get(context)
+              if not row or row.get("state")!="success":
+                  return False
+              raw=str(row.get("updated_at") or row.get("created_at") or "")
+              try:
+                  at=datetime.datetime.fromisoformat(raw.replace("Z","+00:00"))
+              except ValueError:
+                  return False
+              age=(now-at).total_seconds()
+              return -300 <= age <= max_age*60
+          core=all(fresh_success(x) for x in hosted)
+          complete=core and all(fresh_success(x) for x in external)
           print("true" if core else "false","true" if complete else "false")
-          ')
+          PY
+          )
 
           if [ "$core_green" != true ]; then
             echo "OMEGA_EXTERNAL_ARM_WAIT_HOSTED_CORE sha=$sha"
