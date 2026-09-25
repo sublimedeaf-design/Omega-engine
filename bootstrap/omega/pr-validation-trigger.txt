@@ -1,1 +1,1 @@
-trigger hosted runtime handoff validation 257
+validate-exact-pr ef4e56f2ac2bffe7cda19208cca0ef9af5daa735
