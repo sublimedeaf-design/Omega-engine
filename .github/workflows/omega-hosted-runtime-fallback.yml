@@ -94,7 +94,8 @@ jobs:
       OMEGA_SHA: ${{ needs.discover.outputs.sha }}
       OMEGA_MODE: ${{ needs.discover.outputs.mode }}
       OMEGA_BOOTSTRAP_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
-      OMEGA_ODDS_API_KEY: ${{ secrets.OMEGA_ODDS_API_KEY }}
+      # Shadow redundancy must stay zero-cost and must not consume paid/provider
+      # quota. The cycle is explicitly allowed to use public provider fallbacks.
     steps:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
