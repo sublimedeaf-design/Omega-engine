@@ -1,1 +1,1 @@
-recover-exact 7837bc2ef8cd11bb7c00ac958033fe3733f6fb45 hardening/failproof-dual-localbrain-recovery-20260925 bounded-recovery-contract-v7
+recover-exact 4fc99786c67f249ca9f8426b1c564ee65fa83394 hardening/recovery-contract-hash-source-20260925 recovery-contract-sha-bound-v1
