@@ -39,8 +39,8 @@ jobs:
           row=""
           pr_rc=0
           set +e
-          row="$(gh api "/repos/$PRIVATE_REPOSITORY/pulls?state=open&per_page=100" 2>/tmp/omega-pr-discovery.err \
-            --jq '[.[] | select((.head.ref | startswith("agent/orchestrator/vm-autonomous-")) or (.head.ref | startswith("hardening/failproof-")))] | sort_by(.updated_at) | reverse | .[0] // empty')"
+          row="$(gh api --paginate "/repos/$PRIVATE_REPOSITORY/pulls?state=open&per_page=100" 2>/tmp/omega-pr-discovery.err \
+            | jq -cs 'add | [.[] | select((.head.ref | startswith("agent/orchestrator/vm-autonomous-")) or (.head.ref | startswith("hardening/failproof-")))] | sort_by([(if (.head.ref | startswith("hardening/failproof-")) then 1 else 0 end), .updated_at]) | reverse | .[0] // empty')"
           pr_rc=$?
           set -e
 
@@ -50,8 +50,8 @@ jobs:
             number="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["number"])' <<<"$row")"
             mode="pull"
           else
-            branch_row="$(gh api "/repos/$PRIVATE_REPOSITORY/branches?per_page=100" \
-              --jq '[.[] | select((.name | startswith("agent/orchestrator/vm-autonomous-")) or (.name | startswith("hardening/failproof-")))] | sort_by(.name) | reverse | .[0] // empty')"
+            branch_row="$(gh api --paginate "/repos/$PRIVATE_REPOSITORY/branches?per_page=100" \
+              | jq -cs 'add | [.[] | select((.name | startswith("agent/orchestrator/vm-autonomous-")) or (.name | startswith("hardening/failproof-")))] | sort_by([(if (.name | startswith("hardening/failproof-")) then 1 else 0 end), .name]) | reverse | .[0] // empty')"
             if [ -z "$branch_row" ]; then
               echo "found=false" >> "$GITHUB_OUTPUT"
               echo "OMEGA_HOSTED_PR_NONE pr_rc=$pr_rc"
