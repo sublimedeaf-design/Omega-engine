@@ -116,7 +116,7 @@ jobs:
           ref: ${{ needs.discover.outputs.sha }}
           token: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
           persist-credentials: false
-          fetch-depth: 0
+          fetch-depth: 1
           path: srcdir
       - name: Run lane
         working-directory: srcdir
@@ -205,7 +205,7 @@ jobs:
           ref: ${{ needs.discover.outputs.sha }}
           token: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
           persist-credentials: false
-          fetch-depth: 0
+          fetch-depth: 1
           path: srcdir
       - name: Validate governance
         working-directory: srcdir
