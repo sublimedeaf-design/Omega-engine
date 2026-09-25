@@ -45,22 +45,7 @@ jobs:
           pr_rc=$?
           set -e
 
-          explicit_sha=""
-          gh api "/repos/$PRIVATE_REPOSITORY/contents/bootstrap/omega/pr-validation-trigger.txt?ref=main" --jq '.content' 2>/dev/null | tr -d '\n' | base64 --decode > /tmp/omega-pr-validation-trigger.txt 2>/dev/null || true
-          trigger_file="/tmp/omega-pr-validation-trigger.txt"
-          if [ -s "$trigger_file" ]; then
-            explicit_sha="$(grep -Eo '[0-9a-f]{40}' "$trigger_file" | tail -1 || true)"
-          fi
-          if [ -n "$explicit_sha" ]; then
-            explicit_pr="$(gh api --paginate "/repos/$PRIVATE_REPOSITORY/pulls?state=open&per_page=100"               | jq -cs --arg sha "$explicit_sha" 'add | [.[] | select(.head.sha == $sha)] | .[0] // empty')"
-            if [ -n "$explicit_pr" ]; then
-              row="$explicit_pr"
-              pr_rc=0
-              echo "OMEGA_HOSTED_PR_EXPLICIT sha=$explicit_sha"
-            fi
-          fi
-
-          if [ "$pr_rc" -eq 0 ] && [ -n "$row" ]; then
+          # Explicit validation triggers live only in this public helper.\n          # Private-repo discovery remains read-only and prefix constrained.\n          if [ "$pr_rc" -eq 0 ] && [ -n "$row" ]; then
             sha="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["head"]["sha"])' <<<"$row")"
             base_sha="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["base"]["sha"])' <<<"$row")"
             number="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["number"])' <<<"$row")"
