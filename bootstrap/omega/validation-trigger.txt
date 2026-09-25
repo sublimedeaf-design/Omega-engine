@@ -1,2 +1,2 @@
-private_main=47eff09ce20f384ae352db8315f61144cbebbc44
-purpose=validate-schema-constrained-localbrain-protocol
+private_main=ba7dc31c15a3ae3686e24d7dc07b11500781b750
+purpose=validate-hosted-recovery-failover-and-quota-independent-control-plane
