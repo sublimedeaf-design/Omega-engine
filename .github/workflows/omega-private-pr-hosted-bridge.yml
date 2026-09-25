@@ -41,7 +41,7 @@ jobs:
           pr_rc=0
           set +e
           row="$(gh api --paginate "/repos/$PRIVATE_REPOSITORY/pulls?state=open&per_page=100" 2>/tmp/omega-pr-discovery.err \
-            | jq -cs 'add | [.[] | select((.head.ref | startswith("agent/orchestrator/vm-autonomous-")) or ((.head.ref | startswith("hardening/failproof-") or startswith("fix/signer-") or startswith("hotfix/signer-")) or ((.head.ref | startswith("hardening/hosted-signer-continuity-")) or (.head.ref | startswith("hotfix/signer-")))))] | sort_by(.updated_at) | reverse | .[0] // empty')"
+            | jq -s 'add | [.[] | select((.head.ref | startswith("agent/orchestrator/vm-autonomous-")) or ((.head.ref | startswith("hardening/failproof-") or startswith("fix/signer-") or startswith("hotfix/signer-")) or ((.head.ref | startswith("hardening/hosted-signer-continuity-")) or (.head.ref | startswith("hotfix/signer-")))))] | sort_by(.updated_at) | reverse | .[0] // empty')"
           pr_rc=$?
           set -e
 
