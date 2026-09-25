@@ -84,7 +84,7 @@ jobs:
                               "status":v.get("status"),
                               "attempts":v.get("attempts"),
                               "worker_id":v.get("worker_id"),
-                              "last_error":str(v.get("last_error") or "")[:300],
+                              "error":str(v.get("error") or "")[:600],
                           } for k,v in tasks.items() if isinstance(v,dict)}
                       }
               except Exception as exc:
