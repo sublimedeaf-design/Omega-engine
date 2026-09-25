@@ -60,6 +60,14 @@ jobs:
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
           echo "ready=$ready" >> "$GITHUB_OUTPUT"
           echo "OMEGA_EXTERNAL_PIN sha=$sha hosted_core_green=$ready"
+          if [ "$ready" = true ]; then
+            target="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$sha" \
+              -f state=success \
+              -f context="omega/control-plane/source-pin" \
+              -f description="direct validator pinned current exact main SHA" \
+              -f target_url="$target" >/dev/null
+          fi
 
   github_provider:
     needs: discover
@@ -209,3 +217,33 @@ jobs:
               -f description="Render exact-SHA $suite validator: $RESULT" \
               -f target_url="$target" >/dev/null
           done
+
+  finalize:
+    needs: [discover, github_provider, render_provider]
+    if: ${{ always() && needs.discover.outputs.ready == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Publish direct-dispatch control-plane result
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          SHA: ${{ needs.discover.outputs.sha }}
+          GITHUB_PROVIDER_RESULT: ${{ needs.github_provider.result }}
+          RENDER_PROVIDER_RESULT: ${{ needs.render_provider.result }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          set +x
+          state=failure
+          description="direct exact-SHA external dispatch failed"
+          if [ "$GITHUB_PROVIDER_RESULT" = success ] && [ "$RENDER_PROVIDER_RESULT" = success ]; then
+            state=success
+            description="direct exact-SHA GitHub plus Render dispatch green"
+          fi
+          target="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$SHA" \
+            -f state="$state" \
+            -f context="omega/control-plane/direct-dispatch" \
+            -f description="$description" \
+            -f target_url="$target" >/dev/null
+          [ "$state" = success ]
