@@ -1,1 +1,1 @@
-validate-signer-hotfix ba39ad8d88eb7d439a3e1aabb95613d8288000ee
+validate-signer-hotfix 74c6e3a5160ed5264b21e2efafa9841e92275233
