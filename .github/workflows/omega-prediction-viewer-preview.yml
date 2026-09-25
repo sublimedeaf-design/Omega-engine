@@ -1,0 +1,183 @@
+name: OMEGA Prediction Viewer Preview
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/omega-prediction-viewer-preview.yml"
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: omega-prediction-viewer-preview
+  cancel-in-progress: true
+
+env:
+  PRIVATE_REPOSITORY: sublimedeaf-design/Omega-engines
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - name: Resolve exact private main and latest hosted evidence
+        id: source
+        env:
+          PRIVATE_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          PUBLIC_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          set +x
+          private_sha="$(GH_TOKEN="$PRIVATE_TOKEN" gh api "/repos/$PRIVATE_REPOSITORY/commits/main" --jq '.sha')"
+          [[ "$private_sha" =~ ^[0-9a-f]{40}$ ]] || exit 64
+
+          artifacts="$(GH_TOKEN="$PUBLIC_TOKEN" gh api "/repos/$GITHUB_REPOSITORY/actions/artifacts?per_page=100")"
+          pick() {
+            local mode="$1"
+            printf '%s' "$artifacts" | python3 -c '
+          import json,sys
+          mode=sys.argv[1]
+          p=json.load(sys.stdin)
+          prefix=f"omega-runtime-handoff-{mode}-"
+          rows=[x for x in p.get("artifacts",[]) if not x.get("expired") and str(x.get("name") or "").startswith(prefix)]
+          rows.sort(key=lambda x:str(x.get("created_at") or ""), reverse=True)
+          print(rows[0].get("id","") if rows else "")
+          ' "$mode"
+          }
+          t24_id="$(pick t24)"
+          t60_id="$(pick t60)"
+          [ -n "$t24_id" ] || { echo "OMEGA_VIEWER_T24_ARTIFACT_MISSING" >&2; exit 65; }
+          [ -n "$t60_id" ] || { echo "OMEGA_VIEWER_T60_ARTIFACT_MISSING" >&2; exit 66; }
+          {
+            echo "private_sha=$private_sha"
+            echo "t24_id=$t24_id"
+            echo "t60_id=$t60_id"
+          } >> "$GITHUB_OUTPUT"
+          echo "OMEGA_VIEWER_SOURCE_RESOLVED sha=$private_sha t24=$t24_id t60=$t60_id"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: ${{ env.PRIVATE_REPOSITORY }}
+          ref: ${{ steps.source.outputs.private_sha }}
+          token: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          persist-credentials: false
+          fetch-depth: 1
+          path: omega
+
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb
+        with:
+          gradle-version: "8.13"
+          cache-disabled: true
+
+      - name: Restore freshest hosted T24 and T60 evidence into the app
+        env:
+          GH_TOKEN: ${{ github.token }}
+          T24_ID: ${{ steps.source.outputs.t24_id }}
+          T60_ID: ${{ steps.source.outputs.t60_id }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p "$RUNNER_TEMP/t24" "$RUNNER_TEMP/t60" omega/android/app/src/main/assets/evidence
+          gh api "/repos/$GITHUB_REPOSITORY/actions/artifacts/$T24_ID/zip" > "$RUNNER_TEMP/t24.zip"
+          gh api "/repos/$GITHUB_REPOSITORY/actions/artifacts/$T60_ID/zip" > "$RUNNER_TEMP/t60.zip"
+          unzip -q "$RUNNER_TEMP/t24.zip" -d "$RUNNER_TEMP/t24"
+          unzip -q "$RUNNER_TEMP/t60.zip" -d "$RUNNER_TEMP/t60"
+
+          one() {
+            local root="$1" name="$2"
+            mapfile -t hits < <(find "$root" -type f -name "$name" -print)
+            [ "${#hits[@]}" -eq 1 ] || { echo "OMEGA_VIEWER_EVIDENCE_AMBIGUOUS:$name:${#hits[@]}" >&2; exit 67; }
+            printf '%s' "${hits[0]}"
+          }
+
+          cp "$(one "$RUNNER_TEMP/t24" latest-24h.json)" omega/android/app/src/main/assets/evidence/latest-24h.json
+          cp "$(one "$RUNNER_TEMP/t24" coverage-gaps.json)" omega/android/app/src/main/assets/evidence/coverage-gaps.json
+          cp "$(one "$RUNNER_TEMP/t60" latest-t60.json)" omega/android/app/src/main/assets/evidence/latest-t60.json
+
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          root=Path("omega/android/app/src/main/assets/evidence")
+          for name in ("latest-24h.json","latest-t60.json","coverage-gaps.json"):
+              p=root/name
+              data=json.loads(p.read_text(encoding="utf-8"),parse_constant=lambda x: (_ for _ in ()).throw(ValueError(x)))
+              if not isinstance(data,dict):
+                  raise SystemExit(f"OMEGA_VIEWER_EVIDENCE_NOT_OBJECT:{name}")
+              print(name,data.get("generated_at"),data.get("engine_health"),len(data.get("results") or []))
+          PY
+
+      - name: Install Android SDK 36
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for attempt in 1 2 3; do
+            if "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "platforms;android-36" "build-tools;36.0.0" >/dev/null; then
+              exit 0
+            fi
+            sleep $((attempt * 5))
+          done
+          exit 75
+
+      - name: Build installable hosted prediction viewer
+        env:
+          OMEGA_SOURCE_SHA: ${{ steps.source.outputs.private_sha }}
+        working-directory: omega/android
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          gradle --no-daemon --stacktrace lintDebug assembleDebug
+          apk=app/build/outputs/apk/debug/app-debug.apk
+          test -s "$apk"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose "$apk"
+          mkdir -p ../../dist
+          cp "$apk" ../../dist/OMEGA-Prediction-Viewer.apk
+          cd ../..
+          sha256sum dist/OMEGA-Prediction-Viewer.apk > dist/OMEGA-Prediction-Viewer.apk.sha256
+          python3 - <<'PY'
+          import hashlib,json,os
+          from datetime import datetime,timezone
+          from pathlib import Path
+          apk=Path("dist/OMEGA-Prediction-Viewer.apk")
+          h=hashlib.sha256(apk.read_bytes()).hexdigest()
+          def load(name):
+              return json.loads((Path("android/app/src/main/assets/evidence")/name).read_text(encoding="utf-8"))
+          t24=load("latest-24h.json"); t60=load("latest-t60.json")
+          payload={
+              "schema_version":1,
+              "build_kind":"hosted_debug_prediction_viewer",
+              "private_source_sha":os.environ["OMEGA_SOURCE_SHA"],
+              "apk_sha256":h,
+              "built_at":datetime.now(timezone.utc).isoformat(),
+              "t24_generated_at":t24.get("generated_at"),
+              "t60_generated_at":t60.get("generated_at"),
+              "release_authority":False,
+              "purpose":"immediately installable read-only prediction viewer while canonical signed release is being certified",
+          }
+          Path("dist/OMEGA-Prediction-Viewer.provenance.json").write_text(json.dumps(payload,indent=2,sort_keys=True)+"\n",encoding="utf-8")
+          PY
+
+      - name: Publish private preview release
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          SOURCE_SHA: ${{ steps.source.outputs.private_sha }}
+        working-directory: omega
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          set +x
+          short="${SOURCE_SHA:0:12}"
+          tag="omega-prediction-viewer-preview-$short"
+          if gh release view "$tag" --repo "$PRIVATE_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$tag"               dist/OMEGA-Prediction-Viewer.apk               dist/OMEGA-Prediction-Viewer.apk.sha256               dist/OMEGA-Prediction-Viewer.provenance.json               --repo "$PRIVATE_REPOSITORY" --clobber
+          else
+            gh release create "$tag"               dist/OMEGA-Prediction-Viewer.apk               dist/OMEGA-Prediction-Viewer.apk.sha256               dist/OMEGA-Prediction-Viewer.provenance.json               --repo "$PRIVATE_REPOSITORY"               --target "$SOURCE_SHA"               --title "OMEGA Prediction Viewer Preview $short"               --notes "Hosted read-only preview APK with the freshest available T24/T60 handoff evidence. This is not the canonical production-signed release."               --prerelease
+          fi
+          echo "OMEGA_VIEWER_RELEASE=https://github.com/$PRIVATE_REPOSITORY/releases/tag/$tag"
