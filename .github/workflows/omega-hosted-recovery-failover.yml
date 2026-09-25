@@ -12,6 +12,11 @@ on:
 permissions:
   contents: read
 
+# Recovery consumes caches as untrusted acceleration only. Never allow this
+# proof workflow to publish/overwrite cache entries; model bytes are still
+# SHA-256 verified before execution.
+cache-mode: read
+
 concurrency:
   # Serialize explicit recovery proofs and keep their queue. The pin job rejects
   # stale trigger revisions, preventing cancellation livelock and redundant
