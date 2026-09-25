@@ -45,14 +45,14 @@ jobs:
           pr_rc=$?
           set -e
 
-          # Explicit validation triggers live only in this public helper.\n          # Private-repo discovery remains read-only and prefix constrained.\n          if [ "$pr_rc" -eq 0 ] && [ -n "$row" ]; then
+          # Private-repo discovery remains read-only and prefix constrained.\n          if [ "$pr_rc" -eq 0 ] && [ -n "$row" ]; then
             sha="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["head"]["sha"])' <<<"$row")"
             base_sha="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["base"]["sha"])' <<<"$row")"
             number="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["number"])' <<<"$row")"
             mode="pull"
           else
             branch_row="$(gh api --paginate "/repos/$PRIVATE_REPOSITORY/branches?per_page=100" \
-              | jq -cs 'add | [.[] | select((.name | startswith("agent/orchestrator/vm-autonomous-")) or ((.name | startswith("hardening/failproof-")) or ((.name | startswith("hardening/hosted-signer-continuity-")) or (.name | startswith("hotfix/signer-")))))] | sort_by(.commit.commit.committer.date) | reverse | .[0] // empty')"
+              | jq -s 'add | [.[] | select((.name | startswith("agent/orchestrator/vm-autonomous-")) or ((.name | startswith("hardening/failproof-")) or ((.name | startswith("hardening/hosted-signer-continuity-")) or (.name | startswith("hotfix/signer-")))))] | sort_by(.commit.commit.committer.date) | reverse | .[0] // empty')"
             if [ -z "$branch_row" ]; then
               echo "found=false" >> "$GITHUB_OUTPUT"
               echo "OMEGA_HOSTED_PR_NONE pr_rc=$pr_rc"
