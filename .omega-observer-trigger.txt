@@ -1,2 +1,2 @@
-probe=runtime-recovery-state-before-fixed-bootstrap
+probe=d6-acceptance-after-agent-smoke
 private_main=d6b02b6c23e573253bb13c893072f229bb4b8fff
