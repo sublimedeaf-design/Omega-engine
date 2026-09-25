@@ -107,8 +107,9 @@ async function postPrivateStatus(token, sha, state, description, targetUrl) {
   });
 }
 
-export async function reconcile({token, provider="unknown", targetUrl="", nowMs=Date.now()} = {}) {
+export async function reconcile({token, ledgerToken=token, provider="unknown", targetUrl="", nowMs=Date.now()} = {}) {
   if (!token) throw new Error("OMEGA_GITHUB_TOKEN_MISSING");
+  if (!ledgerToken) throw new Error("OMEGA_LEDGER_TOKEN_MISSING");
 
   const main = await gh(token, `/repos/${PRIVATE_REPO}/commits/main`);
   const sha = String(main.sha || "");
@@ -153,7 +154,7 @@ export async function reconcile({token, provider="unknown", targetUrl="", nowMs=
     return {ok:true, action:"current", sha, provider, android:false};
   }
 
-  const comments = await gh(token, `/repos/${HELPER_REPO}/issues/${LEDGER_ISSUE}/comments?per_page=100`);
+  const comments = await gh(ledgerToken, `/repos/${HELPER_REPO}/issues/${LEDGER_ISSUE}/comments?per_page=100`);
   const budget = parseLedger(Array.isArray(comments) ? comments : [], nowMs);
   if (!budget.allowed) {
     await postPrivateStatus(token, sha, "pending", "external validation budget/cooldown active", targetUrl);
@@ -165,7 +166,7 @@ export async function reconcile({token, provider="unknown", targetUrl="", nowMs=
   if (needAndroid) result.android = await updateRef(token, ANDROID_REF, sha, androidOld);
 
   const at = new Date(nowMs).toISOString().replace(".000Z","Z");
-  await gh(token, `/repos/${HELPER_REPO}/issues/${LEDGER_ISSUE}/comments`, {
+  await gh(ledgerToken, `/repos/${HELPER_REPO}/issues/${LEDGER_ISSUE}/comments`, {
     method:"POST",
     headers:{"content-type":"application/json"},
     body:JSON.stringify({body:`OMEGA_EXTERNAL_DISPATCH at=${at} android=${needAndroid}`}),
