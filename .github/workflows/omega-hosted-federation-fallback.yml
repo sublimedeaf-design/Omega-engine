@@ -8,13 +8,15 @@ on:
   push:
     paths:
       - ".github/workflows/omega-hosted-federation-fallback.yml"
+      - "bootstrap/omega/federation-trigger.txt"
 
 permissions:
   contents: read
 
 concurrency:
   group: omega-hosted-federation-fallback
-  cancel-in-progress: true
+  cancel-in-progress: false
+  queue: max
 
 env:
   PRIVATE_REPOSITORY: sublimedeaf-design/Omega-engines
@@ -35,10 +37,30 @@ jobs:
           set +x
           sha="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/main" --jq '.sha')"
           [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
+          statuses="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/$sha/status?per_page=100")"
+          need_run="$(printf '%s' "$statuses" | python3 -c '
+          import json,sys
+          p=json.load(sys.stdin)
+          latest={}
+          for row in p.get("statuses",[]):
+              ctx=str(row.get("context") or "")
+              if ctx and ctx not in latest:
+                  latest[ctx]=str(row.get("state") or "")
+          required=[
+              "omega-runtime/main-exact",
+              "omega-federation/peer-http-5x",
+              "omega-federation/exact-sha-executor",
+              "omega-federation/evidence-verifier",
+              "omega-federation/evidence-publish",
+          ]
+          print("false" if all(latest.get(x)=="success" for x in required) else "true")
+          ')"
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
-          echo "OMEGA_HOSTED_FEDERATION_PIN sha=$sha"
+          echo "need_run=$need_run" >> "$GITHUB_OUTPUT"
+          echo "OMEGA_HOSTED_FEDERATION_PIN sha=$sha need_run=$need_run"
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        if: ${{ steps.pin.outputs.need_run == 'true' }}
         with:
           repository: ${{ env.PRIVATE_REPOSITORY }}
           ref: ${{ steps.pin.outputs.sha }}
@@ -48,10 +70,12 @@ jobs:
           path: omega
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        if: ${{ steps.pin.outputs.need_run == 'true' }}
         with:
           python-version: "3.13"
 
       - name: Verify exact main and peer authorization
+        if: ${{ steps.pin.outputs.need_run == 'true' }}
         working-directory: omega
         shell: bash
         env:
@@ -96,6 +120,7 @@ jobs:
           PY
 
       - name: Run exact peer executor
+        if: ${{ steps.pin.outputs.need_run == 'true' }}
         id: exec
         working-directory: omega
         shell: bash
@@ -134,6 +159,7 @@ jobs:
           PY
 
       - name: Independent hosted verifier
+        if: ${{ steps.pin.outputs.need_run == 'true' }}
         working-directory: omega
         shell: bash
         env:
@@ -169,7 +195,7 @@ jobs:
           PY
 
       - name: Publish exact-main federation stages
-        if: ${{ always() }}
+        if: ${{ always() && steps.pin.outputs.need_run == 'true' }}
         shell: bash
         env:
           SOURCE_SHA: ${{ steps.pin.outputs.sha }}
