@@ -164,7 +164,20 @@ jobs:
           Path("dist/OMEGA-Prediction-Viewer.provenance.json").write_text(json.dumps(payload,indent=2,sort_keys=True)+"\n",encoding="utf-8")
           PY
 
+      - name: Upload installable viewer artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: OMEGA-Prediction-Viewer-${{ steps.source.outputs.private_sha }}
+          path: |
+            omega/dist/OMEGA-Prediction-Viewer.apk
+            omega/dist/OMEGA-Prediction-Viewer.apk.sha256
+            omega/dist/OMEGA-Prediction-Viewer.provenance.json
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+
       - name: Publish private preview release
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
           SOURCE_SHA: ${{ steps.source.outputs.private_sha }}
