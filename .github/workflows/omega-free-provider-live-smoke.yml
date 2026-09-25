@@ -44,6 +44,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          export PYTHONPATH="$PWD/src"
           python - <<'PY'
           import json
           from datetime import datetime, timezone
