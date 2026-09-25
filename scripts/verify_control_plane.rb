@@ -58,7 +58,7 @@ end
 recovery_path = WORKFLOWS.join("omega-hosted-recovery-failover.yml")
 recovery = File.read(recovery_path, encoding: "UTF-8")
 {
-  "stale_pr_head_guard" => "OMEGA_RECOVERY_TRIGGER_NOT_OPEN_PR_HEAD",
+  "stale_ref_tip_guard" => "OMEGA_RECOVERY_TRIGGER_NOT_REF_TIP",
   "latest_candidate_supersedes_stale" => "cancel-in-progress: ${{ github.event_name != 'schedule' }}",
   "worker_model_pin" => "cc324af070c2ecbfd324a30884d2f951a7ff756aba85cb811a6ec436933bb046",
   "qa_model_pin" => "1d9614638d18024d0fbb36575a15f1302a3adf044df10345688ec4f6e1c4ff32",
@@ -72,6 +72,6 @@ end
 fail!("recovery_must_not_continue_on_error") if recovery.include?("continue-on-error: true")
 
 pr_bridge = File.read(WORKFLOWS.join("omega-private-pr-hosted-bridge.yml"), encoding: "UTF-8")
-fail!("pr_bridge_stale_head_guard_missing") unless pr_bridge.include?("OMEGA_EXACT_TRIGGER_NOT_OPEN_PR_HEAD")
+fail!("pr_bridge_stale_ref_guard_missing") unless pr_bridge.include?("OMEGA_EXACT_TRIGGER_NOT_REF_TIP")
 
 puts "OMEGA_CONTROL_PLANE_INTEGRITY_GREEN workflows=#{files.length}"
