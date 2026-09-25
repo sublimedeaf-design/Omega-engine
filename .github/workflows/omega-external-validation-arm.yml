@@ -112,17 +112,21 @@ jobs:
             exit 0
           fi
 
-          # Avoid duplicate dispatch while a direct validator is queued/running.
-          active="$(gh api "/repos/$PUBLIC_REPOSITORY/actions/workflows/omega-external-validator-dispatch.yml/runs?per_page=20" \
-            --jq '[.workflow_runs[] | select(.status=="queued" or .status=="in_progress" or .status=="pending")] | length')"
+          dispatch_ref="${GITHUB_REF_NAME:-main}"
+
+          # Avoid duplicate dispatch only for this helper ref. A main validation
+          # must not suppress independent support-branch proof, and vice versa.
+          active="$(gh api "/repos/$PUBLIC_REPOSITORY/actions/workflows/omega-external-validator-dispatch.yml/runs?per_page=50" \
+            --jq '[.workflow_runs[] | select(.head_branch=="'"$dispatch_ref"'" and (.status=="queued" or .status=="in_progress" or .status=="pending"))] | length')"
           if [ "$active" != 0 ]; then
-            echo "OMEGA_EXTERNAL_ARM_ACTIVE sha=$sha active=$active"
+            echo "OMEGA_EXTERNAL_ARM_ACTIVE sha=$sha ref=$dispatch_ref active=$active"
             exit 0
           fi
 
-          # Bound retries to one dispatch per 15 minutes after a failed/incomplete run.
-          latest_created="$(gh api "/repos/$PUBLIC_REPOSITORY/actions/workflows/omega-external-validator-dispatch.yml/runs?per_page=1" \
-            --jq '.workflow_runs[0].created_at // empty')"
+          # Bound retries per helper ref to one dispatch per 15 minutes after
+          # a failed/incomplete run.
+          latest_created="$(gh api "/repos/$PUBLIC_REPOSITORY/actions/workflows/omega-external-validator-dispatch.yml/runs?per_page=50" \
+            --jq '[.workflow_runs[] | select(.head_branch=="'"$dispatch_ref"'")][0].created_at // empty')"
           if [ -n "$latest_created" ]; then
             set +e
             python3 - "$latest_created" <<'PY'
@@ -140,7 +144,6 @@ jobs:
             [ "$rc" -eq 0 ] || exit "$rc"
           fi
 
-          dispatch_ref="${GITHUB_REF_NAME:-main}"
           gh api --method POST "/repos/$PUBLIC_REPOSITORY/actions/workflows/omega-external-validator-dispatch.yml/dispatches" \
             -f ref="$dispatch_ref" >/dev/null
           echo "OMEGA_EXTERNAL_ARM_DISPATCHED sha=$sha mode=public-workflow-dispatch ref=$dispatch_ref"
