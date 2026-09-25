@@ -1,1 +1,1 @@
-validate-pr 252 e1eb20e9092ce9c6d08f5dcc6bbb2ef8ca1cc3ef
+trigger hosted pr discovery retry=3
