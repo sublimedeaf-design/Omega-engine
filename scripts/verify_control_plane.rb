@@ -70,7 +70,8 @@ recovery = File.read(recovery_path, encoding: "UTF-8")
   "hard_missing_artifact_failure" => "if-no-files-found: error",
   "failure_diagnostics_preserved" => "Preserve failed pre-recovery diagnostics",
   "model_only_cache_restore" => "actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9",
-  "gradle_cache_disabled" => "cache-disabled: true",
+  "workflow_cache_restore_only" => "cache-mode: read",
+  "gradle_cache_restore_only" => "cache-read-only: true",
   "two_vm_post_recovery" => "post_recovery:",
   "bounded_job_timeout" => "timeout-minutes: 90"
 }.each do |name, needle|
