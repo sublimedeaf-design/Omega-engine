@@ -21,7 +21,7 @@ concurrency:
   # Serialize explicit recovery proofs and keep their queue. The pin job rejects
   # stale trigger revisions, preventing cancellation livelock and redundant
   # parallel recovery jobs from exhausting hosted-runner capacity.
-  group: omega-hosted-recovery-${{ github.event_name == 'schedule' && 'routine' || 'exact-candidate' }}
+  group: omega-hosted-recovery-v2-${{ github.event_name == 'schedule' && 'routine' || 'exact-candidate' }}
   cancel-in-progress: false
   queue: max
 
