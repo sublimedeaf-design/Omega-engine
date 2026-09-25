@@ -31,7 +31,7 @@ def check_duplicate_keys(node, file, path = [])
       end
     end
   elsif node.respond_to?(:children)
-    node.children.each { |child| check_duplicate_keys(child, file, path) if child }
+    Array(node.children).each { |child| check_duplicate_keys(child, file, path) if child }
   end
 end
 
