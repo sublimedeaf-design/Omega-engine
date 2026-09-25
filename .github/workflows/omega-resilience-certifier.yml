@@ -1,0 +1,32 @@
+name: OMEGA Resilience Certifier
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "11,26,41,56 * * * *"
+  push:
+    paths:
+      - "control-plane/certify.mjs"
+      - "control-plane/certify-github.mjs"
+      - ".github/workflows/omega-resilience-certifier.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: omega-resilience-certifier
+  cancel-in-progress: true
+
+jobs:
+  certify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Certify current exact-main resilience evidence
+        env:
+          OMEGA_GITHUB_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          OMEGA_CERTIFIER_TARGET_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: node control-plane/certify-github.mjs
