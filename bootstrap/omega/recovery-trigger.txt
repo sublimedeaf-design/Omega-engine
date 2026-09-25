@@ -1,1 +1,1 @@
-recover-exact 94ccdbd9d44bc64c7a9c50ee18bfdcae4b62e1b8 hardening/failproof-dual-localbrain-recovery-20260925 cache-read-signer-none-token-scope-v3
+recover-exact 3c6170e73e13023808278c2f89b0d449bda0a605 hardening/failproof-dual-localbrain-recovery-20260925 llama-schema-fix-v4
