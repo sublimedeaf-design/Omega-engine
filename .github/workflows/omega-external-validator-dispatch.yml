@@ -18,6 +18,7 @@ permissions:
 concurrency:
   group: omega-external-validator-dispatch
   cancel-in-progress: false
+  queue: max
 
 env:
   PRIVATE_REPOSITORY: sublimedeaf-design/Omega-engines
@@ -28,6 +29,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       ready: ${{ steps.pin.outputs.ready }}
+      need_run: ${{ steps.pin.outputs.need_run }}
       sha: ${{ steps.pin.outputs.sha }}
     steps:
       - id: pin
@@ -40,7 +42,7 @@ jobs:
           sha="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/main" --jq '.sha')"
           [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
           statuses="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/$sha/status?per_page=100")"
-          ready="$(printf '%s' "$statuses" | python3 -c '
+          read -r ready need_run < <(printf '%s' "$statuses" | python3 -c '
           import json,sys
           p=json.load(sys.stdin)
           latest={}
@@ -48,19 +50,36 @@ jobs:
               c=str(row.get("context") or "")
               if c and c not in latest:
                   latest[c]=str(row.get("state") or "")
-          required=[
+          hosted=[
               "omega/hosted-ci/python311",
               "omega/hosted-ci/python313",
               "omega/hosted-ci/python314",
               "omega/hosted-ci/storage",
               "omega/hosted-governance",
           ]
-          print("true" if all(latest.get(x)=="success" for x in required) else "false")
-          ')"
+          external=[
+              "omega/control-plane/source-pin",
+              "omega/control-plane/direct-dispatch",
+              "omega/external/github/python311",
+              "omega/external/github/python313",
+              "omega/external/github/python314",
+              "omega/external/github/storage",
+              "omega/external/github/governance",
+              "omega/external/render/python311",
+              "omega/external/render/python313",
+              "omega/external/render/python314",
+              "omega/external/render/storage",
+              "omega/external/render/governance",
+          ]
+          ready=all(latest.get(x)=="success" for x in hosted)
+          complete=ready and all(latest.get(x)=="success" for x in external)
+          print(("true" if ready else "false"),("false" if complete else "true"))
+          ')
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
           echo "ready=$ready" >> "$GITHUB_OUTPUT"
-          echo "OMEGA_EXTERNAL_PIN sha=$sha hosted_core_green=$ready"
-          if [ "$ready" = true ]; then
+          echo "need_run=$need_run" >> "$GITHUB_OUTPUT"
+          echo "OMEGA_EXTERNAL_PIN sha=$sha hosted_core_green=$ready need_run=$need_run"
+          if [ "$ready" = true ] && [ "$need_run" = true ]; then
             target="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
             gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$sha" \
               -f state=success \
@@ -71,7 +90,7 @@ jobs:
 
   github_provider:
     needs: discover
-    if: ${{ needs.discover.outputs.ready == 'true' }}
+    if: ${{ needs.discover.outputs.ready == 'true' && needs.discover.outputs.need_run == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -94,7 +113,7 @@ jobs:
 
   render_provider:
     needs: discover
-    if: ${{ needs.discover.outputs.ready == 'true' }}
+    if: ${{ needs.discover.outputs.ready == 'true' && needs.discover.outputs.need_run == 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -220,7 +239,7 @@ jobs:
 
   finalize:
     needs: [discover, github_provider, render_provider]
-    if: ${{ always() && needs.discover.outputs.ready == 'true' }}
+    if: ${{ always() && needs.discover.outputs.ready == 'true' && needs.discover.outputs.need_run == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
