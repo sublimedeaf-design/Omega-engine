@@ -1,0 +1,80 @@
+name: OMEGA Runtime Forecast Refresh Bridge
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/omega-runtime-forecast-refresh.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: omega-runtime-forecast-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+      PRIVATE_REPOSITORY: sublimedeaf-design/Omega-engines
+    steps:
+      - name: Discover exact private head and existing runtime
+        id: target
+        shell: bash
+        run: |
+          set +x
+          sha="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/main" --jq '.sha')"
+          payload="$(gh api -X GET /user/codespaces -f per_page=100)"
+          name="$(python3 -c 'import json,sys; p=json.load(sys.stdin); rows=[x for x in p.get("codespaces",[]) if (x.get("repository") or {}).get("full_name")=="sublimedeaf-design/Omega-engines" and str((x.get("git_status") or {}).get("ref") or "").replace("refs/heads/","")=="main" and str(x.get("state") or "").lower() in {"available","running"}]; rows.sort(key=lambda x:x.get("last_used_at") or x.get("created_at") or "",reverse=True); print(rows[0]["name"] if rows else "")' <<<"$payload")"
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
+          [ -n "$name" ] || { echo "OMEGA_REFRESH_RUNTIME_NOT_AVAILABLE" >&2; exit 2; }
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "codespace_name=$name" >> "$GITHUB_OUTPUT"
+          echo "OMEGA_REFRESH_TARGET_DISCOVERED sha=$sha"
+
+      - name: Run canonical T24 cycle in exact runtime
+        env:
+          OMEGA_SHA: ${{ steps.target.outputs.sha }}
+          OMEGA_CODESPACE_NAME: ${{ steps.target.outputs.codespace_name }}
+        shell: bash
+        run: |
+          set +x
+          {
+            printf 'export OMEGA_EXPECTED_SHA=%q\n' "$OMEGA_SHA"
+            cat <<'REMOTE'
+          set -Eeuo pipefail
+          STATE="${OMEGA_STATE:-/workspaces/.omega-state}"
+          ROOT=""
+          for candidate in /workspaces/*; do
+            [ -d "$candidate/.git" ] || continue
+            remote="$(git -C "$candidate" remote get-url origin 2>/dev/null || true)"
+            case "$remote" in *sublimedeaf-design/Omega-engines*) ROOT="$candidate"; break;; esac
+          done
+          [ -n "$ROOT" ] || { echo "OMEGA_REFRESH_REPOSITORY_NOT_FOUND" >&2; exit 44; }
+          cd "$ROOT"
+          current="$(git rev-parse HEAD)"
+          [ "$current" = "$OMEGA_EXPECTED_SHA" ] || {
+            echo "OMEGA_REFRESH_SOURCE_NOT_CONVERGED current=$current expected=$OMEGA_EXPECTED_SHA" >&2
+            exit 45
+          }
+          if pgrep -f 'deploy/codespaces/acceptance-test.sh' >/dev/null 2>&1 || \
+             pgrep -f 'deploy/vm/omega-cycle.sh' >/dev/null 2>&1 || \
+             [ -f "$STATE/acceptance-rebuild-armed" ]; then
+            echo "OMEGA_REFRESH_DEFERRED_VALIDATED_MUTATION_ACTIVE" >&2
+            exit 75
+          fi
+          env \
+            OMEGA_REPO="$ROOT" \
+            OMEGA_HOME="$STATE" \
+            OMEGA_STATE="$STATE" \
+            OMEGA_LOCK="$STATE/omega-state.lock" \
+            OMEGA_GIT_SHA="$OMEGA_EXPECTED_SHA" \
+            OMEGA_GIT_REF="main" \
+            OMEGA_ALLOW_PUBLIC_PROVIDER_FALLBACK=1 \
+            timeout 900 bash deploy/vm/omega-cycle.sh t24
+          echo "OMEGA_RUNTIME_T24_REFRESH_GREEN sha=$OMEGA_EXPECTED_SHA"
+          REMOTE
+          } | timeout 960s gh codespace ssh -c "$OMEGA_CODESPACE_NAME" -- bash -s
