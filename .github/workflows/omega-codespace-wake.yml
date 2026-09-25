@@ -34,7 +34,9 @@ jobs:
       - name: Verify Codespaces secret tooling
         shell: bash
         run: |
-          gh secret set --help | grep -q codespaces
+          help_text="$(gh secret set --help)"
+          grep -q 'codespaces' <<<"$help_text"
+          echo "OMEGA_CODESPACES_SECRET_TOOLING_OK"
       - name: Discover and converge existing OMEGA runtime
         id: wake
         shell: bash
