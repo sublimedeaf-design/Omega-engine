@@ -37,8 +37,42 @@ jobs:
           sha="$(gh api /repos/sublimedeaf-design/Omega-engines/commits/main --jq .sha)"
           [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
           need_run=true
+          max_age_minutes="$(gh api "/repos/sublimedeaf-design/Omega-engines/contents/.omega/external-validation.json?ref=$sha" --jq '.content' | tr -d '\n' | base64 -d | jq -r '.max_status_age_minutes // 180')"
+          [[ "$max_age_minutes" =~ ^[0-9]+$ ]] && [ "$max_age_minutes" -ge 1 ] && [ "$max_age_minutes" -le 1440 ] || {
+            echo "OMEGA_HOSTED_EVIDENCE_MAX_AGE_INVALID:$max_age_minutes" >&2
+            exit 65
+          }
           if payload="$(gh api "/repos/sublimedeaf-design/Omega-engines/commits/$sha/status" 2>/dev/null)"; then
-            if printf '%s' "$payload" | python3 -c 'import json,sys; d=json.load(sys.stdin); want={"omega/hosted-ci/python311","omega/hosted-ci/python313","omega/hosted-ci/python314","omega/hosted-ci/storage","omega/hosted-governance","omega/hosted-android"}; latest={}; [(latest.setdefault(str(x.get("context") or ""),str(x.get("state") or ""))) for x in d.get("statuses",[]) if x.get("context")]; raise SystemExit(0 if all(latest.get(k)=="success" for k in want) else 1)'; then
+            if STATUS_PAYLOAD="$payload" MAX_AGE_MINUTES="$max_age_minutes" python3 <<'PY'
+          import datetime,json,os
+          d=json.loads(os.environ["STATUS_PAYLOAD"])
+          max_age=int(os.environ["MAX_AGE_MINUTES"])
+          now=datetime.datetime.now(datetime.timezone.utc)
+          want={
+              "omega/hosted-ci/python311","omega/hosted-ci/python313",
+              "omega/hosted-ci/python314","omega/hosted-ci/storage",
+              "omega/hosted-governance","omega/hosted-android",
+          }
+          latest={}
+          for row in d.get("statuses",[]):
+              context=str(row.get("context") or "")
+              stamp=str(row.get("updated_at") or row.get("created_at") or "")
+              if context and (context not in latest or stamp > str(latest[context].get("_stamp") or "")):
+                  latest[context]={**row,"_stamp":stamp}
+          def fresh_success(context):
+              row=latest.get(context)
+              if not row or row.get("state")!="success":
+                  return False
+              raw=str(row.get("updated_at") or row.get("created_at") or "")
+              try:
+                  at=datetime.datetime.fromisoformat(raw.replace("Z","+00:00"))
+              except ValueError:
+                  return False
+              age=(now-at).total_seconds()
+              return -300 <= age <= max_age*60
+          raise SystemExit(0 if all(fresh_success(k) for k in want) else 1)
+          PY
+            then
               need_run=false
             fi
           fi
