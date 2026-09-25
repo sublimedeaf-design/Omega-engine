@@ -6,17 +6,19 @@ on:
     - cron: "*/5 * * * *"
   push:
     paths:
-      - "control-plane/ref-sync-trigger.txt"
-      - "control-plane/reconcile.mjs"
-      - "control-plane/github.mjs"
+      - ".github/workflows/omega-external-validation-arm.yml"
+      - ".github/workflows/omega-external-validator-dispatch.yml"
 
 permissions:
   contents: read
-  issues: write
+  actions: write
 
 concurrency:
   group: omega-external-validation-arm
   cancel-in-progress: false
+
+env:
+  PRIVATE_REPOSITORY: sublimedeaf-design/Omega-engines
 
 jobs:
   arm:
@@ -27,9 +29,89 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Reconcile exact-main external validation refs
+      - name: Arm direct exact-SHA external validation without private ref writes
         env:
-          OMEGA_GITHUB_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
-          OMEGA_LEDGER_TOKEN: ${{ github.token }}
-          OMEGA_CONTROL_TARGET_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: node control-plane/github.mjs
+          OMEGA_PRIVATE_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+          PUBLIC_REPOSITORY: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          set +x
+
+          private_api() {
+            curl -fsS --retry 4 --retry-all-errors --connect-timeout 20 --max-time 60 \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer $OMEGA_PRIVATE_TOKEN" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "https://api.github.com$1"
+          }
+
+          sha="$(private_api "/repos/$PRIVATE_REPOSITORY/commits/main" | jq -r '.sha // empty')"
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "OMEGA_EXTERNAL_ARM_MAIN_SHA_INVALID" >&2; exit 64; }
+
+          statuses="$(private_api "/repos/$PRIVATE_REPOSITORY/commits/$sha/status?per_page=100")"
+          read -r core_green external_complete < <(printf '%s' "$statuses" | python3 -c '
+          import json,sys
+          p=json.load(sys.stdin)
+          latest={}
+          for row in p.get("statuses",[]):
+              c=str(row.get("context") or "")
+              if c and c not in latest:
+                  latest[c]=str(row.get("state") or "")
+          hosted=[
+              "omega/hosted-ci/python311","omega/hosted-ci/python313",
+              "omega/hosted-ci/python314","omega/hosted-ci/storage",
+              "omega/hosted-governance",
+          ]
+          external=[
+              "omega/control-plane/source-pin","omega/control-plane/direct-dispatch",
+              "omega/external/github/python311","omega/external/github/python313",
+              "omega/external/github/python314","omega/external/github/storage",
+              "omega/external/github/governance",
+              "omega/external/render/python311","omega/external/render/python313",
+              "omega/external/render/python314","omega/external/render/storage",
+              "omega/external/render/governance",
+          ]
+          core=all(latest.get(x)=="success" for x in hosted)
+          complete=core and all(latest.get(x)=="success" for x in external)
+          print("true" if core else "false","true" if complete else "false")
+          ')
+
+          if [ "$core_green" != true ]; then
+            echo "OMEGA_EXTERNAL_ARM_WAIT_HOSTED_CORE sha=$sha"
+            exit 0
+          fi
+          if [ "$external_complete" = true ]; then
+            echo "OMEGA_EXTERNAL_ARM_CURRENT sha=$sha"
+            exit 0
+          fi
+
+          # Avoid duplicate dispatch while a direct validator is queued/running.
+          active="$(gh api "/repos/$PUBLIC_REPOSITORY/actions/workflows/omega-external-validator-dispatch.yml/runs?per_page=20" \
+            --jq '[.workflow_runs[] | select(.status=="queued" or .status=="in_progress" or .status=="pending")] | length')"
+          if [ "$active" != 0 ]; then
+            echo "OMEGA_EXTERNAL_ARM_ACTIVE sha=$sha active=$active"
+            exit 0
+          fi
+
+          # Bound retries to one dispatch per 15 minutes after a failed/incomplete run.
+          latest_created="$(gh api "/repos/$PUBLIC_REPOSITORY/actions/workflows/omega-external-validator-dispatch.yml/runs?per_page=1" \
+            --jq '.workflow_runs[0].created_at // empty')"
+          if [ -n "$latest_created" ]; then
+            python3 - "$latest_created" <<'PY'
+          import datetime,sys
+          raw=sys.argv[1]
+          t=datetime.datetime.fromisoformat(raw.replace("Z","+00:00"))
+          age=(datetime.datetime.now(datetime.timezone.utc)-t).total_seconds()
+          if age < 900:
+              print(f"OMEGA_EXTERNAL_ARM_COOLDOWN age_seconds={int(age)}")
+              raise SystemExit(75)
+          PY
+            rc=$?
+            if [ "$rc" -eq 75 ]; then exit 0; fi
+          fi
+
+          gh api --method POST "/repos/$PUBLIC_REPOSITORY/actions/workflows/omega-external-validator-dispatch.yml/dispatches" \
+            -f ref=main >/dev/null
+          echo "OMEGA_EXTERNAL_ARM_DISPATCHED sha=$sha mode=public-workflow-dispatch"
