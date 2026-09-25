@@ -1,1 +1,1 @@
-validate-exact-pr 4fc99786c67f249ca9f8426b1c564ee65fa83394 hardening/recovery-contract-hash-source-20260925
+validate-exact-pr d53614af88f2d35c04775866a25fdb1e018bda61 support/recovery-agent-termination-20260926
