@@ -90,11 +90,16 @@ export async function certify({token,targetUrl="",now=Date.now()}={}){
     "omega-federation/exact-sha-executor","omega-federation/evidence-verifier",
     "omega-federation/evidence-publish",
   ];
+  const directMode=p.trigger_mode==="direct_exact_sha";
   const layers={
     hosted_exact:hosted.every(x=>green(map,x,now,180)),
     external_quorum:ext.green,
-    validation_refs:light===sha && android===sha,
-    control_plane:green(map,"omega/control-plane/ref-sync",now,180),
+    validation_refs:directMode
+      ? green(map,"omega/control-plane/source-pin",now,180)
+      : light===sha && android===sha,
+    control_plane:directMode
+      ? green(map,"omega/control-plane/direct-dispatch",now,180)
+      : green(map,"omega/control-plane/ref-sync",now,180),
     clean_recovery:green(map,"omega/hosted-recovery",now,1440),
     federation:federation.every(x=>green(map,x,now,1440)),
     signer_continuity:green(map,"omega/signer/continuity",now,10080),
