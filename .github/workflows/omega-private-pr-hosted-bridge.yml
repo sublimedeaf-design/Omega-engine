@@ -8,6 +8,7 @@ on:
   push:
     paths:
       - ".github/workflows/omega-private-pr-hosted-bridge.yml"
+      - "bootstrap/omega/pr-validation-trigger.txt"
 
 permissions:
   contents: read
