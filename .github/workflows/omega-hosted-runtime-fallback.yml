@@ -20,6 +20,9 @@ on:
 permissions:
   contents: read
 
+# Hosted shadow/fallback execution is rebuilt from exact source every run.
+cache-mode: none
+
 concurrency:
   group: omega-hosted-runtime-fallback
   cancel-in-progress: false
@@ -70,16 +73,17 @@ jobs:
             fi
           fi
 
+          # An "available" Codespace is not proof that its autonomous cycle is
+          # healthy. Keep a provider-independent hosted shadow cycle running on
+          # every schedule so Codespace sleep, stale state, or runner loss cannot
+          # create a silent observation gap.
           run=true
-          if [ "$runtime_available" = true ]; then
-            run=false
-          fi
           {
             echo "run=$run"
             echo "mode=$mode"
             echo "sha=$sha"
           } >> "$GITHUB_OUTPUT"
-          echo "OMEGA_HOSTED_RUNTIME_TARGET mode=$mode sha=$sha primary_runtime_available=$runtime_available run=$run"
+          echo "OMEGA_HOSTED_RUNTIME_TARGET mode=$mode sha=$sha primary_runtime_available=$runtime_available independent_shadow=true run=$run"
 
   fallback:
     needs: discover
