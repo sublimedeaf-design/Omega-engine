@@ -13,6 +13,9 @@ on:
 permissions:
   contents: read
 
+# Federation proof executes exact private source and must not inherit cache state.
+cache-mode: none
+
 concurrency:
   group: omega-hosted-federation-fallback
   cancel-in-progress: false
@@ -25,12 +28,11 @@ jobs:
   federation:
     runs-on: ubuntu-latest
     timeout-minutes: 35
-    env:
-      GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
-      OMEGA_FEDERATION_PAT: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
     steps:
       - name: Pin current private main
         id: pin
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -80,6 +82,7 @@ jobs:
         shell: bash
         env:
           SOURCE_SHA: ${{ steps.pin.outputs.sha }}
+          OMEGA_FEDERATION_PAT: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
         run: |
           set -Eeuo pipefail
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
@@ -198,6 +201,7 @@ jobs:
         if: ${{ always() && steps.pin.outputs.need_run == 'true' }}
         shell: bash
         env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
           SOURCE_SHA: ${{ steps.pin.outputs.sha }}
           RESULT: ${{ job.status }}
         run: |
