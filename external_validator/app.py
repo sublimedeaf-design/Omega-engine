@@ -194,8 +194,21 @@ def validate():
         bundle_sha = hashlib.sha256(raw).hexdigest()
         with LOCK:
             prior = _read(sha)
-            if prior and prior.get("state") == "running":
-                return jsonify({"ok": True, "accepted": False, "reason": "already_running", "sha": sha}), 202
+            if prior and prior.get("state") in {"running", "success"}:
+                prior_bundle = str(prior.get("bundle_sha256") or "")
+                if prior_bundle and prior_bundle != bundle_sha:
+                    return jsonify({
+                        "ok": False,
+                        "error": "IMMUTABLE_SHA_BUNDLE_CONFLICT",
+                        "sha": sha,
+                    }), 409
+                return jsonify({
+                    "ok": True,
+                    "accepted": False,
+                    "reason": "already_" + str(prior.get("state")),
+                    "sha": sha,
+                    "bundle_sha256": bundle_sha,
+                }), 202
             thread = threading.Thread(target=_validate, args=(sha, raw, bundle_sha, claims), daemon=True)
             thread.start()
         return jsonify({"ok": True, "accepted": True, "sha": sha, "bundle_sha256": bundle_sha}), 202
