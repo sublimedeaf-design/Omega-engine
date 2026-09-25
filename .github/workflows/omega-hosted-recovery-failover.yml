@@ -87,6 +87,8 @@ jobs:
     needs: pin
     if: ${{ needs.pin.outputs.need_run == 'true' }}
     runs-on: ubuntu-latest
+    outputs:
+      recovery_package_sha256: ${{ steps.package.outputs.sha256 }}
     timeout-minutes: 90
     env:
       GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
@@ -115,12 +117,11 @@ jobs:
       - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb
         with:
           gradle-version: "8.13"
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+          cache-disabled: true
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
-          path: |
-            ${{ runner.temp }}/omega-state/llama.cpp
-            ${{ runner.temp }}/omega-state/model-cache
-          key: omega-localbrain-v2-linux-x64-b29c606e28a01b1bc8c1351026a0fa6e616bf6c4-worker-cc324af070c2ecbfd324a30884d2f951a7ff756aba85cb811a6ec436933bb046-qa-1d9614638d18024d0fbb36575a15f1302a3adf044df10345688ec4f6e1c4ff32
+          path: ${{ runner.temp }}/omega-state/model-cache
+          key: omega-localbrain-models-v3-worker-cc324af070c2ecbfd324a30884d2f951a7ff756aba85cb811a6ec436933bb046-qa-1d9614638d18024d0fbb36575a15f1302a3adf044df10345688ec4f6e1c4ff32
       - name: Prepare exact hosted runtime
         shell: bash
         run: |
@@ -175,6 +176,7 @@ jobs:
           (state/"hosted-pre-recovery.json").write_text(json.dumps(payload,indent=2)+"\n",encoding="utf-8")
           PY
       - name: Package recovery state with hard integrity manifest
+        id: package
         if: ${{ success() }}
         shell: bash
         run: |
@@ -188,6 +190,9 @@ jobs:
             cd "$RUNNER_TEMP"
             sha256sum omega-recovery-state.tgz > omega-recovery-state.tgz.sha256
             sha256sum -c omega-recovery-state.tgz.sha256
+            digest="$(awk '{print $1}' omega-recovery-state.tgz.sha256)"
+            [[ "$digest" =~ ^[0-9a-f]{64}$ ]]
+            echo "sha256=$digest" >> "$GITHUB_OUTPUT"
           )
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: ${{ success() }}
@@ -242,12 +247,11 @@ jobs:
       - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb
         with:
           gradle-version: "8.13"
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+          cache-disabled: true
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
-          path: |
-            ${{ runner.temp }}/omega-state/llama.cpp
-            ${{ runner.temp }}/omega-state/model-cache
-          key: omega-localbrain-v2-linux-x64-b29c606e28a01b1bc8c1351026a0fa6e616bf6c4-worker-cc324af070c2ecbfd324a30884d2f951a7ff756aba85cb811a6ec436933bb046-qa-1d9614638d18024d0fbb36575a15f1302a3adf044df10345688ec4f6e1c4ff32
+          path: ${{ runner.temp }}/omega-state/model-cache
+          key: omega-localbrain-models-v3-worker-cc324af070c2ecbfd324a30884d2f951a7ff756aba85cb811a6ec436933bb046-qa-1d9614638d18024d0fbb36575a15f1302a3adf044df10345688ec4f6e1c4ff32
       - name: Prepare clean recovery VM
         shell: bash
         run: |
@@ -284,6 +288,12 @@ jobs:
           cd "$RUNNER_TEMP/omega-recovery-artifact"
           test -s omega-recovery-state.tgz
           test -s omega-recovery-state.tgz.sha256
+          expected="${{ needs.pre_recovery.outputs.recovery_package_sha256 }}"
+          [[ "$expected" =~ ^[0-9a-f]{64}$ ]] || { echo "OMEGA_RECOVERY_EXPECTED_DIGEST_INVALID" >&2; exit 41; }
+          recorded="$(awk '{print $1}' omega-recovery-state.tgz.sha256)"
+          [ "$recorded" = "$expected" ] || { echo "OMEGA_RECOVERY_DIGEST_METADATA_MISMATCH:$recorded!=$expected" >&2; exit 42; }
+          actual="$(sha256sum omega-recovery-state.tgz | awk '{print $1}')"
+          [ "$actual" = "$expected" ] || { echo "OMEGA_RECOVERY_ARTIFACT_HASH_MISMATCH:$actual!=$expected" >&2; exit 43; }
           sha256sum -c omega-recovery-state.tgz.sha256
           mkdir -p "$RUNNER_TEMP/omega-state"
           tar -xzf omega-recovery-state.tgz -C "$RUNNER_TEMP/omega-state"
