@@ -13,6 +13,9 @@ permissions:
   contents: read
   actions: write
 
+# This workflow does not trust or require Actions cache state.
+cache-mode: none
+
 concurrency:
   group: omega-external-validation-arm
   cancel-in-progress: false
