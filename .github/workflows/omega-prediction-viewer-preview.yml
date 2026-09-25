@@ -137,9 +137,9 @@ jobs:
           apk=app/build/outputs/apk/debug/app-debug.apk
           test -s "$apk"
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose "$apk"
-          mkdir -p ../../dist
-          cp "$apk" ../../dist/OMEGA-Prediction-Viewer.apk
-          cd ../..
+          mkdir -p ../dist
+          cp "$apk" ../dist/OMEGA-Prediction-Viewer.apk
+          cd ..
           sha256sum dist/OMEGA-Prediction-Viewer.apk > dist/OMEGA-Prediction-Viewer.apk.sha256
           python3 - <<'PY'
           import hashlib,json,os
