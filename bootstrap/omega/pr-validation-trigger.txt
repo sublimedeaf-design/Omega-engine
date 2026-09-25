@@ -1,1 +1,1 @@
-validate-exact-pr 1925bc9bacc834d7c3a6d1e1bf25fc883e7398bd
+validate newest failproof hardening PRs top-down
