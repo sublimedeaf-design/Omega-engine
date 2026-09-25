@@ -129,30 +129,7 @@ jobs:
 
           comments="$(GH_TOKEN="$PUBLIC_GITHUB_TOKEN" gh api "/repos/$HELPER_REPOSITORY/issues/$LEDGER_ISSUE/comments?per_page=100")"
           export OMEGA_NOW="$now"
-          budget="$(printf '%s' "$comments" | python3 -c '
-import datetime,json,re,sys,os
-rows=json.load(sys.stdin)
-now=int(os.environ["OMEGA_NOW"])
-cooldown=int(os.environ["DISPATCH_COOLDOWN_SECONDS"])
-max24=int(os.environ["MAX_DISPATCHES_24H"])
-max30=int(os.environ["MAX_DISPATCHES_30D"])
-times=[]
-pat=re.compile(r"^OMEGA_EXTERNAL_DISPATCH at=([^ ]+) android=(true|false)$")
-for row in rows:
-    m=pat.match(str(row.get("body") or "").strip())
-    if not m:
-        continue
-    try:
-        at=datetime.datetime.fromisoformat(m.group(1).replace("Z","+00:00"))
-        times.append(int(at.timestamp()))
-    except Exception:
-        pass
-last=max(times) if times else 0
-c24=sum(1 for t in times if t>=now-86400)
-c30=sum(1 for t in times if t>=now-30*86400)
-ok=(now-last>=cooldown and c24<max24 and c30<max30)
-print(("true" if ok else "false")+":"+str(last)+":"+str(c24)+":"+str(c30))
-' )"
+          budget="$(printf '%s' "$comments" | python3 -c 'import datetime,json,re,sys,os; rows=json.load(sys.stdin); now=int(os.environ["OMEGA_NOW"]); cooldown=int(os.environ["DISPATCH_COOLDOWN_SECONDS"]); max24=int(os.environ["MAX_DISPATCHES_24H"]); max30=int(os.environ["MAX_DISPATCHES_30D"]); pat=re.compile(r"^OMEGA_EXTERNAL_DISPATCH at=([^ ]+) android=(true|false)$"); times=[]; exec("for row in rows:\\n m=pat.match(str(row.get(\\\"body\\\") or \\\"\\\").strip())\\n if not m: continue\\n try:\\n  at=datetime.datetime.fromisoformat(m.group(1).replace(\\\"Z\\\",\\\"+00:00\\\")); times.append(int(at.timestamp()))\\n except Exception: pass"); last=max(times) if times else 0; c24=sum(1 for t in times if t>=now-86400); c30=sum(1 for t in times if t>=now-30*86400); ok=(now-last>=cooldown and c24<max24 and c30<max30); print(("true" if ok else "false")+":"+str(last)+":"+str(c24)+":"+str(c30))')"
           budget_ok="$(printf '%s' "$budget" | cut -d: -f1)"
           last_dispatch="$(printf '%s' "$budget" | cut -d: -f2)"
           count24="$(printf '%s' "$budget" | cut -d: -f3)"
