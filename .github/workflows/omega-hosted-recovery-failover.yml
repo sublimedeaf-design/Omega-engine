@@ -7,18 +7,15 @@ on:
     - cron: "7,37 * * * *"
   push:
     paths:
-      - ".github/workflows/omega-hosted-recovery-failover.yml"
       - "bootstrap/omega/recovery-trigger.txt"
 
 permissions:
   contents: read
 
 concurrency:
-  # Routine schedules serialize with each other. Explicit push probes use their
-  # public trigger/config commit SHA so a later schedule cannot evict a queued
-  # exact-SHA candidate from GitHub's single-pending concurrency slot.
-  group: omega-hosted-recovery-failover-${{ github.event_name == 'schedule' && 'routine' || github.sha }}
+  group: omega-hosted-recovery-failover
   cancel-in-progress: false
+  queue: max
 
 env:
   PRIVATE_REPOSITORY: sublimedeaf-design/Omega-engines
@@ -65,7 +62,7 @@ jobs:
           fi
           payload="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/$sha/status")"
           need_run=true
-          if printf '%s' "$payload" | python3 -c 'import json,sys; d=json.load(sys.stdin); s={x.get("context"):x.get("state") for x in d.get("statuses",[])}; raise SystemExit(0 if s.get("omega/hosted-recovery")=="success" else 1)'; then
+          if printf '%s' "$payload" | python3 -c 'import json,sys; d=json.load(sys.stdin); latest={}; [(latest.setdefault(str(x.get("context") or ""),str(x.get("state") or ""))) for x in d.get("statuses",[]) if x.get("context")]; raise SystemExit(0 if latest.get("omega/hosted-recovery")=="success" else 1)'; then
             need_run=false
           fi
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
@@ -104,7 +101,7 @@ jobs:
           path: |
             ${{ runner.temp }}/omega-state/llama.cpp
             ${{ runner.temp }}/omega-state/model-cache
-          key: omega-localbrain-linux-x64-b29c606e28a01b1bc8c1351026a0fa6e616bf6c4-cc324af070c2ecbfd324a30884d2f951a7ff756aba85cb811a6ec436933bb046-qa-1d9614638d18024d0fbb36575a15f1302a3adf044df10345688ec4f6e1c4ff32
+          key: omega-localbrain-v2-linux-x64-b29c606e28a01b1bc8c1351026a0fa6e616bf6c4-worker-cc324af070c2ecbfd324a30884d2f951a7ff756aba85cb811a6ec436933bb046-qa-1d9614638d18024d0fbb36575a15f1302a3adf044df10345688ec4f6e1c4ff32-qa-1d9614638d18024d0fbb36575a15f1302a3adf044df10345688ec4f6e1c4ff32
       - name: Prepare exact hosted runtime
         shell: bash
         run: |
@@ -150,13 +147,14 @@ jobs:
           (state/"hosted-pre-recovery.json").write_text(json.dumps(payload,indent=2)+"\n",encoding="utf-8")
           PY
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: ${{ always() }}
         with:
           name: omega-hosted-recovery-${{ needs.pin.outputs.sha }}
           path: |
             ${{ runner.temp }}/omega-state/evidence
-            ${{ runner.temp }}/omega-state/logs/codespaces-acceptance.pass
+            ${{ runner.temp }}/omega-state/logs
           retention-days: 2
-          if-no-files-found: error
+          if-no-files-found: warn
 
   post_recovery:
     needs: [pin, pre_recovery]
@@ -190,7 +188,7 @@ jobs:
           path: |
             ${{ runner.temp }}/omega-state/llama.cpp
             ${{ runner.temp }}/omega-state/model-cache
-          key: omega-localbrain-linux-x64-b29c606e28a01b1bc8c1351026a0fa6e616bf6c4-cc324af070c2ecbfd324a30884d2f951a7ff756aba85cb811a6ec436933bb046-qa-1d9614638d18024d0fbb36575a15f1302a3adf044df10345688ec4f6e1c4ff32
+          key: omega-localbrain-v2-linux-x64-b29c606e28a01b1bc8c1351026a0fa6e616bf6c4-worker-cc324af070c2ecbfd324a30884d2f951a7ff756aba85cb811a6ec436933bb046-qa-1d9614638d18024d0fbb36575a15f1302a3adf044df10345688ec4f6e1c4ff32-qa-1d9614638d18024d0fbb36575a15f1302a3adf044df10345688ec4f6e1c4ff32
       - name: Prepare clean recovery VM
         shell: bash
         run: |
