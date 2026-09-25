@@ -1,1 +1,1 @@
-recover-exact d3e53f1187342a45717beeaa56cb2ffab460591c hardening/failproof-dual-localbrain-recovery-20260925 union-free-sigstore-v5
+recover-exact 7837bc2ef8cd11bb7c00ac958033fe3733f6fb45 hardening/failproof-dual-localbrain-recovery-20260925 bounded-recovery-contract-v7
