@@ -16,6 +16,7 @@ permissions:
 concurrency:
   group: omega-private-ci-hosted-bridge
   cancel-in-progress: false
+  queue: max
 
 jobs:
   discover:
@@ -34,7 +35,7 @@ jobs:
           [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
           need_run=true
           if payload="$(gh api "/repos/sublimedeaf-design/Omega-engines/commits/$sha/status" 2>/dev/null)"; then
-            if printf '%s' "$payload" | python3 -c 'import json,sys; d=json.load(sys.stdin); want={"omega/hosted-ci/python311","omega/hosted-ci/python313","omega/hosted-ci/python314","omega/hosted-ci/storage","omega/hosted-governance","omega/hosted-android"}; got={x.get("context"):x.get("state") for x in d.get("statuses",[])}; raise SystemExit(0 if all(got.get(k)=="success" for k in want) else 1)'; then
+            if printf '%s' "$payload" | python3 -c 'import json,sys; d=json.load(sys.stdin); want={"omega/hosted-ci/python311","omega/hosted-ci/python313","omega/hosted-ci/python314","omega/hosted-ci/storage","omega/hosted-governance","omega/hosted-android"}; latest={}; [(latest.setdefault(str(x.get("context") or ""),str(x.get("state") or ""))) for x in d.get("statuses",[]) if x.get("context")]; raise SystemExit(0 if all(latest.get(k)=="success" for k in want) else 1)'; then
               need_run=false
             fi
           fi
