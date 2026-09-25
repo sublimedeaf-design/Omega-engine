@@ -159,7 +159,7 @@ jobs:
         working-directory: omega
         shell: bash
         run: |
-          python -m pip install -c requirements-ci.lock -e '.[${{ matrix.extra }}]'
+          python -m pip --retries 5 --timeout 60 install -c requirements-ci.lock -e '.[${{ matrix.extra }}]'
           ${{ matrix.command }}
       - name: Publish exact-SHA hosted lane status
         if: ${{ always() }}
@@ -259,11 +259,22 @@ jobs:
       - name: Install Android SDK 36
         shell: bash
         run: |
+          set -Eeuo pipefail
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "platforms;android-36" "build-tools;36.0.0"
+          sdk_ok=false
+          for attempt in 1 2 3 4; do
+            if "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "platforms;android-36" "build-tools;36.0.0" >/dev/null; then
+              sdk_ok=true
+              break
+            fi
+            echo "OMEGA_ANDROID_SDK_RETRY attempt=$attempt" >&2
+            sleep $((attempt * 5))
+          done
+          "$sdk_ok" || { echo "OMEGA_ANDROID_SDK_INSTALL_FAILED" >&2; exit 75; }
       - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb
         with:
           gradle-version: "8.13"
+          cache-disabled: true
       - name: Build, lint and verify debug APK
         working-directory: omega/android
         shell: bash
