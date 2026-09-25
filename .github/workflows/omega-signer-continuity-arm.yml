@@ -69,6 +69,10 @@ jobs:
             echo "OMEGA_SIGNER_ARM_PERMISSION_BLOCKED sha=$sha required=private-actions-read-write" >&2
             sed -n '1,3p' "$actions_err" >&2 || true
             rm -f "$actions_err"
+            gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$sha" \
+              -f state=error \
+              -f context="omega/signer/continuity" \
+              -f description="BLOCKED: private Actions read/write permission unavailable" >/dev/null 2>&1 || true
             exit 0
           fi
           rm -f "$actions_err"
@@ -84,6 +88,10 @@ jobs:
             echo "OMEGA_SIGNER_ARM_PERMISSION_BLOCKED sha=$sha required=private-actions-read-write" >&2
             sed -n '1,3p' "$dispatch_err" >&2 || true
             rm -f "$dispatch_err"
+            gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$sha" \
+              -f state=error \
+              -f context="omega/signer/continuity" \
+              -f description="BLOCKED: private Actions dispatch permission unavailable" >/dev/null 2>&1 || true
             exit 0
           fi
           rm -f "$dispatch_err"
