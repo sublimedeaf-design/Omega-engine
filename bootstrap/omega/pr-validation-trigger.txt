@@ -1,1 +1,1 @@
-validate-exact-pr 0a280c50e42401261296357bc7d357ba2d9ec44e data/omega-deep-source-expansion-20260925
+validate-exact-pr 4fc99786c67f249ca9f8426b1c564ee65fa83394 hardening/recovery-contract-hash-source-20260925
