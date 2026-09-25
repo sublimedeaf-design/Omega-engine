@@ -1,1 +1,1 @@
-recover-exact ff0452be0d83fe3a98e0ae224c000da9238717df protocol-v5
+recover-exact 40ed748092a2b81e83a0545574e5991f51c0cb39 protocol-v6
