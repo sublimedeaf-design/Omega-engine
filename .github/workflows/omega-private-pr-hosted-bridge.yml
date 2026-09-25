@@ -262,10 +262,14 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-      - name: Install Android SDK 36
+      - name: Ensure Android SDK 36
         shell: bash
         run: |
           set -Eeuo pipefail
+          if [ -d "$ANDROID_HOME/platforms/android-36" ] && [ -x "$ANDROID_HOME/build-tools/36.0.0/apksigner" ]; then
+            echo "OMEGA_ANDROID_SDK_REUSED platform=36 build_tools=36.0.0"
+            exit 0
+          fi
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
           sdk_ok=false
           for attempt in 1 2 3 4; do
