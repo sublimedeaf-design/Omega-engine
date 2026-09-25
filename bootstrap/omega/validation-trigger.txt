@@ -1,2 +1,2 @@
-private_main=304fca102dd5024e89918194a907266730bc51fe
-purpose=validate-localbrain-final-normalization-and-recovery-hardening
+private_main=8758c0e69df49377c66f851bb0acc756ae6c7ac5
+purpose=fresh-acceptance-after-localbrain-protocol-and-state-recovery
