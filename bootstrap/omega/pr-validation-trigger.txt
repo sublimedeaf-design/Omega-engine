@@ -1,1 +1,1 @@
-validate-exact-pr 4fc99786c67f249ca9f8426b1c564ee65fa83394 hardening/recovery-contract-hash-source-20260925
+validate-exact-pr e061d81ff067c5c1137b77d25f6a9ab61cb36cdd hardening/canonical-execution-envelope-20260926
