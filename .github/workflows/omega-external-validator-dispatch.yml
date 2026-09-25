@@ -17,7 +17,7 @@ permissions:
 
 concurrency:
   group: omega-external-validator-dispatch
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 env:
   PRIVATE_REPOSITORY: sublimedeaf-design/Omega-engines
