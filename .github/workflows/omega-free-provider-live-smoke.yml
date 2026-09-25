@@ -1,0 +1,109 @@
+name: OMEGA Free Provider Live Smoke
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/omega-free-provider-live-smoke.yml"
+      - "bootstrap/omega/free-provider-smoke-trigger.txt"
+
+permissions:
+  contents: read
+
+cache-mode: none
+
+concurrency:
+  group: omega-free-provider-live-smoke
+  cancel-in-progress: true
+
+env:
+  PRIVATE_REPOSITORY: sublimedeaf-design/Omega-engines
+  CANDIDATE_SHA: edde801f9e2e2a17d53a28a32c53f0bb3bd8629b
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: ${{ env.PRIVATE_REPOSITORY }}
+          ref: ${{ env.CANDIDATE_SHA }}
+          token: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          persist-credentials: false
+          fetch-depth: 1
+          path: omega
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.13"
+
+      - name: Probe independent zero-account fixture routes
+        working-directory: omega
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          python - <<'PY'
+          import json
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          from omega.live.espn_provider import discover as espn_discover
+          from omega.live.thesportsdb_provider import discover as tsdb_discover
+
+          now=datetime.now(timezone.utc)
+          providers={}
+          all_rows=[]
+
+          for name,fn in (("espn",espn_discover),("thesportsdb",tsdb_discover)):
+              try:
+                  rows,meta=fn(now,horizon_hours=30)
+              except Exception as exc:
+                  rows=[]
+                  meta={"provider_health":"SYSTEMIC_FAILURE","exception":f"{type(exc).__name__}:{exc}"}
+              providers[name]={
+                  "health":meta.get("provider_health"),
+                  "count":len(rows),
+                  "sports":sorted({str(x.get("sport") or "") for x in rows}),
+                  "errors":meta.get("provider_errors",[]),
+              }
+              all_rows.extend((name,row) for row in rows)
+
+          nations=[
+              {
+                  "provider":name,
+                  "event_id":row.get("event",{}).get("id"),
+                  "sport":row.get("sport"),
+                  "kickoff":row.get("event",{}).get("commence_time"),
+                  "home":row.get("event",{}).get("home_team"),
+                  "away":row.get("event",{}).get("away_team"),
+              }
+              for name,row in all_rows
+              if row.get("sport")=="soccer_uefa_nations_league"
+          ]
+
+          payload={
+              "schema_version":1,
+              "candidate_sha":"edde801f9e2e2a17d53a28a32c53f0bb3bd8629b",
+              "observed_at":now.isoformat(),
+              "horizon_hours":30,
+              "providers":providers,
+              "nations_league":nations,
+              "synthetic_fixtures":False,
+          }
+          Path("../free-provider-live-smoke.json").write_text(
+              json.dumps(payload,indent=2,sort_keys=True)+"\n",encoding="utf-8"
+          )
+          print(json.dumps(payload,indent=2,sort_keys=True))
+
+          if not nations:
+              raise SystemExit("OMEGA_FREE_PROVIDER_NO_NATIONS_LEAGUE_FIXTURES")
+          PY
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: omega-free-provider-live-smoke-${{ env.CANDIDATE_SHA }}
+          path: free-provider-live-smoke.json
+          if-no-files-found: error
+          retention-days: 7
