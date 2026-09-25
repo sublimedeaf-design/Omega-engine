@@ -28,20 +28,20 @@ jobs:
   prime:
     runs-on: ubuntu-latest
     timeout-minutes: 25
-    env:
-      MODEL_CACHE: ${{ runner.temp }}/omega-state/model-cache
     steps:
       - name: Restore or schedule exact immutable model cache
         id: cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
-          path: ${{ env.MODEL_CACHE }}
+          path: ${{ runner.temp }}/omega-state/model-cache
           key: ${{ env.CACHE_KEY }}
 
       - name: Download missing immutable model bytes
         shell: bash
         run: |
           set -Eeuo pipefail
+          MODEL_CACHE="$RUNNER_TEMP/omega-state/model-cache"
+          export MODEL_CACHE
           mkdir -p "$MODEL_CACHE"
 
           fetch_verified() {
@@ -71,6 +71,7 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
+          MODEL_CACHE="$RUNNER_TEMP/omega-state/model-cache"
           test -s "$MODEL_CACHE/$WORKER_NAME"
           test -s "$MODEL_CACHE/$QA_NAME"
           printf '%s  %s\n' "$WORKER_SHA256" "$MODEL_CACHE/$WORKER_NAME" | sha256sum -c -
