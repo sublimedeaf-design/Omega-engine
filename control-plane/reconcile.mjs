@@ -11,7 +11,7 @@ const REQUIRED = [
   "omega/hosted-governance",
 ];
 const STABILITY_MS = 15 * 60 * 1000;
-const COOLDOWN_MS = 60 * 60 * 1000;
+const COOLDOWN_MS = 15 * 60 * 1000;
 const MAX_24H = 2;
 const MAX_30D = 6;
 const SHA = /^[0-9a-f]{40}$/;
@@ -115,13 +115,14 @@ export async function reconcile({token, ledgerToken=token, provider="unknown", t
   const sha = String(main.sha || "");
   const committedAt = Date.parse(String(main?.commit?.committer?.date || ""));
   if (!SHA.test(sha) || !Number.isFinite(committedAt)) throw new Error("MAIN_PROVENANCE_INVALID");
-  if (nowMs - committedAt < STABILITY_MS) return {ok:true, action:"wait_stability", sha, provider};
-
   const combined = await gh(token, `/repos/${PRIVATE_REPO}/commits/${sha}/status?per_page=100`);
   const states = latestStates(Array.isArray(combined.statuses) ? combined.statuses : []);
   const coreGreen = REQUIRED.every(k => states[k] === "success");
   const androidGreen = states["omega/hosted-android"] === "success";
-  if (!coreGreen) return {ok:true, action:"wait_hosted_core", sha, provider};
+  if (!coreGreen) {
+    if (nowMs - committedAt < STABILITY_MS) return {ok:true, action:"wait_stability", sha, provider};
+    return {ok:true, action:"wait_hosted_core", sha, provider};
+  }
 
   const [lightOld, androidOld] = await Promise.all([
     refSha(token, LIGHT_REF), refSha(token, ANDROID_REF),
