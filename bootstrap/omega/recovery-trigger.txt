@@ -1,1 +1,1 @@
-recover-exact 75162056fb96aae9da49b839a3f1916a8567bc7a protocol-v9
+recover-exact 75162056fb96aae9da49b839a3f1916a8567bc7a protocol-v6
