@@ -8,6 +8,7 @@ on:
     paths:
       - "control-plane/certify.mjs"
       - "control-plane/certify-github.mjs"
+      - "control-plane/certifier-trigger.txt"
       - ".github/workflows/omega-resilience-certifier.yml"
 
 permissions:
