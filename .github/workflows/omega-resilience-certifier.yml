@@ -3,7 +3,7 @@ name: OMEGA Resilience Certifier
 on:
   workflow_dispatch:
   schedule:
-    - cron: "11,26,41,56 * * * *"
+    - cron: "4-59/5 * * * *"
   push:
     paths:
       - "control-plane/certify.mjs"
