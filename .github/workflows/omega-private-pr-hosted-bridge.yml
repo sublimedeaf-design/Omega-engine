@@ -31,59 +31,72 @@ jobs:
       number: ${{ steps.pr.outputs.number }}
       android: ${{ steps.pr.outputs.android }}
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
       - id: pr
         env:
           GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          EVENT_NAME: ${{ github.event_name }}
         shell: bash
         run: |
           set -Eeuo pipefail
-          selected=""
-          set +e
-          selected="$(gh api "/repos/$PRIVATE_REPOSITORY/pulls?state=open&per_page=100" \
-            --jq '[.[] | select(
-              (.head.ref | startswith("agent/orchestrator/vm-autonomous-")) or
-              (.head.ref | startswith("hardening/failproof-")) or
-              (.head.ref | startswith("fix/signer-")) or
-              (.head.ref | startswith("hotfix/signer-")) or
-              (.head.ref | startswith("hardening/hosted-signer-continuity-"))
-            )] | sort_by(.updated_at) | reverse | .[0] |
-            if . == null then "" else [.head.sha,.base.sha,(.number|tostring)] | @tsv end' \
-            2>/tmp/omega-pr-discovery.err)"
-          pr_rc=$?
-          set -e
-
-          if [ "$pr_rc" -eq 0 ] && [ -n "$selected" ]; then
-            IFS=$'\t' read -r sha base_sha number <<< "$selected"
-            mode="pull"
-          else
-            branch_selected="$(gh api "/repos/$PRIVATE_REPOSITORY/branches?per_page=100" \
-              --jq '[.[] | select(
-                (.name | startswith("agent/orchestrator/vm-autonomous-")) or
-                (.name | startswith("hardening/failproof-")) or
-                (.name | startswith("fix/signer-")) or
-                (.name | startswith("hotfix/signer-")) or
-                (.name | startswith("hardening/hosted-signer-continuity-"))
-              )] | sort_by(.name) | reverse | .[0] |
-              if . == null then "" else [.commit.sha] | @tsv end')"
-            if [ -z "$branch_selected" ]; then
-              echo "found=false" >> "$GITHUB_OUTPUT"
-              echo "OMEGA_HOSTED_PR_NONE pr_rc=$pr_rc"
-              exit 0
+          requested_sha=''
+          if [ "$EVENT_NAME" = push ] && [ -s bootstrap/omega/pr-validation-trigger.txt ]; then
+            read -r marker candidate _ < bootstrap/omega/pr-validation-trigger.txt || true
+            if [ "${marker:-}" = validate-exact-pr ] && [[ "${candidate:-}" =~ ^[0-9a-f]{40}$ ]]; then
+              requested_sha="$candidate"
             fi
-            sha="$branch_selected"
-            base_sha="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/main" --jq '.sha')"
-            number="0"
-            mode="branch"
           fi
 
-          [[ "$sha" =~ ^[0-9a-f]{40}$ && "$base_sha" =~ ^[0-9a-f]{40}$ ]]
+          if [ -n "$requested_sha" ]; then
+            payload="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/$requested_sha/pulls?per_page=100")"
+            selected="$(printf '%s' "$payload" | jq -r --arg sha "$requested_sha" '
+              [.[] | select(type=="object")
+                | select(.state=="open" and (.draft|not) and .base.ref=="main" and .head.sha==$sha)
+                | select(
+                    (.head.ref|startswith("agent/orchestrator/vm-autonomous-")) or
+                    (.head.ref|startswith("hardening/failproof-")) or
+                    (.head.ref|startswith("fix/signer-")) or
+                    (.head.ref|startswith("hotfix/signer-")) or
+                    (.head.ref|startswith("hardening/hosted-signer-continuity-"))
+                  )]
+              | if length==1 then [.[0].head.sha,.[0].base.sha,(.[0].number|tostring)] | @tsv
+                elif length==0 then ""
+                else error("OMEGA_EXACT_TRIGGER_AMBIGUOUS") end
+            ')"
+            mode=exact_trigger
+          else
+            payload="$(gh api "/repos/$PRIVATE_REPOSITORY/pulls?state=open&per_page=100")"
+            selected="$(printf '%s' "$payload" | jq -r '
+              [.[] | select(type=="object")
+                | select((.head|type)=="object" and (.base|type)=="object")
+                | select(.state=="open" and (.draft|not) and .base.ref=="main")
+                | select(
+                    (.head.ref|startswith("agent/orchestrator/vm-autonomous-")) or
+                    (.head.ref|startswith("hardening/failproof-")) or
+                    (.head.ref|startswith("fix/signer-")) or
+                    (.head.ref|startswith("hotfix/signer-")) or
+                    (.head.ref|startswith("hardening/hosted-signer-continuity-"))
+                  )]
+              | sort_by(.updated_at) | reverse
+              | if length==0 then "" else [.[0].head.sha,.[0].base.sha,(.[0].number|tostring)] | @tsv end
+            ')"
+            mode=scheduled_pull
+          fi
+
+          if [ -z "$selected" ]; then
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            echo "OMEGA_HOSTED_PR_NONE mode=$mode requested_sha=${requested_sha:-none}"
+            exit 0
+          fi
+
+          IFS=$'\t' read -r sha base_sha number <<< "$selected"
+          [[ "$sha" =~ ^[0-9a-f]{40}$ && "$base_sha" =~ ^[0-9a-f]{40}$ && "$number" =~ ^[0-9]+$ ]]
+
           android=false
-          if [ "$number" != "0" ]; then
-            if gh api --paginate "/repos/$PRIVATE_REPOSITORY/pulls/$number/files?per_page=100" --jq '.[].filename' \
-              | grep -Eq '^(android/|\.github/workflows/android-[^/]+\.yml$)'; then
-              android=true
-            fi
-          elif gh api "/repos/$PRIVATE_REPOSITORY/compare/$base_sha...$sha" --jq '.files[].filename' \
+          if gh api --paginate "/repos/$PRIVATE_REPOSITORY/pulls/$number/files?per_page=100" --jq '.[].filename' \
             | grep -Eq '^(android/|\.github/workflows/android-[^/]+\.yml$)'; then
             android=true
           fi
