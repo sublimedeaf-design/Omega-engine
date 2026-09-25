@@ -14,7 +14,10 @@ permissions:
   contents: read
 
 concurrency:
-  group: omega-hosted-recovery-failover
+  # Routine schedules serialize with each other. Explicit push probes use their
+  # public trigger/config commit SHA so a later schedule cannot evict a queued
+  # exact-SHA candidate from GitHub's single-pending concurrency slot.
+  group: omega-hosted-recovery-failover-${{ github.event_name == 'schedule' && 'routine' || github.sha }}
   cancel-in-progress: false
 
 env:
