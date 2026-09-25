@@ -123,8 +123,8 @@ jobs:
           echo "OMEGA_HOSTED_PR_PIN mode=exact_sha number=0 sha=$requested_sha android=$android"
 
   ci:
-    needs: discover
-    if: ${{ needs.discover.outputs.found == 'true' }}
+    needs: [discover, governance]
+    if: ${{ needs.discover.outputs.found == 'true' && needs.governance.result == 'success' }}
     strategy:
       fail-fast: false
       matrix:
@@ -245,8 +245,8 @@ jobs:
             -f description="public hosted exact-PR governance: $RESULT" >/dev/null
 
   android:
-    needs: discover
-    if: ${{ needs.discover.outputs.found == 'true' && needs.discover.outputs.android == 'true' }}
+    needs: [discover, governance]
+    if: ${{ needs.discover.outputs.found == 'true' && needs.discover.outputs.android == 'true' && needs.governance.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
