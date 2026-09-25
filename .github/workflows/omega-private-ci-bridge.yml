@@ -13,6 +13,9 @@ on:
 permissions:
   contents: read
 
+# Exact-source proof path: no dependency/build cache enters the trust boundary.
+cache-mode: none
+
 concurrency:
   group: omega-private-ci-hosted-bridge
   cancel-in-progress: false
