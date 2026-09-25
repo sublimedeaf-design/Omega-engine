@@ -1,0 +1,27 @@
+name: OMEGA Control Plane Integrity
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/**"
+      - "scripts/verify_control_plane.rb"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: omega-control-plane-integrity
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Verify workflow syntax, immutable actions and failproof contracts
+        shell: bash
+        run: ruby scripts/verify_control_plane.rb
