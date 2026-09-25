@@ -228,3 +228,4 @@ jobs:
           set +x
           state=failure; [ "$RESULT" = success ] && state=success
           gh api --method POST "/repos/sublimedeaf-design/Omega-engines/statuses/$OMEGA_SHA"             -f state="$state" -f context="omega/hosted-governance"             -f description="public hosted governance: $RESULT" >/dev/null
+# support exact-head evidence stamp: autopilot-fastpath-v1

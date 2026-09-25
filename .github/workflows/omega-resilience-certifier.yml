@@ -39,3 +39,4 @@ jobs:
           OMEGA_GITHUB_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
           OMEGA_CERTIFIER_TARGET_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: node control-plane/certify-github.mjs
+# support exact-head evidence stamp: autopilot-fastpath-v1
