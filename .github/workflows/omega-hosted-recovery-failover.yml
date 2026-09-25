@@ -188,6 +188,17 @@ jobs:
           retention-days: 2
           if-no-files-found: error
 
+      - name: Preserve failed pre-recovery diagnostics
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: omega-hosted-recovery-failure-${{ needs.pin.outputs.sha }}-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/omega-state/evidence
+            ${{ runner.temp }}/omega-state/logs
+          retention-days: 2
+          if-no-files-found: warn
+
   post_recovery:
     needs: [pin, pre_recovery]
     if: ${{ always() && needs.pin.outputs.need_run == 'true' && needs.pre_recovery.result == 'success' }}
