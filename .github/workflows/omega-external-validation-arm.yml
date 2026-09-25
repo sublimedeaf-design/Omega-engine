@@ -140,6 +140,7 @@ jobs:
             [ "$rc" -eq 0 ] || exit "$rc"
           fi
 
+          dispatch_ref="${GITHUB_REF_NAME:-main}"
           gh api --method POST "/repos/$PUBLIC_REPOSITORY/actions/workflows/omega-external-validator-dispatch.yml/dispatches" \
-            -f ref=main >/dev/null
-          echo "OMEGA_EXTERNAL_ARM_DISPATCHED sha=$sha mode=public-workflow-dispatch"
+            -f ref="$dispatch_ref" >/dev/null
+          echo "OMEGA_EXTERNAL_ARM_DISPATCHED sha=$sha mode=public-workflow-dispatch ref=$dispatch_ref"
