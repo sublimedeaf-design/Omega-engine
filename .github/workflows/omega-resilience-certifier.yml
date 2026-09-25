@@ -14,6 +14,9 @@ on:
 permissions:
   contents: read
 
+# Exact-source proof path: no dependency/build cache enters the trust boundary.
+cache-mode: none
+
 concurrency:
   group: omega-resilience-certifier
   cancel-in-progress: true
