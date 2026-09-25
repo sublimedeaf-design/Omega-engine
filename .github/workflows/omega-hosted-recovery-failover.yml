@@ -8,6 +8,7 @@ on:
   push:
     paths:
       - ".github/workflows/omega-hosted-recovery-failover.yml"
+      - "bootstrap/omega/recovery-trigger.txt"
 
 permissions:
   contents: read
