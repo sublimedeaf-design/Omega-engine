@@ -29,17 +29,33 @@ jobs:
         shell: bash
         run: |
           set +x
-          name="$(gh api -X GET /user/codespaces -f per_page=100 --jq '
+          row="$(gh api -X GET /user/codespaces -f per_page=100 --jq '
             [.codespaces[]
               | select(.repository.full_name=="sublimedeaf-design/Omega-engines")
-              | select((.git_status.ref // "")=="main" or (.git_status.ref // "")=="refs/heads/main")
-              | select(((.state // "")|ascii_downcase)=="available" or ((.state // "")|ascii_downcase)=="running")]
-            | sort_by(.last_used_at // .created_at) | reverse | .[0].name // empty')"
-          [ -n "$name" ] || { echo "OMEGA_OBSERVER_RUNTIME_NOT_AVAILABLE"; exit 2; }
+              | select((.git_status.ref // "")=="main" or (.git_status.ref // "")=="refs/heads/main")]
+            | sort_by(.last_used_at // .created_at) | reverse | .[0] // empty')"
+          if [ -z "$row" ]; then
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "OMEGA_OBSERVER_RUNTIME_NOT_FOUND"
+            exit 0
+          fi
+          name="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["name"])' <<<"$row")"
+          state="$(python3 -c 'import json,sys; print(str(json.load(sys.stdin).get("state") or "").lower())' <<<"$row")"
           echo "codespace_name=$name" >> "$GITHUB_OUTPUT"
-          echo "OMEGA_OBSERVER_RUNTIME_FOUND"
+          echo "codespace_state=$state" >> "$GITHUB_OUTPUT"
+          case "$state" in
+            available|running)
+              echo "available=true" >> "$GITHUB_OUTPUT"
+              echo "OMEGA_OBSERVER_RUNTIME_FOUND state=$state"
+              ;;
+            *)
+              echo "available=false" >> "$GITHUB_OUTPUT"
+              echo "OMEGA_OBSERVER_RUNTIME_UNAVAILABLE state=$state hosted_failover=true"
+              ;;
+          esac
 
       - name: Read redacted acceptance state
+        if: ${{ steps.runtime.outputs.available == 'true' }}
         env:
           OMEGA_CODESPACE_NAME: ${{ steps.runtime.outputs.codespace_name }}
         shell: bash
