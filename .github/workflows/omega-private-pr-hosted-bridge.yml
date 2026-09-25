@@ -45,7 +45,7 @@ jobs:
           set -Eeuo pipefail
           requested_sha=''
           if [ -s bootstrap/omega/pr-validation-trigger.txt ]; then
-            read -r marker candidate _ < bootstrap/omega/pr-validation-trigger.txt || true
+            read -r marker candidate source_ref _ < bootstrap/omega/pr-validation-trigger.txt || true
             if [ "${marker:-}" = validate-exact-pr ] && [[ "${candidate:-}" =~ ^[0-9a-f]{40}$ ]]; then
               requested_sha="$candidate"
             fi
@@ -66,11 +66,16 @@ jobs:
             echo "OMEGA_EXACT_TRIGGER_NOT_CURRENT_BASE:status=$relation behind=$behind base=$base_sha head=$requested_sha" >&2
             exit 66
           fi
-          gh api "/repos/$PRIVATE_REPOSITORY/pulls?state=open&base=main&per_page=100" |
-            WANTED="$requested_sha" python3 -c 'import json,os,sys; p=json.load(sys.stdin); w=os.environ["WANTED"]; raise SystemExit(0 if any(str((x.get("head") or {}).get("sha") or "")==w for x in p) else 1)' || {
-              echo "OMEGA_EXACT_TRIGGER_NOT_OPEN_PR_HEAD:head=$requested_sha" >&2
-              exit 67
-            }
+          [[ "${source_ref:-}" =~ ^[A-Za-z0-9._/-]+$ ]] || {
+            echo "OMEGA_EXACT_TRIGGER_REF_INVALID:head=$requested_sha ref=${source_ref:-missing}" >&2
+            exit 67
+          }
+          case "$source_ref" in *..*|/*|-*) echo "OMEGA_EXACT_TRIGGER_REF_UNSAFE:$source_ref" >&2; exit 67 ;; esac
+          ref_tip="$(gh api "/repos/$PRIVATE_REPOSITORY/commits?sha=$source_ref&per_page=1" --jq '.[0].sha // empty')"
+          [ "$ref_tip" = "$requested_sha" ] || {
+            echo "OMEGA_EXACT_TRIGGER_NOT_REF_TIP:head=$requested_sha ref=$source_ref tip=$ref_tip" >&2
+            exit 67
+          }
 
           android=false
           if printf '%s' "$compare" | jq -r '.files[]?.filename' \
