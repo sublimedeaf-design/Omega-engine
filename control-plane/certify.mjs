@@ -37,7 +37,8 @@ async function policy(token,sha){
   return JSON.parse(atob(raw));
 }
 function externalQuorum(map,p,now){
-  const suites=[...p.required_suites,p.android_suite];
+  const configured=Array.isArray(p.external_quorum_suites) ? p.external_quorum_suites : null;
+  const suites=configured && configured.length ? [...configured] : [...p.required_suites,p.android_suite];
   const providers={};
   const greens=[];
   for(const [name,spec] of Object.entries(p.providers||{})){
