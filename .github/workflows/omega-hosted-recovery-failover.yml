@@ -45,6 +45,11 @@ jobs:
           [[ "$main_sha" =~ ^[0-9a-f]{40}$ ]]
           sha="$main_sha"
           mode=main
+          assert_open_pr_head() {
+            local wanted="$1"
+            gh api "/repos/$PRIVATE_REPOSITORY/pulls?state=open&base=main&per_page=100" |
+              WANTED="$wanted" python3 -c 'import json,os,sys; p=json.load(sys.stdin); w=os.environ["WANTED"]; raise SystemExit(0 if any(str((x.get("head") or {}).get("sha") or "")==w for x in p) else 1)'
+          }
           if [ "$EVENT_NAME" = push ] && [ -s bootstrap/omega/recovery-trigger.txt ]; then
             read -r marker candidate _ < bootstrap/omega/recovery-trigger.txt || true
             if [ "${marker:-}" = recover-exact ]; then
@@ -58,6 +63,10 @@ jobs:
                   exit 66
                 fi
               fi
+              assert_open_pr_head "$candidate" || {
+                echo "OMEGA_RECOVERY_TRIGGER_NOT_OPEN_PR_HEAD:candidate=$candidate" >&2
+                exit 67
+              }
               sha="$candidate"
               mode=exact_candidate
             fi
