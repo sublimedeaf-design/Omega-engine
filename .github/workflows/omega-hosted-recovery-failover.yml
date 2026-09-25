@@ -13,7 +13,7 @@ permissions:
 
 concurrency:
   group: omega-hosted-recovery-failover
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 env:
   PRIVATE_REPOSITORY: sublimedeaf-design/Omega-engines
@@ -100,7 +100,7 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          bash deploy/codespaces/acceptance-test.sh
+          timeout --signal=TERM --kill-after=30s 50m bash deploy/codespaces/acceptance-test.sh
           test -s "$OMEGA_STATE/evidence/acceptance-pre-rebuild.json"
       - name: Record source and VM identity
         working-directory: omega
