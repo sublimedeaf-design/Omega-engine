@@ -25,7 +25,9 @@ PROVIDER = os.getenv("OMEGA_VALIDATOR_PROVIDER", "unknown")
 EXPECTED_PYTHON = os.getenv("OMEGA_VALIDATOR_EXPECTED_PYTHON", "3.13").strip()
 if EXPECTED_PYTHON not in {"3.11", "3.13", "3.14"}:
     raise RuntimeError("OMEGA_VALIDATOR_EXPECTED_PYTHON_INVALID")
-MAX_BUNDLE = int(os.getenv("OMEGA_VALIDATOR_MAX_BUNDLE_BYTES", str(20 * 1024 * 1024)))
+MAX_BUNDLE = int(os.getenv("OMEGA_VALIDATOR_MAX_BUNDLE_BYTES", str(100 * 1024 * 1024)))
+if MAX_BUNDLE < 1024 * 1024 or MAX_BUNDLE > 128 * 1024 * 1024:
+    raise RuntimeError("OMEGA_VALIDATOR_MAX_BUNDLE_BYTES_INVALID")
 STATE = Path(os.getenv("OMEGA_VALIDATOR_STATE", "/tmp/omega-validator-attestations"))
 STATE.mkdir(parents=True, exist_ok=True)
 LOCK = threading.Lock()
