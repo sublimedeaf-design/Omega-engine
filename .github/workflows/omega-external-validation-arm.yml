@@ -99,6 +99,7 @@ jobs:
           latest_created="$(gh api "/repos/$PUBLIC_REPOSITORY/actions/workflows/omega-external-validator-dispatch.yml/runs?per_page=1" \
             --jq '.workflow_runs[0].created_at // empty')"
           if [ -n "$latest_created" ]; then
+            set +e
             python3 - "$latest_created" <<'PY'
           import datetime,sys
           raw=sys.argv[1]
@@ -109,7 +110,9 @@ jobs:
               raise SystemExit(75)
           PY
             rc=$?
+            set -e
             if [ "$rc" -eq 75 ]; then exit 0; fi
+            [ "$rc" -eq 0 ] || exit "$rc"
           fi
 
           gh api --method POST "/repos/$PUBLIC_REPOSITORY/actions/workflows/omega-external-validator-dispatch.yml/dispatches" \
