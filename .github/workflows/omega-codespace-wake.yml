@@ -43,7 +43,7 @@ jobs:
         run: |
           python3 bootstrap/omega/codespace_wake.py
       - name: Hot-sync and reload private OMEGA runtime
-        if: ${{ steps.wake.outputs.codespace_name != '' && env.OMEGA_FORCE_RESTART != '1' }}
+        if: ${{ steps.wake.outputs.runtime_available == 'true' && env.OMEGA_FORCE_RESTART != '1' }}
         continue-on-error: true
         shell: bash
         env:
@@ -61,7 +61,7 @@ jobs:
 
       - name: Reuse any existing configured omega-ci runner
         id: reuse
-        if: ${{ steps.wake.outputs.codespace_name != '' && env.OMEGA_FORCE_RESTART != '1' && env.OMEGA_ENABLE_RUNNER_REPAIR == '1' }}
+        if: ${{ steps.wake.outputs.runtime_available == 'true' && env.OMEGA_FORCE_RESTART != '1' && env.OMEGA_ENABLE_RUNNER_REPAIR == '1' }}
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
@@ -149,7 +149,7 @@ jobs:
           fi
 
       - name: Repair omega-ci inside the existing Codespace
-        if: ${{ steps.wake.outputs.codespace_name != '' && env.OMEGA_FORCE_RESTART != '1' && env.OMEGA_ENABLE_RUNNER_REPAIR == '1' && steps.reuse.outputs.runner_reused != 'true' }}
+        if: ${{ steps.wake.outputs.runtime_available == 'true' && env.OMEGA_FORCE_RESTART != '1' && env.OMEGA_ENABLE_RUNNER_REPAIR == '1' && steps.reuse.outputs.runner_reused != 'true' }}
         continue-on-error: true
         shell: bash
         env:
@@ -178,7 +178,7 @@ jobs:
             'IFS= read -r OMEGA_RUNNER_REGISTRATION_TOKEN; export OMEGA_RUNNER_REGISTRATION_TOKEN; exec bash -s'
           unset registration_token
       - name: Verify private federation evidence externally
-        if: ${{ always() && steps.wake.outputs.codespace_name != '' }}
+        if: ${{ always() && steps.wake.outputs.runtime_available == 'true' }}
         continue-on-error: true
         shell: bash
         env:
@@ -215,7 +215,7 @@ jobs:
           PY
 
       - name: Bridge exact acceptance state to private commit status
-        if: ${{ always() && steps.wake.outputs.codespace_name != '' }}
+        if: ${{ always() && steps.wake.outputs.runtime_available == 'true' }}
         continue-on-error: true
         shell: bash
         env:
@@ -282,7 +282,7 @@ jobs:
           echo "OMEGA_ACCEPTANCE_STATUS_BRIDGED sha=$sha state=$state"
 
       - name: Observe private acceptance diagnostics
-        if: ${{ always() && steps.wake.outputs.codespace_name != '' }}
+        if: ${{ always() && steps.wake.outputs.runtime_available == 'true' }}
         continue-on-error: true
         shell: bash
         env:
