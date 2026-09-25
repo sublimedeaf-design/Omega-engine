@@ -1,0 +1,229 @@
+name: OMEGA Hosted Runtime Fallback
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Hosted shadow/data cycle to run
+        required: true
+        type: choice
+        options: [daily, t24, t60]
+        default: t24
+  schedule:
+    - cron: "17 2 * * *"
+    - cron: "7 * * * *"
+    - cron: "3,18,33,48 * * * *"
+  push:
+    paths:
+      - ".github/workflows/omega-hosted-runtime-fallback.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: omega-hosted-runtime-fallback
+  cancel-in-progress: false
+
+env:
+  PRIVATE_REPOSITORY: sublimedeaf-design/Omega-engines
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    outputs:
+      run: ${{ steps.target.outputs.run }}
+      mode: ${{ steps.target.outputs.mode }}
+      sha: ${{ steps.target.outputs.sha }}
+    steps:
+      - id: target
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          REQUESTED_MODE: ${{ inputs.mode || '' }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_SCHEDULE: ${{ github.event.schedule || '' }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          if [ "$EVENT_NAME" = "push" ]; then
+            {
+              echo "run=false"
+              echo "mode=none"
+              echo "sha=0000000000000000000000000000000000000000"
+            } >> "$GITHUB_OUTPUT"
+            echo "OMEGA_HOSTED_RUNTIME_CONFIG_CHECK"
+            exit 0
+          fi
+
+          mode="$REQUESTED_MODE"
+          if [ "$EVENT_NAME" = "schedule" ]; then
+            case "$EVENT_SCHEDULE" in
+              "17 2 * * *") mode=daily ;;
+              "7 * * * *") mode=t24 ;;
+              "3,18,33,48 * * * *") mode=t60 ;;
+              *) echo "OMEGA_HOSTED_RUNTIME_UNKNOWN_SCHEDULE:$EVENT_SCHEDULE" >&2; exit 64 ;;
+            esac
+          fi
+          case "$mode" in daily|t24|t60) ;; *) exit 64 ;; esac
+
+          set +x
+          sha="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/main" --jq '.sha')"
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
+
+          runtime_available=false
+          if payload="$(gh api -X GET /user/codespaces -f per_page=100 2>/dev/null)"; then
+            if printf '%s' "$payload" | python3 -c 'import json,sys; p=json.load(sys.stdin); ok=any((x.get("repository") or {}).get("full_name")=="sublimedeaf-design/Omega-engines" and str((x.get("git_status") or {}).get("ref") or "").replace("refs/heads/","")=="main" and str(x.get("state") or "").lower() in {"available","running"} for x in p.get("codespaces",[])); raise SystemExit(0 if ok else 1)'; then
+              runtime_available=true
+            fi
+          fi
+
+          run=true
+          if [ "$runtime_available" = true ]; then
+            run=false
+          fi
+          {
+            echo "run=$run"
+            echo "mode=$mode"
+            echo "sha=$sha"
+          } >> "$GITHUB_OUTPUT"
+          echo "OMEGA_HOSTED_RUNTIME_TARGET mode=$mode sha=$sha primary_runtime_available=$runtime_available run=$run"
+
+  fallback:
+    needs: discover
+    if: ${{ needs.discover.outputs.run == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      OMEGA_SHA: ${{ needs.discover.outputs.sha }}
+      OMEGA_MODE: ${{ needs.discover.outputs.mode }}
+      OMEGA_BOOTSTRAP_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+      OMEGA_ODDS_API_KEY: ${{ secrets.OMEGA_ODDS_API_KEY }}
+    steps:
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.13"
+
+      - name: Checkout exact private source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: ${{ env.PRIVATE_REPOSITORY }}
+          ref: ${{ env.OMEGA_SHA }}
+          token: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          persist-credentials: false
+          fetch-depth: 20
+          path: omega
+
+      - name: Run canonical hosted fallback cycle
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd omega
+          test "$(git rev-parse HEAD)" = "$OMEGA_SHA"
+          python -m venv .venv
+          mkdir -p "$RUNNER_TEMP/omega-state/evidence"
+
+          set +x
+          auth_header="$(python3 - <<'PY'
+          import base64,os
+          token=os.environ["OMEGA_BOOTSTRAP_TOKEN"]
+          print("AUTHORIZATION: basic "+base64.b64encode(("x-access-token:"+token).encode()).decode())
+          PY
+          )"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0='http.https://github.com/.extraheader'
+          export GIT_CONFIG_VALUE_0="$auth_header"
+          export OMEGA_REPO="$GITHUB_WORKSPACE/omega"
+          export OMEGA_HOME="$RUNNER_TEMP/omega-home"
+          export OMEGA_STATE="$RUNNER_TEMP/omega-state"
+          export OMEGA_LOCK="$RUNNER_TEMP/omega-state.lock"
+          export OMEGA_GIT_SHA="$OMEGA_SHA"
+          export OMEGA_GIT_REF=main
+          export OMEGA_ENV_FILE=/dev/null
+          export OMEGA_ALLOW_PUBLIC_PROVIDER_FALLBACK=1
+          timeout --signal=TERM --kill-after=30s 16m bash deploy/vm/omega-cycle.sh "$OMEGA_MODE"
+          auth_header=""
+          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+
+      - name: Promote only bounded shadow/data evidence
+        id: promote
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd omega
+          test "$(git rev-parse HEAD)" = "$OMEGA_SHA"
+
+          files=()
+          case "$OMEGA_MODE" in
+            daily)
+              mkdir -p evidence
+              cp data/fabric/inventory.json evidence/data-inventory.json
+              cp data/fabric/last_update.json evidence/data-last-update.json
+              cp data/fabric/history_overlay.json evidence/history-overlay.json
+              files=(evidence/data-inventory.json evidence/data-last-update.json evidence/history-overlay.json data/fabric/sync_state.json)
+              ;;
+            t24)
+              files=(evidence/latest-24h.json evidence/coverage-gaps.json evidence/forecast-ledger.jsonl evidence/prematch-intelligence.jsonl evidence/prematch-intelligence-refresh-24h.json data/fabric/sync_state.json)
+              ;;
+            t60)
+              files=(evidence/latest-t60.json evidence/shadow-ledger.jsonl evidence/prematch-intelligence.jsonl evidence/prematch-intelligence-refresh-t60.json)
+              ;;
+            *) exit 64 ;;
+          esac
+
+          if ! git diff --quiet -- android/ evidence/release-stage.json; then
+            echo "OMEGA_HOSTED_RUNTIME_FORBIDDEN_RELEASE_MUTATION" >&2
+            exit 88
+          fi
+
+          git config user.name omega-hosted-runtime
+          git config user.email omega-hosted-runtime@users.noreply.github.com
+          for f in "${files[@]}"; do
+            [ -e "$f" ] && git add "$f"
+          done
+          if git diff --cached --quiet; then
+            echo "promotion_status=no_change" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git commit -m "omega: hosted $OMEGA_MODE fallback evidence"
+
+          set +x
+          auth_header="$(python3 - <<'PY'
+          import base64,os
+          token=os.environ["OMEGA_BOOTSTRAP_TOKEN"]
+          print("AUTHORIZATION: basic "+base64.b64encode(("x-access-token:"+token).encode()).decode())
+          PY
+          )"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0='http.https://github.com/.extraheader'
+          export GIT_CONFIG_VALUE_0="$auth_header"
+          git fetch origin main
+          set +e
+          python scripts/verify_evidence_rebase.py --base "$OMEGA_SHA" --head origin/main
+          guard=$?
+          set -e
+          if [ "$guard" -eq 3 ]; then
+            echo "promotion_status=deferred" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          [ "$guard" -eq 0 ] || exit "$guard"
+          git rebase origin/main
+          git push origin HEAD:main
+          auth_header=""
+          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+          echo "promotion_status=promoted" >> "$GITHUB_OUTPUT"
+
+      - name: Publish hosted runtime fallback status
+        if: ${{ always() }}
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          RESULT: ${{ job.status }}
+        shell: bash
+        run: |
+          set +x
+          state=failure
+          [ "$RESULT" = success ] && state=success
+          gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$OMEGA_SHA" \
+            -f state="$state" \
+            -f context="omega/hosted-runtime-fallback/$OMEGA_MODE" \
+            -f description="public hosted shadow/data fallback: $RESULT" \
+            -f target_url="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" >/dev/null
