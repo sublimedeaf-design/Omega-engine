@@ -1,0 +1,211 @@
+name: OMEGA External Validator Dispatch
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17,47 * * * *"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/omega-external-validator-dispatch.yml"
+      - "external_validator/**"
+      - "bootstrap/omega/external-validator-trigger.txt"
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: omega-external-validator-dispatch
+  cancel-in-progress: true
+
+env:
+  PRIVATE_REPOSITORY: sublimedeaf-design/Omega-engines
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      ready: ${{ steps.pin.outputs.ready }}
+      sha: ${{ steps.pin.outputs.sha }}
+    steps:
+      - id: pin
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          set +x
+          sha="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/main" --jq '.sha')"
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
+          statuses="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/$sha/status?per_page=100")"
+          ready="$(printf '%s' "$statuses" | python3 -c '
+          import json,sys
+          p=json.load(sys.stdin)
+          latest={}
+          for row in p.get("statuses",[]):
+              c=str(row.get("context") or "")
+              if c and c not in latest:
+                  latest[c]=str(row.get("state") or "")
+          required=[
+              "omega/hosted-ci/python311",
+              "omega/hosted-ci/python313",
+              "omega/hosted-ci/python314",
+              "omega/hosted-ci/storage",
+              "omega/hosted-governance",
+          ]
+          print("true" if all(latest.get(x)=="success" for x in required) else "false")
+          ')"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "ready=$ready" >> "$GITHUB_OUTPUT"
+          echo "OMEGA_EXTERNAL_PIN sha=$sha hosted_core_green=$ready"
+
+  github_provider:
+    needs: discover
+    if: ${{ needs.discover.outputs.ready == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Publish GitHub-hosted provider attestations
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          SHA: ${{ needs.discover.outputs.sha }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          set +x
+          target="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          for suite in python311 python313 python314 storage governance; do
+            gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$SHA" \
+              -f state=success \
+              -f context="omega/external/github/$suite" \
+              -f description="GitHub-hosted exact-SHA $suite attested" \
+              -f target_url="$target" >/dev/null
+          done
+
+  render_provider:
+    needs: discover
+    if: ${{ needs.discover.outputs.ready == 'true' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runtime: py311
+            url: https://omega-external-validator-render-py311.onrender.com
+            contexts: python311
+          - runtime: py313
+            url: https://omega-external-validator-render.onrender.com
+            contexts: python313 storage governance
+          - runtime: py314
+            url: https://omega-external-validator-render-py314.onrender.com
+            contexts: python314
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: ${{ env.PRIVATE_REPOSITORY }}
+          ref: ${{ needs.discover.outputs.sha }}
+          token: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          persist-credentials: false
+          fetch-depth: 1
+          path: omega
+
+      - name: Build exact-source bounded bundle
+        env:
+          SHA: ${{ needs.discover.outputs.sha }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(git -C omega rev-parse HEAD)" = "$SHA"
+          tar -C omega -czf /tmp/omega-exact-source.tgz .
+          bytes="$(stat -c '%s' /tmp/omega-exact-source.tgz)"
+          test "$bytes" -gt 0
+          test "$bytes" -le $((100*1024*1024))
+          sha256sum /tmp/omega-exact-source.tgz | tee /tmp/omega-exact-source.tgz.sha256
+          echo "OMEGA_RENDER_BUNDLE bytes=$bytes source=$SHA"
+
+      - name: Request GitHub OIDC token for external validator
+        id: oidc
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          response="$(curl -fsS \
+            -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=omega-external-validator")"
+          token="$(printf '%s' "$response" | jq -r '.value')"
+          test -n "$token" && test "$token" != null
+          echo "::add-mask::$token"
+          printf '%s' "$token" > /tmp/omega-validator-oidc
+
+      - name: Dispatch exact source to Render validator
+        env:
+          SHA: ${{ needs.discover.outputs.sha }}
+          VALIDATOR_URL: ${{ matrix.url }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          set +x
+          token="$(cat /tmp/omega-validator-oidc)"
+          curl -fsS --retry 5 --retry-all-errors --connect-timeout 30 --max-time 180 \
+            -H "Authorization: Bearer $token" \
+            -H "X-OMEGA-SHA: $SHA" \
+            -H "Content-Type: application/gzip" \
+            --data-binary @/tmp/omega-exact-source.tgz \
+            "$VALIDATOR_URL/validate" | tee /tmp/omega-validator-dispatch.json
+          python3 - <<'PY'
+          import json
+          p=json.load(open('/tmp/omega-validator-dispatch.json'))
+          assert p.get('ok') is True,p
+          assert p.get('sha'),p
+          PY
+
+      - name: Poll immutable Render attestation
+        env:
+          SHA: ${{ needs.discover.outputs.sha }}
+          VALIDATOR_URL: ${{ matrix.url }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          state=""
+          for _ in $(seq 1 120); do
+            code="$(curl -sS --connect-timeout 20 --max-time 60 \
+              -o /tmp/omega-render-attestation.json -w '%{http_code}' \
+              "$VALIDATOR_URL/attestation/$SHA" || true)"
+            if [ "$code" = 200 ]; then
+              state="$(python3 -c 'import json; print(json.load(open("/tmp/omega-render-attestation.json")).get("state",""))')"
+              case "$state" in
+                success) exit 0 ;;
+                failure)
+                  cat /tmp/omega-render-attestation.json
+                  exit 20
+                  ;;
+              esac
+            fi
+            sleep 20
+          done
+          echo "OMEGA_RENDER_ATTESTATION_TIMEOUT state=$state" >&2
+          exit 21
+
+      - name: Publish provider-bound Render statuses
+        if: ${{ always() }}
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          SHA: ${{ needs.discover.outputs.sha }}
+          VALIDATOR_URL: ${{ matrix.url }}
+          CONTEXTS: ${{ matrix.contexts }}
+          RESULT: ${{ job.status }}
+        shell: bash
+        run: |
+          set +x
+          state=failure
+          [ "$RESULT" = success ] && state=success
+          target="$VALIDATOR_URL/attestation/$SHA"
+          for suite in $CONTEXTS; do
+            gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$SHA" \
+              -f state="$state" \
+              -f context="omega/external/render/$suite" \
+              -f description="Render exact-SHA $suite validator: $RESULT" \
+              -f target_url="$target" >/dev/null
+          done
