@@ -18,7 +18,7 @@ concurrency:
 
 env:
   PRIVATE_REPOSITORY: sublimedeaf-design/Omega-engines
-  CANDIDATE_SHA: 5ba9e27ce75771d3e8349bbd54c472c7622cc766
+  CANDIDATE_SHA: 8e77abb8b66e7cdd6423809223597ea35b49c7cf
 
 jobs:
   smoke:
@@ -52,13 +52,14 @@ jobs:
 
           from omega.live.espn_provider import discover as espn_discover
           from omega.live.thesportsdb_provider import discover as tsdb_discover
+          from omega.live.worldcup26_provider import discover as worldcup26_discover
           from omega.live.openfoot_provider import discover as openfoot_discover
 
           now=datetime.now(timezone.utc)
           providers={}
           all_rows=[]
 
-          for name,fn in (("espn",espn_discover),("thesportsdb",tsdb_discover),("openfoot",openfoot_discover)):
+          for name,fn in (("espn",espn_discover),("worldcup26",worldcup26_discover),("thesportsdb",tsdb_discover),("openfoot",openfoot_discover)):
               try:
                   rows,meta=fn(now,horizon_hours=30)
               except Exception as exc:
@@ -87,7 +88,7 @@ jobs:
 
           payload={
               "schema_version":1,
-              "candidate_sha":"5ba9e27ce75771d3e8349bbd54c472c7622cc766",
+              "candidate_sha":"8e77abb8b66e7cdd6423809223597ea35b49c7cf",
               "observed_at":now.isoformat(),
               "horizon_hours":30,
               "providers":providers,
