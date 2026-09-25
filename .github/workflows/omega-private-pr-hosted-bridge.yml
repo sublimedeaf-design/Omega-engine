@@ -62,6 +62,17 @@ jobs:
 
           base_sha="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/main" --jq '.sha')"
           [[ "$base_sha" =~ ^[0-9a-f]{40}$ ]]
+          [[ "${source_ref:-}" =~ ^[A-Za-z0-9._/-]+$ ]] || {
+            echo "OMEGA_EXACT_TRIGGER_REF_INVALID:head=$requested_sha ref=${source_ref:-missing}" >&2
+            exit 67
+          }
+          case "$source_ref" in *..*|/*|-*) echo "OMEGA_EXACT_TRIGGER_REF_UNSAFE:$source_ref" >&2; exit 67 ;; esac
+          ref_tip="$(gh api "/repos/$PRIVATE_REPOSITORY/commits?sha=$source_ref&per_page=1" --jq '.[0].sha // empty')"
+          [[ "$ref_tip" =~ ^[0-9a-f]{40}$ ]] || { echo "OMEGA_EXACT_TRIGGER_REF_TIP_INVALID:$source_ref" >&2; exit 67; }
+          if [ "$ref_tip" != "$requested_sha" ]; then
+            echo "OMEGA_EXACT_TRIGGER_ADVANCED stale=$requested_sha current=$ref_tip ref=$source_ref"
+            requested_sha="$ref_tip"
+          fi
           compare="$(gh api "/repos/$PRIVATE_REPOSITORY/compare/$base_sha...$requested_sha")"
           relation="$(printf '%s' "$compare" | jq -r '.status // ""')"
           behind="$(printf '%s' "$compare" | jq -r '.behind_by // 999999')"
@@ -69,16 +80,6 @@ jobs:
             echo "OMEGA_EXACT_TRIGGER_NOT_CURRENT_BASE:status=$relation behind=$behind base=$base_sha head=$requested_sha" >&2
             exit 66
           fi
-          [[ "${source_ref:-}" =~ ^[A-Za-z0-9._/-]+$ ]] || {
-            echo "OMEGA_EXACT_TRIGGER_REF_INVALID:head=$requested_sha ref=${source_ref:-missing}" >&2
-            exit 67
-          }
-          case "$source_ref" in *..*|/*|-*) echo "OMEGA_EXACT_TRIGGER_REF_UNSAFE:$source_ref" >&2; exit 67 ;; esac
-          ref_tip="$(gh api "/repos/$PRIVATE_REPOSITORY/commits?sha=$source_ref&per_page=1" --jq '.[0].sha // empty')"
-          [ "$ref_tip" = "$requested_sha" ] || {
-            echo "OMEGA_EXACT_TRIGGER_NOT_REF_TIP:head=$requested_sha ref=$source_ref tip=$ref_tip" >&2
-            exit 67
-          }
 
           android=false
           if printf '%s' "$compare" | jq -r '.files[]?.filename' \
