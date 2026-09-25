@@ -1,1 +1,1 @@
-validate-exact-pr 96d9e042985518796cdae0591873783e7fa32e03
+validate-exact-pr 96d9e042985518796cdae0591873783e7fa32e03 hardening/failproof-dual-localbrain-recovery-20260925
