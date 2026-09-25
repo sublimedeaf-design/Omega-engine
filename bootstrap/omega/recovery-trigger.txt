@@ -1,1 +1,1 @@
-recover-exact 105c01a57cee3623b6aa3fcc394237088283736d hardening/failproof-dual-localbrain-recovery-20260925 auto-tip-schema-v5
+recover-exact 7b825618360b356b221a4197e2f68905cfc6aefe hardening/failproof-dual-localbrain-recovery-20260925 recovery-v2-schema-v6
