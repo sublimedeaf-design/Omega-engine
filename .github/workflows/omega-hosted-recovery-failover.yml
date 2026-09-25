@@ -104,7 +104,7 @@ jobs:
           path: |
             ${{ runner.temp }}/omega-state/llama.cpp
             ${{ runner.temp }}/omega-state/model-cache
-          key: omega-localbrain-linux-x64-b29c606e28a01b1bc8c1351026a0fa6e616bf6c4-cc324af070c2ecbfd324a30884d2f951a7ff756aba85cb811a6ec436933bb046
+          key: omega-localbrain-linux-x64-b29c606e28a01b1bc8c1351026a0fa6e616bf6c4-cc324af070c2ecbfd324a30884d2f951a7ff756aba85cb811a6ec436933bb046-qa-1d9614638d18024d0fbb36575a15f1302a3adf044df10345688ec4f6e1c4ff32
       - name: Prepare exact hosted runtime
         shell: bash
         run: |
@@ -190,7 +190,7 @@ jobs:
           path: |
             ${{ runner.temp }}/omega-state/llama.cpp
             ${{ runner.temp }}/omega-state/model-cache
-          key: omega-localbrain-linux-x64-b29c606e28a01b1bc8c1351026a0fa6e616bf6c4-cc324af070c2ecbfd324a30884d2f951a7ff756aba85cb811a6ec436933bb046
+          key: omega-localbrain-linux-x64-b29c606e28a01b1bc8c1351026a0fa6e616bf6c4-cc324af070c2ecbfd324a30884d2f951a7ff756aba85cb811a6ec436933bb046-qa-1d9614638d18024d0fbb36575a15f1302a3adf044df10345688ec4f6e1c4ff32
       - name: Prepare clean recovery VM
         shell: bash
         run: |
