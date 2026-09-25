@@ -158,8 +158,17 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          sudo apt-get -o Acquire::Retries=4 update -qq
-          sudo apt-get -o Acquire::Retries=4 install -y --no-install-recommends build-essential cmake ninja-build pkg-config libcurl4-openssl-dev zstd
+          need_apt=false
+          for cmd in gcc g++ make cmake ninja pkg-config zstd; do
+            command -v "$cmd" >/dev/null 2>&1 || need_apt=true
+          done
+          pkg-config --exists libcurl >/dev/null 2>&1 || need_apt=true
+          if [ "$need_apt" = true ]; then
+            sudo apt-get -o Acquire::Retries=4 update -qq
+            sudo apt-get -o Acquire::Retries=4 install -y --no-install-recommends build-essential cmake ninja-build pkg-config libcurl4-openssl-dev zstd
+          else
+            echo "OMEGA_HOSTED_PREREQS_REUSED"
+          fi
           if [ -d "$ANDROID_HOME/platforms/android-36" ] && [ -x "$ANDROID_HOME/build-tools/36.0.0/apksigner" ]; then
             echo "OMEGA_ANDROID_SDK_REUSED platform=36 build_tools=36.0.0"
           else
@@ -293,8 +302,17 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          sudo apt-get -o Acquire::Retries=4 update -qq
-          sudo apt-get -o Acquire::Retries=4 install -y --no-install-recommends build-essential cmake ninja-build pkg-config libcurl4-openssl-dev zstd
+          need_apt=false
+          for cmd in gcc g++ make cmake ninja pkg-config zstd; do
+            command -v "$cmd" >/dev/null 2>&1 || need_apt=true
+          done
+          pkg-config --exists libcurl >/dev/null 2>&1 || need_apt=true
+          if [ "$need_apt" = true ]; then
+            sudo apt-get -o Acquire::Retries=4 update -qq
+            sudo apt-get -o Acquire::Retries=4 install -y --no-install-recommends build-essential cmake ninja-build pkg-config libcurl4-openssl-dev zstd
+          else
+            echo "OMEGA_HOSTED_PREREQS_REUSED"
+          fi
           if [ -d "$ANDROID_HOME/platforms/android-36" ] && [ -x "$ANDROID_HOME/build-tools/36.0.0/apksigner" ]; then
             echo "OMEGA_ANDROID_SDK_REUSED platform=36 build_tools=36.0.0"
           else
