@@ -102,6 +102,10 @@ jobs:
           cp "$(one "$RUNNER_TEMP/t24" coverage-gaps.json)" omega/android/app/src/main/assets/evidence/coverage-gaps.json
           cp "$(one "$RUNNER_TEMP/t60" latest-t60.json)" omega/android/app/src/main/assets/evidence/latest-t60.json
 
+          python3 scripts/prepare_prediction_viewer_snapshot.py \
+            --hosted-dir android/app/src/main/assets/evidence \
+            --canonical-dir evidence
+
           python3 - <<'PY'
           import json
           from pathlib import Path
