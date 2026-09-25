@@ -1,1 +1,1 @@
-recover-exact 96d9e042985518796cdae0591873783e7fa32e03 hardening/failproof-dual-localbrain-recovery-20260925
+recover-exact 96d9e042985518796cdae0591873783e7fa32e03 hardening/failproof-dual-localbrain-recovery-20260925 cache-read-v1
