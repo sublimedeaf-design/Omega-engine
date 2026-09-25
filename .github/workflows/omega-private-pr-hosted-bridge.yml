@@ -66,6 +66,11 @@ jobs:
             echo "OMEGA_EXACT_TRIGGER_NOT_CURRENT_BASE:status=$relation behind=$behind base=$base_sha head=$requested_sha" >&2
             exit 66
           fi
+          gh api "/repos/$PRIVATE_REPOSITORY/pulls?state=open&base=main&per_page=100" |
+            WANTED="$requested_sha" python3 -c 'import json,os,sys; p=json.load(sys.stdin); w=os.environ["WANTED"]; raise SystemExit(0 if any(str((x.get("head") or {}).get("sha") or "")==w for x in p) else 1)' || {
+              echo "OMEGA_EXACT_TRIGGER_NOT_OPEN_PR_HEAD:head=$requested_sha" >&2
+              exit 67
+            }
 
           android=false
           if printf '%s' "$compare" | jq -r '.files[]?.filename' \
