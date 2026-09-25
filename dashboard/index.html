@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#08111f">
+  <title>OMEGA Live Predictions</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <main class="shell">
+    <header>
+      <div>
+        <div class="eyebrow">OMEGA ENGINE</div>
+        <h1>Live voorspellingen</h1>
+        <p class="sub">Read-only overzicht van de laatst beschikbare T−24 en T−60 output.</p>
+      </div>
+      <button id="refresh" type="button">Vernieuwen</button>
+    </header>
+
+    <section id="health" class="health"></section>
+
+    <section class="toolbar">
+      <input id="search" type="search" placeholder="Zoek team of competitie…" autocomplete="off">
+      <select id="filter">
+        <option value="all">Alle voorspellingen</option>
+        <option value="eligible">Alleen bet-eligible</option>
+        <option value="upcoming">Alleen nog te spelen</option>
+      </select>
+    </section>
+
+    <section>
+      <div class="section-head">
+        <h2>T−24 / prematch</h2>
+        <span id="t24Meta"></span>
+      </div>
+      <div id="predictions" class="grid"></div>
+    </section>
+
+    <section>
+      <div class="section-head">
+        <h2>T−60 / beslislaag</h2>
+        <span id="t60Meta"></span>
+      </div>
+      <div id="t60" class="grid"></div>
+    </section>
+
+    <footer>
+      <span id="footerStatus">Laden…</span>
+      <span>Geen gokadvies · NO BET blijft een geldige uitkomst</span>
+    </footer>
+  </main>
+  <script src="./app.js" defer></script>
+</body>
+</html>
