@@ -1,13 +1,7 @@
-name: OMEGA External Validation Arm
+name: OMEGA Legacy External Validation Arm
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "*/15 * * * *"
-  push:
-    paths:
-      - ".github/workflows/omega-external-validation-arm.yml"
-      - "control-plane/**"
 
 permissions:
   contents: read
