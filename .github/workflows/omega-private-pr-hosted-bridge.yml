@@ -37,28 +37,40 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          row=""
-          pr_rc=0
+          selected=""
           set +e
-          row="$(gh api "/repos/$PRIVATE_REPOSITORY/pulls?state=open&per_page=100" 2>/tmp/omega-pr-discovery.err \
-            | jq '[.[] | select((.head.ref | startswith("agent/orchestrator/vm-autonomous-")) or (.head.ref | startswith("hardening/failproof-")) or (.head.ref | startswith("fix/signer-")) or (.head.ref | startswith("hotfix/signer-")) or (.head.ref | startswith("hardening/hosted-signer-continuity-")))] | sort_by(.updated_at) | reverse | .[0] // empty')"
+          selected="$(gh api "/repos/$PRIVATE_REPOSITORY/pulls?state=open&per_page=100" \
+            --jq '[.[] | select(
+              (.head.ref | startswith("agent/orchestrator/vm-autonomous-")) or
+              (.head.ref | startswith("hardening/failproof-")) or
+              (.head.ref | startswith("fix/signer-")) or
+              (.head.ref | startswith("hotfix/signer-")) or
+              (.head.ref | startswith("hardening/hosted-signer-continuity-"))
+            )] | sort_by(.updated_at) | reverse | .[0] |
+            if . == null then "" else [.head.sha,.base.sha,(.number|tostring)] | @tsv end' \
+            2>/tmp/omega-pr-discovery.err)"
           pr_rc=$?
           set -e
 
-          # Private-repo discovery remains read-only and prefix constrained.\n          if [ "$pr_rc" -eq 0 ] && [ -n "$row" ]; then
-            sha="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["head"]["sha"])' <<<"$row")"
-            base_sha="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["base"]["sha"])' <<<"$row")"
-            number="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["number"])' <<<"$row")"
+          if [ "$pr_rc" -eq 0 ] && [ -n "$selected" ]; then
+            IFS=$'\t' read -r sha base_sha number <<< "$selected"
             mode="pull"
           else
-            branch_row="$(gh api "/repos/$PRIVATE_REPOSITORY/branches?per_page=100" \
-              | jq '[.[] | select((.name | startswith("agent/orchestrator/vm-autonomous-")) or (.name | startswith("hardening/failproof-")) or (.name | startswith("fix/signer-")) or (.name | startswith("hotfix/signer-")) or (.name | startswith("hardening/hosted-signer-continuity-")))] | .[0] // empty')"
-            if [ -z "$branch_row" ]; then
+            branch_selected="$(gh api "/repos/$PRIVATE_REPOSITORY/branches?per_page=100" \
+              --jq '[.[] | select(
+                (.name | startswith("agent/orchestrator/vm-autonomous-")) or
+                (.name | startswith("hardening/failproof-")) or
+                (.name | startswith("fix/signer-")) or
+                (.name | startswith("hotfix/signer-")) or
+                (.name | startswith("hardening/hosted-signer-continuity-"))
+              )] | .[0] |
+              if . == null then "" else [.commit.sha] | @tsv end')"
+            if [ -z "$branch_selected" ]; then
               echo "found=false" >> "$GITHUB_OUTPUT"
               echo "OMEGA_HOSTED_PR_NONE pr_rc=$pr_rc"
               exit 0
             fi
-            sha="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["commit"]["sha"])' <<<"$branch_row")"
+            sha="$branch_selected"
             base_sha="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/main" --jq '.sha')"
             number="0"
             mode="branch"
