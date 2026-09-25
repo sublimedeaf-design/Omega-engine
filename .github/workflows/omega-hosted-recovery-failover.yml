@@ -4,7 +4,8 @@ name: OMEGA Hosted Recovery Failover
 on:
   workflow_dispatch:
   schedule:
-    - cron: "7,37 * * * *"
+    - cron: "7,37 * * * *"   # production-main recovery
+    - cron: "22,52 * * * *"  # current hardening-candidate recovery watchdog
   push:
     paths:
       - "bootstrap/omega/recovery-trigger.txt"
@@ -21,7 +22,7 @@ concurrency:
   # Serialize explicit recovery proofs and keep their queue. The pin job rejects
   # stale trigger revisions, preventing cancellation livelock and redundant
   # parallel recovery jobs from exhausting hosted-runner capacity.
-  group: omega-hosted-recovery-v2-${{ github.event_name == 'schedule' && 'routine' || 'exact-candidate' }}
+  group: omega-hosted-recovery-v2-${{ github.event_name == 'schedule' && (github.event.schedule == '22,52 * * * *' && 'candidate-watch' || 'routine-main') || 'exact-candidate' }}
   cancel-in-progress: false
   queue: max
 
@@ -43,6 +44,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
           EVENT_NAME: ${{ github.event_name }}
+          EVENT_SCHEDULE: ${{ github.event.schedule || '' }}
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -51,7 +53,11 @@ jobs:
           [[ "$main_sha" =~ ^[0-9a-f]{40}$ ]]
           sha="$main_sha"
           mode=main
-          if [ "$EVENT_NAME" = push ] && [ -s bootstrap/omega/recovery-trigger.txt ]; then
+          candidate_watch=false
+          if [ "$EVENT_NAME" = push ] || { [ "$EVENT_NAME" = schedule ] && [ "$EVENT_SCHEDULE" = "22,52 * * * *" ]; }; then
+            candidate_watch=true
+          fi
+          if [ "$candidate_watch" = true ] && [ -s bootstrap/omega/recovery-trigger.txt ]; then
             local_trigger="$(tr -d '\r\n' < bootstrap/omega/recovery-trigger.txt)"
             current_b64="$(gh api "/repos/${GITHUB_REPOSITORY}/contents/bootstrap/omega/recovery-trigger.txt?ref=main" --jq '.content' 2>/dev/null || true)"
             current_trigger=""
@@ -99,7 +105,9 @@ jobs:
           # Exact-candidate probes always rerun: a success emitted by an older
           # recovery implementation must never suppress validation of a newer
           # failproof protocol for the same source SHA.
-          if [ "$mode" != exact_candidate ] && printf '%s' "$payload" | python3 -c 'import json,sys; d=json.load(sys.stdin); latest={}; [(latest.setdefault(str(x.get("context") or ""),str(x.get("state") or ""))) for x in d.get("statuses",[]) if x.get("context")]; raise SystemExit(0 if latest.get("omega/hosted-recovery")=="success" else 1)'; then
+          # Explicit push probes always rerun. Scheduled main/candidate watchdogs
+          # skip an exact SHA that already has a green recovery certificate.
+          if { [ "$mode" != exact_candidate ] || [ "$EVENT_NAME" = schedule ]; } && printf '%s' "$payload" | python3 -c 'import json,sys; d=json.load(sys.stdin); latest={}; [(latest.setdefault(str(x.get("context") or ""),str(x.get("state") or ""))) for x in d.get("statuses",[]) if x.get("context")]; raise SystemExit(0 if latest.get("omega/hosted-recovery")=="success" else 1)'; then
             need_run=false
           fi
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
