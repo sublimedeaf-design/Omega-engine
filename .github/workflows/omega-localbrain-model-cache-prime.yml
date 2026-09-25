@@ -1,0 +1,79 @@
+name: OMEGA LocalBrain Model Cache Prime
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/omega-localbrain-model-cache-prime.yml"
+
+permissions:
+  contents: read
+
+cache-mode: write
+
+concurrency:
+  group: omega-localbrain-model-cache-prime-v1
+  cancel-in-progress: true
+
+env:
+  CACHE_KEY: omega-localbrain-models-v3-worker-cc324af070c2ecbfd324a30884d2f951a7ff756aba85cb811a6ec436933bb046-qa-1d9614638d18024d0fbb36575a15f1302a3adf044df10345688ec4f6e1c4ff32
+  WORKER_NAME: omega-qwen2.5-coder-1.5b-instruct-q4_k_m.gguf
+  WORKER_SHA256: cc324af070c2ecbfd324a30884d2f951a7ff756aba85cb811a6ec436933bb046
+  WORKER_URL: https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF/resolve/2ab9f8f42af02fc212effaef7c4850c885e965f4/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf?download=true
+  QA_NAME: omega-qwen2.5-coder-0.5b-instruct-q4_k_m.gguf
+  QA_SHA256: 1d9614638d18024d0fbb36575a15f1302a3adf044df10345688ec4f6e1c4ff32
+  QA_URL: https://huggingface.co/Qwen/Qwen2.5-Coder-0.5B-Instruct-GGUF/resolve/bf1da6ca8f02b444067db175f02a14e74f49c5c0/qwen2.5-coder-0.5b-instruct-q4_k_m.gguf?download=true
+
+jobs:
+  prime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      MODEL_CACHE: ${{ runner.temp }}/omega-state/model-cache
+    steps:
+      - name: Restore or schedule exact immutable model cache
+        id: cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: ${{ env.MODEL_CACHE }}
+          key: ${{ env.CACHE_KEY }}
+
+      - name: Download missing immutable model bytes
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p "$MODEL_CACHE"
+
+          fetch_verified() {
+            local name="$1" url="$2" expected="$3"
+            local target="$MODEL_CACHE/$name"
+
+            if [ -s "$target" ] &&
+               printf '%s  %s\n' "$expected" "$target" | sha256sum -c - >/dev/null 2>&1; then
+              echo "OMEGA_MODEL_CACHE_REUSE name=$name sha256=$expected"
+              return 0
+            fi
+
+            rm -f "$target"
+            tmp="$target.tmp.$$"
+            curl -fL --retry 5 --retry-all-errors --connect-timeout 20 \
+              --max-time 1200 --retry-delay 2 --retry-max-time 1500 \
+              "$url" -o "$tmp"
+            printf '%s  %s\n' "$expected" "$tmp" | sha256sum -c - >/dev/null
+            mv -f "$tmp" "$target"
+            echo "OMEGA_MODEL_CACHE_DOWNLOADED name=$name sha256=$expected"
+          }
+
+          fetch_verified "$WORKER_NAME" "$WORKER_URL" "$WORKER_SHA256"
+          fetch_verified "$QA_NAME" "$QA_URL" "$QA_SHA256"
+
+      - name: Final fail-closed cache verification
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -s "$MODEL_CACHE/$WORKER_NAME"
+          test -s "$MODEL_CACHE/$QA_NAME"
+          printf '%s  %s\n' "$WORKER_SHA256" "$MODEL_CACHE/$WORKER_NAME" | sha256sum -c -
+          printf '%s  %s\n' "$QA_SHA256" "$MODEL_CACHE/$QA_NAME" | sha256sum -c -
+          du -sh "$MODEL_CACHE"
+          echo "OMEGA_MODEL_CACHE_PRIME_GREEN key=$CACHE_KEY"
