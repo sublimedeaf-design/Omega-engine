@@ -4,7 +4,7 @@ name: OMEGA Private PR Hosted Bridge
 on:
   workflow_dispatch:
   schedule:
-    - cron: "3-59/10 * * * *"
+    - cron: "2-59/5 * * * *"
   push:
     paths:
       - ".github/workflows/omega-private-pr-hosted-bridge.yml"
