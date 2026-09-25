@@ -3,7 +3,7 @@ name: OMEGA Signer Continuity Arm
 on:
   workflow_dispatch:
   schedule:
-    - cron: "5-59/5 * * * *"
+    - cron: "37 * * * *"
   push:
     branches: [main]
     paths:
@@ -63,11 +63,28 @@ jobs:
             exit 0
           fi
 
-          active="$(gh api "/repos/$PRIVATE_REPOSITORY/actions/workflows/$SIGNER_WORKFLOW/runs?branch=main&per_page=20"             --jq '[.workflow_runs[] | select(.status=="queued" or .status=="in_progress" or .status=="pending")] | length')"
+          actions_payload=""
+          actions_err="$(mktemp)"
+          if ! actions_payload="$(gh api "/repos/$PRIVATE_REPOSITORY/actions/workflows/$SIGNER_WORKFLOW/runs?branch=main&per_page=20" 2>"$actions_err")"; then
+            echo "OMEGA_SIGNER_ARM_PERMISSION_BLOCKED sha=$sha required=private-actions-read-write" >&2
+            sed -n '1,3p' "$actions_err" >&2 || true
+            rm -f "$actions_err"
+            exit 0
+          fi
+          rm -f "$actions_err"
+
+          active="$(printf '%s' "$actions_payload" | jq '[.workflow_runs[] | select(.status=="queued" or .status=="in_progress" or .status=="pending")] | length')"
           if [ "$active" != 0 ]; then
             echo "OMEGA_SIGNER_ARM_ACTIVE sha=$sha active=$active"
             exit 0
           fi
 
-          gh api --method POST             "/repos/$PRIVATE_REPOSITORY/actions/workflows/$SIGNER_WORKFLOW/dispatches"             -f ref=main >/dev/null
+          dispatch_err="$(mktemp)"
+          if ! gh api --method POST             "/repos/$PRIVATE_REPOSITORY/actions/workflows/$SIGNER_WORKFLOW/dispatches"             -f ref=main >/dev/null 2>"$dispatch_err"; then
+            echo "OMEGA_SIGNER_ARM_PERMISSION_BLOCKED sha=$sha required=private-actions-read-write" >&2
+            sed -n '1,3p' "$dispatch_err" >&2 || true
+            rm -f "$dispatch_err"
+            exit 0
+          fi
+          rm -f "$dispatch_err"
           echo "OMEGA_SIGNER_ARM_DISPATCHED sha=$sha workflow=$SIGNER_WORKFLOW"
