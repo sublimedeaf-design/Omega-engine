@@ -1,2 +1,2 @@
-private_main=8758c0e69df49377c66f851bb0acc756ae6c7ac5
-purpose=fresh-acceptance-after-localbrain-protocol-and-state-recovery
+private_main=454168c3bbb8f080135c923577f84ea8cc3cac76
+purpose=validate-syntax-fixed-protocol-and-recovery-head
