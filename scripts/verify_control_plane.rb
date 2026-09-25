@@ -59,7 +59,8 @@ recovery_path = WORKFLOWS.join("omega-hosted-recovery-failover.yml")
 recovery = File.read(recovery_path, encoding: "UTF-8")
 {
   "stale_ref_tip_guard" => "OMEGA_RECOVERY_TRIGGER_NOT_REF_TIP",
-  "latest_candidate_supersedes_stale" => "cancel-in-progress: ${{ github.event_name != 'schedule' }}",
+  "serialized_recovery_no_livelock" => "cancel-in-progress: false",
+  "bounded_recovery_queue" => "queue: max",
   "worker_model_pin" => "cc324af070c2ecbfd324a30884d2f951a7ff756aba85cb811a6ec436933bb046",
   "qa_model_pin" => "1d9614638d18024d0fbb36575a15f1302a3adf044df10345688ec4f6e1c4ff32",
   "artifact_checksum_verify" => "sha256sum -c",
