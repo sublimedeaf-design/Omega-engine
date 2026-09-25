@@ -74,12 +74,7 @@ jobs:
           fi
           auth_header=""
           if [ -n "${OMEGA_FEDERATION_PAT:-}" ]; then
-            auth_header="$(python3 - <<'PY'
-import base64,os
-token=os.environ.get("OMEGA_FEDERATION_PAT","")
-print("AUTHORIZATION: basic "+base64.b64encode(("x-access-token:"+token).encode()).decode())
-PY
-)"
+            auth_header="$(python3 -c 'import base64,os; t=os.environ.get("OMEGA_FEDERATION_PAT",""); print("AUTHORIZATION: basic "+base64.b64encode(("x-access-token:"+t).encode()).decode())')"
           fi
           [ -n "$auth_header" ] || { echo "OMEGA_REFRESH_GIT_AUTH_UNAVAILABLE" >&2; exit 77; }
           env \
