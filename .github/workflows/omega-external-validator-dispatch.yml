@@ -15,6 +15,9 @@ permissions:
   contents: read
   id-token: write
 
+# Validator jobs build from exact source and do not trust Actions cache state.
+cache-mode: none
+
 concurrency:
   group: omega-external-validator-dispatch
   cancel-in-progress: false
