@@ -47,7 +47,7 @@ jobs:
           sha="$main_sha"
           mode=main
           if [ "$EVENT_NAME" = push ] && [ -s bootstrap/omega/recovery-trigger.txt ]; then
-            read -r marker candidate _ < bootstrap/omega/recovery-trigger.txt || true
+            read -r marker candidate source_ref _ < bootstrap/omega/recovery-trigger.txt || true
             if [ "${marker:-}" = recover-exact ]; then
               [[ "${candidate:-}" =~ ^[0-9a-f]{40}$ ]] || { echo "OMEGA_RECOVERY_TRIGGER_SHA_INVALID" >&2; exit 64; }
               if [ "$candidate" != "$main_sha" ]; then
@@ -59,9 +59,19 @@ jobs:
                   exit 66
                 fi
               fi
-              # Authorization is the signed control-plane trigger plus exact ancestry.
-              # Do not require Pull Requests API scope: the bootstrap token intentionally
-              # has least privilege and may not have pull-request metadata access.
+              # Bind the trigger to the current tip of an explicit source branch.
+              # This uses the commits endpoint already available to the least-privilege
+              # bootstrap token and rejects stale-but-still-ahead candidate SHAs.
+              [[ "${source_ref:-}" =~ ^[A-Za-z0-9._/-]+$ ]] || {
+                echo "OMEGA_RECOVERY_TRIGGER_REF_INVALID:candidate=$candidate ref=${source_ref:-missing}" >&2
+                exit 67
+              }
+              case "$source_ref" in *..*|/*|-*) echo "OMEGA_RECOVERY_TRIGGER_REF_UNSAFE:$source_ref" >&2; exit 67 ;; esac
+              ref_tip="$(gh api "/repos/$PRIVATE_REPOSITORY/commits?sha=$source_ref&per_page=1" --jq '.[0].sha // empty')"
+              [ "$ref_tip" = "$candidate" ] || {
+                echo "OMEGA_RECOVERY_TRIGGER_NOT_REF_TIP:candidate=$candidate ref=$source_ref tip=$ref_tip" >&2
+                exit 67
+              }
               sha="$candidate"
               mode=exact_candidate
             fi
