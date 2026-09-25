@@ -51,21 +51,14 @@ jobs:
           fi
 
           if [ -n "$requested_sha" ]; then
-            payload="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/$requested_sha/pulls?per_page=100")"
-            selected="$(printf '%s' "$payload" | jq -r --arg sha "$requested_sha" '
-              [.[] | select(type=="object")
-                | select(.state=="open" and (.draft|not) and .base.ref=="main" and .head.sha==$sha)
-                | select(
-                    (.head.ref|startswith("agent/orchestrator/vm-autonomous-")) or
-                    (.head.ref|startswith("hardening/failproof-")) or
-                    (.head.ref|startswith("fix/signer-")) or
-                    (.head.ref|startswith("hotfix/signer-")) or
-                    (.head.ref|startswith("hardening/hosted-signer-continuity-"))
-                  )]
-              | if length==1 then [.[0].head.sha,.[0].base.sha,(.[0].number|tostring)] | @tsv
-                elif length==0 then ""
-                else error("OMEGA_EXACT_TRIGGER_AMBIGUOUS") end
-            ')"
+            gh api "/repos/$PRIVATE_REPOSITORY/commits/$requested_sha" --jq '.sha' | grep -Fx "$requested_sha" >/dev/null
+            base_sha="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/main" --jq '.sha')"
+            relation="$(gh api "/repos/$PRIVATE_REPOSITORY/compare/$base_sha...$requested_sha" --jq '.status')"
+            case "$relation" in
+              ahead|identical) ;;
+              *) echo "OMEGA_EXACT_TRIGGER_NOT_BASED_ON_CURRENT_MAIN relation=$relation" >&2; exit 41 ;;
+            esac
+            selected="$(printf '%s\t%s\t0' "$requested_sha" "$base_sha")"
             mode=exact_trigger
           else
             payload="$(gh api "/repos/$PRIVATE_REPOSITORY/pulls?state=open&per_page=100")"
@@ -96,7 +89,12 @@ jobs:
           [[ "$sha" =~ ^[0-9a-f]{40}$ && "$base_sha" =~ ^[0-9a-f]{40}$ && "$number" =~ ^[0-9]+$ ]]
 
           android=false
-          if gh api --paginate "/repos/$PRIVATE_REPOSITORY/pulls/$number/files?per_page=100" --jq '.[].filename' \
+          if [ "$number" != "0" ]; then
+            if gh api --paginate "/repos/$PRIVATE_REPOSITORY/pulls/$number/files?per_page=100" --jq '.[].filename' \
+              | grep -Eq '^(android/|\.github/workflows/android-[^/]+\.yml$)'; then
+              android=true
+            fi
+          elif gh api "/repos/$PRIVATE_REPOSITORY/compare/$base_sha...$sha" --jq '.files[].filename' \
             | grep -Eq '^(android/|\.github/workflows/android-[^/]+\.yml$)'; then
             android=true
           fi
