@@ -123,8 +123,8 @@ jobs:
           echo "OMEGA_HOSTED_PR_PIN mode=exact_sha number=0 sha=$requested_sha android=$android"
 
   ci:
-    needs: discover
-    if: ${{ needs.discover.outputs.found == 'true' }}
+    needs: [discover, governance]
+    if: ${{ needs.discover.outputs.found == 'true' && needs.governance.result == 'success' }}
     strategy:
       fail-fast: false
       matrix:
@@ -154,11 +154,13 @@ jobs:
           ref: ${{ needs.discover.outputs.sha }}
           token: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
           persist-credentials: false
-          fetch-depth: 0
+          fetch-depth: 1
           path: omega
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: ${{ matrix.python }}
+          cache: "pip"
+          cache-dependency-path: omega/requirements-ci.lock
       - name: Run exact private PR lane
         working-directory: omega
         shell: bash
@@ -193,7 +195,7 @@ jobs:
           ref: ${{ needs.discover.outputs.sha }}
           token: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
           persist-credentials: false
-          fetch-depth: 0
+          fetch-depth: 1
           path: omega
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
@@ -243,8 +245,8 @@ jobs:
             -f description="public hosted exact-PR governance: $RESULT" >/dev/null
 
   android:
-    needs: discover
-    if: ${{ needs.discover.outputs.found == 'true' && needs.discover.outputs.android == 'true' }}
+    needs: [discover, governance]
+    if: ${{ needs.discover.outputs.found == 'true' && needs.discover.outputs.android == 'true' && needs.governance.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -254,16 +256,20 @@ jobs:
           ref: ${{ needs.discover.outputs.sha }}
           token: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
           persist-credentials: false
-          fetch-depth: 0
+          fetch-depth: 1
           path: omega
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6
         with:
           distribution: temurin
           java-version: "17"
-      - name: Install Android SDK 36
+      - name: Ensure Android SDK 36
         shell: bash
         run: |
           set -Eeuo pipefail
+          if [ -d "$ANDROID_HOME/platforms/android-36" ] && [ -x "$ANDROID_HOME/build-tools/36.0.0/apksigner" ]; then
+            echo "OMEGA_ANDROID_SDK_REUSED platform=36 build_tools=36.0.0"
+            exit 0
+          fi
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
           sdk_ok=false
           for attempt in 1 2 3 4; do
@@ -278,7 +284,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb
         with:
           gradle-version: "8.13"
-          cache-disabled: true
+          cache-read-only: true
       - name: Build, lint and verify debug APK
         working-directory: omega/android
         shell: bash
@@ -299,3 +305,4 @@ jobs:
           gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$OMEGA_SHA" \
             -f state="$state" -f context="omega/hosted-android" \
             -f description="public hosted exact-PR Android: $RESULT" >/dev/null
+# support exact-head evidence stamp: autopilot-fastpath-v1
