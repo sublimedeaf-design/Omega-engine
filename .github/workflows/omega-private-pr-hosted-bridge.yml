@@ -40,8 +40,8 @@ jobs:
           row=""
           pr_rc=0
           set +e
-          row="$(gh api --paginate "/repos/$PRIVATE_REPOSITORY/pulls?state=open&per_page=100" 2>/tmp/omega-pr-discovery.err \
-            | jq -s 'add | [.[] | select((.head.ref | startswith("agent/orchestrator/vm-autonomous-")) or ((.head.ref | startswith("hardening/failproof-") or startswith("fix/signer-") or startswith("hotfix/signer-")) or ((.head.ref | startswith("hardening/hosted-signer-continuity-")) or (.head.ref | startswith("hotfix/signer-")))))] | sort_by(.updated_at) | reverse | .[0] // empty')"
+          row="$(gh api "/repos/$PRIVATE_REPOSITORY/pulls?state=open&per_page=100" 2>/tmp/omega-pr-discovery.err \
+            | jq '[.[] | select((.head.ref | startswith("agent/orchestrator/vm-autonomous-")) or (.head.ref | startswith("hardening/failproof-")) or (.head.ref | startswith("fix/signer-")) or (.head.ref | startswith("hotfix/signer-")) or (.head.ref | startswith("hardening/hosted-signer-continuity-")))] | sort_by(.updated_at) | reverse | .[0] // empty')"
           pr_rc=$?
           set -e
 
@@ -51,8 +51,8 @@ jobs:
             number="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["number"])' <<<"$row")"
             mode="pull"
           else
-            branch_row="$(gh api --paginate "/repos/$PRIVATE_REPOSITORY/branches?per_page=100" \
-              | jq -s 'add | [.[] | select((.name | startswith("agent/orchestrator/vm-autonomous-")) or ((.name | startswith("hardening/failproof-")) or ((.name | startswith("hardening/hosted-signer-continuity-")) or (.name | startswith("hotfix/signer-")))))] | sort_by(.commit.commit.committer.date) | reverse | .[0] // empty')"
+            branch_row="$(gh api "/repos/$PRIVATE_REPOSITORY/branches?per_page=100" \
+              | jq '[.[] | select((.name | startswith("agent/orchestrator/vm-autonomous-")) or (.name | startswith("hardening/failproof-")) or (.name | startswith("fix/signer-")) or (.name | startswith("hotfix/signer-")) or (.name | startswith("hardening/hosted-signer-continuity-")))] | .[0] // empty')"
             if [ -z "$branch_row" ]; then
               echo "found=false" >> "$GITHUB_OUTPUT"
               echo "OMEGA_HOSTED_PR_NONE pr_rc=$pr_rc"
