@@ -45,7 +45,8 @@ jobs:
           set -e
 
           explicit_sha=""
-          trigger_file="bootstrap/omega/pr-validation-trigger.txt"
+          gh api "/repos/$PRIVATE_REPOSITORY/contents/bootstrap/omega/pr-validation-trigger.txt?ref=main" --jq '.content' 2>/dev/null | tr -d '\n' | base64 --decode > /tmp/omega-pr-validation-trigger.txt 2>/dev/null || true
+          trigger_file="/tmp/omega-pr-validation-trigger.txt"
           if [ -s "$trigger_file" ]; then
             explicit_sha="$(grep -Eo '[0-9a-f]{40}' "$trigger_file" | tail -1 || true)"
           fi
