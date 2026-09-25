@@ -1,7 +1,14 @@
-name: OMEGA Legacy External Validation Arm
+name: OMEGA External Validation Arm
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: "*/5 * * * *"
+  push:
+    paths:
+      - "control-plane/ref-sync-trigger.txt"
+      - "control-plane/reconcile.mjs"
+      - "control-plane/github.mjs"
 
 permissions:
   contents: read
