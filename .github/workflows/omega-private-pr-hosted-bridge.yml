@@ -159,6 +159,8 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: ${{ matrix.python }}
+          cache: "pip"
+          cache-dependency-path: omega/requirements-ci.lock
       - name: Run exact private PR lane
         working-directory: omega
         shell: bash
