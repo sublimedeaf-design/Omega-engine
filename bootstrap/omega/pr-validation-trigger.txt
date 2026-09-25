@@ -1,1 +1,1 @@
-trigger hosted pr discovery retry=3
+retry hosted pr discovery fixed-json
