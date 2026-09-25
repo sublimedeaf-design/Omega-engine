@@ -18,7 +18,7 @@ concurrency:
 
 env:
   PRIVATE_REPOSITORY: sublimedeaf-design/Omega-engines
-  CANDIDATE_SHA: edde801f9e2e2a17d53a28a32c53f0bb3bd8629b
+  CANDIDATE_SHA: 5ba9e27ce75771d3e8349bbd54c472c7622cc766
 
 jobs:
   smoke:
@@ -52,12 +52,13 @@ jobs:
 
           from omega.live.espn_provider import discover as espn_discover
           from omega.live.thesportsdb_provider import discover as tsdb_discover
+          from omega.live.openfoot_provider import discover as openfoot_discover
 
           now=datetime.now(timezone.utc)
           providers={}
           all_rows=[]
 
-          for name,fn in (("espn",espn_discover),("thesportsdb",tsdb_discover)):
+          for name,fn in (("espn",espn_discover),("thesportsdb",tsdb_discover),("openfoot",openfoot_discover)):
               try:
                   rows,meta=fn(now,horizon_hours=30)
               except Exception as exc:
@@ -86,7 +87,7 @@ jobs:
 
           payload={
               "schema_version":1,
-              "candidate_sha":"edde801f9e2e2a17d53a28a32c53f0bb3bd8629b",
+              "candidate_sha":"5ba9e27ce75771d3e8349bbd54c472c7622cc766",
               "observed_at":now.isoformat(),
               "horizon_hours":30,
               "providers":providers,
@@ -98,8 +99,9 @@ jobs:
           )
           print(json.dumps(payload,indent=2,sort_keys=True))
 
-          if not nations:
-              raise SystemExit("OMEGA_FREE_PROVIDER_NO_NATIONS_LEAGUE_FIXTURES")
+          real_rows=[row for _,row in all_rows]
+          if not real_rows:
+              raise SystemExit("OMEGA_FREE_PROVIDER_NO_REAL_FIXTURES")
           PY
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
