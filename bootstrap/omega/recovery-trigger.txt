@@ -1,1 +1,1 @@
-recover-exact 40ed748092a2b81e83a0545574e5991f51c0cb39 protocol-v6
+recover-exact 40ed748092a2b81e83a0545574e5991f51c0cb39 protocol-v5
