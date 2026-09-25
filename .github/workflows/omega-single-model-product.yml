@@ -1,0 +1,270 @@
+name: OMEGA Single-Model Product E2E
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/omega-single-model-product.yml"
+      - "bootstrap/omega/product-trigger.txt"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: omega-single-model-product
+  cancel-in-progress: true
+
+env:
+  PRIVATE_REPOSITORY: sublimedeaf-design/Omega-engines
+
+jobs:
+  product:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    steps:
+      - name: Pin exact private product source
+        id: pin
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          set +x
+          marker="$(curl -fsSL -H "Authorization: Bearer $GH_TOKEN"             -H "Accept: application/vnd.github.raw+json"             "https://api.github.com/repos/$GITHUB_REPOSITORY/contents/bootstrap/omega/product-trigger.txt?ref=main")"
+          read -r verb candidate source_ref _ <<< "$marker"
+          [ "$verb" = "build-product-exact" ] || { echo "OMEGA_PRODUCT_TRIGGER_INVALID" >&2; exit 61; }
+          [[ "$candidate" =~ ^[0-9a-f]{40}$ ]] || { echo "OMEGA_PRODUCT_SHA_INVALID" >&2; exit 62; }
+          [[ "$source_ref" =~ ^[A-Za-z0-9._/-]+$ ]] || { echo "OMEGA_PRODUCT_REF_INVALID" >&2; exit 63; }
+          case "$source_ref" in *..*|/*|-*) echo "OMEGA_PRODUCT_REF_UNSAFE" >&2; exit 64 ;; esac
+          tip="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/$source_ref" --jq '.sha')"
+          [ "$tip" = "$candidate" ] || { echo "OMEGA_PRODUCT_TRIGGER_STALE:$candidate!=$tip" >&2; exit 65; }
+          {
+            echo "source_sha=$candidate"
+            echo "source_ref=$source_ref"
+          } >> "$GITHUB_OUTPUT"
+          echo "OMEGA_PRODUCT_PIN sha=$candidate ref=$source_ref"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: ${{ env.PRIVATE_REPOSITORY }}
+          ref: ${{ steps.pin.outputs.source_sha }}
+          token: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          persist-credentials: false
+          fetch-depth: 1
+          path: omega
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.13"
+
+      - name: Install OMEGA
+        working-directory: omega
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python -m pip install -c requirements-ci.lock -e '.[dev,data]'
+
+      - name: Refresh free data fabric
+        working-directory: omega
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ok=false
+          for attempt in 1 2 3; do
+            if python scripts/update_omega_data.py               --root data/fabric               --db data/omega.db               --refresh-hours 24; then
+              ok=true
+              break
+            fi
+            sleep $((attempt * 8))
+          done
+          [ "$ok" = true ] || { echo "OMEGA_PRODUCT_DATA_REFRESH_FAILED" >&2; exit 31; }
+          test -s data/fabric/Matches.model.csv
+
+      - name: Generate current T24 forecast
+        working-directory: omega
+        env:
+          OMEGA_GIT_COMMIT: ${{ steps.pin.outputs.source_sha }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p reports
+          python scripts/autonomous_24h.py             --matches data/fabric/Matches.model.csv             --report reports/latest-24h.json             --ledger reports/forecast-ledger.jsonl             --intelligence-ledger ""             --horizon-hours 24             --t24-min-lead-hours 20
+
+      - name: Generate current T60 decision layer
+        working-directory: omega
+        env:
+          OMEGA_GIT_COMMIT: ${{ steps.pin.outputs.source_sha }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python scripts/autonomous_t60.py             --matches data/fabric/Matches.model.csv             --forecast-ledger reports/forecast-ledger.jsonl             --ledger reports/shadow-ledger.jsonl             --intelligence-ledger ""             --report reports/latest-t60.json
+
+      - name: Generate coverage evidence
+        working-directory: omega
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python scripts/coverage_gap_report.py             --matches data/fabric/Matches.model.csv             --out reports/coverage-gaps.json             --forecast-report reports/latest-24h.json
+
+      - name: Product evidence gate
+        working-directory: omega
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          for name in ("latest-24h.json","latest-t60.json","coverage-gaps.json"):
+              p=Path("reports")/name
+              if not p.is_file() or p.stat().st_size < 2:
+                  raise SystemExit(f"OMEGA_PRODUCT_EVIDENCE_MISSING:{name}")
+              payload=json.loads(
+                  p.read_text(encoding="utf-8"),
+                  parse_constant=lambda x: (_ for _ in ()).throw(ValueError(x)),
+              )
+              if not isinstance(payload,dict):
+                  raise SystemExit(f"OMEGA_PRODUCT_EVIDENCE_NOT_OBJECT:{name}")
+          t24=json.loads(Path("reports/latest-24h.json").read_text(encoding="utf-8"))
+          t60=json.loads(Path("reports/latest-t60.json").read_text(encoding="utf-8"))
+          if t24.get("engine_health","OK")!="OK":
+              raise SystemExit(f"OMEGA_PRODUCT_T24_ENGINE_UNHEALTHY:{t24.get('engine_health')}")
+          if t24.get("provider_health")=="SYSTEMIC_FAILURE":
+              raise SystemExit("OMEGA_PRODUCT_T24_PROVIDER_SYSTEMIC_FAILURE")
+          if t60.get("engine_health")!="OK":
+              raise SystemExit(f"OMEGA_PRODUCT_T60_ENGINE_UNHEALTHY:{t60.get('engine_health')}")
+          if t60.get("provider_health")=="SYSTEMIC_FAILURE":
+              raise SystemExit("OMEGA_PRODUCT_T60_PROVIDER_SYSTEMIC_FAILURE")
+          summary={
+              "t24_generated_at":t24.get("generated_at"),
+              "t24_provider":t24.get("provider_backend"),
+              "t24_discovered":t24.get("provider_discovered_fixtures"),
+              "t24_predicted":t24.get("predicted"),
+              "t24_bet_eligible":t24.get("bet_eligible_count"),
+              "t60_generated_at":t60.get("generated_at"),
+              "t60_provider":t60.get("provider_backend"),
+              "t60_candidates":t60.get("t60_candidates"),
+              "t60_recommendations":len(t60.get("recommendations") or []),
+          }
+          print(json.dumps(summary,indent=2))
+          Path("reports/product-summary.json").write_text(
+              json.dumps(summary,indent=2,sort_keys=True,allow_nan=False)+"\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Bundle current evidence into Android
+        working-directory: omega
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p android/app/src/main/assets/evidence
+          cp reports/latest-24h.json android/app/src/main/assets/evidence/latest-24h.json
+          cp reports/latest-t60.json android/app/src/main/assets/evidence/latest-t60.json
+          cp reports/coverage-gaps.json android/app/src/main/assets/evidence/coverage-gaps.json
+
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb
+        with:
+          gradle-version: "8.13"
+          cache-disabled: true
+
+      - name: Install Android SDK 36
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for attempt in 1 2 3; do
+            if "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"               --install "platforms;android-36" "build-tools;36.0.0" >/dev/null; then
+              exit 0
+            fi
+            sleep $((attempt * 5))
+          done
+          exit 75
+
+      - name: Build installable prediction APK
+        working-directory: omega/android
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          gradle --no-daemon --stacktrace lintDebug assembleDebug
+          apk=app/build/outputs/apk/debug/app-debug.apk
+          test -s "$apk"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose "$apk"
+          mkdir -p ../dist
+          cp "$apk" ../dist/OMEGA-Product-Preview.apk
+
+      - name: Create exact-SHA product manifest
+        working-directory: omega
+        env:
+          SOURCE_SHA: ${{ steps.pin.outputs.source_sha }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          sha256sum dist/OMEGA-Product-Preview.apk > dist/OMEGA-Product-Preview.apk.sha256
+          python - <<'PY'
+          import hashlib,json,os
+          from datetime import datetime,timezone
+          from pathlib import Path
+          apk=Path("dist/OMEGA-Product-Preview.apk")
+          t24=json.loads(Path("reports/latest-24h.json").read_text(encoding="utf-8"))
+          t60=json.loads(Path("reports/latest-t60.json").read_text(encoding="utf-8"))
+          payload={
+              "schema_version":1,
+              "build_kind":"single-model-product-preview",
+              "source_sha":os.environ["SOURCE_SHA"],
+              "built_at":datetime.now(timezone.utc).isoformat(),
+              "apk_sha256":hashlib.sha256(apk.read_bytes()).hexdigest(),
+              "t24_generated_at":t24.get("generated_at"),
+              "t24_provider":t24.get("provider_backend"),
+              "t24_discovered":t24.get("provider_discovered_fixtures"),
+              "t24_predicted":t24.get("predicted"),
+              "t24_bet_eligible":t24.get("bet_eligible_count"),
+              "t60_generated_at":t60.get("generated_at"),
+              "t60_provider":t60.get("provider_backend"),
+              "t60_candidates":t60.get("t60_candidates"),
+              "t60_recommendations":len(t60.get("recommendations") or []),
+              "uses_external_llm_at_runtime":False,
+              "release_authority":False,
+          }
+          Path("dist/OMEGA-Product-Preview.manifest.json").write_text(
+              json.dumps(payload,indent=2,sort_keys=True,allow_nan=False)+"\n",
+              encoding="utf-8",
+          )
+          print(json.dumps(payload,indent=2))
+          PY
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: OMEGA-Product-Preview-${{ steps.pin.outputs.source_sha }}
+          path: |
+            omega/dist/OMEGA-Product-Preview.apk
+            omega/dist/OMEGA-Product-Preview.apk.sha256
+            omega/dist/OMEGA-Product-Preview.manifest.json
+            omega/reports/product-summary.json
+            omega/reports/latest-24h.json
+            omega/reports/latest-t60.json
+            omega/reports/coverage-gaps.json
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
+      - name: Publish private preview APK
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          SOURCE_SHA: ${{ steps.pin.outputs.source_sha }}
+        working-directory: omega
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          set +x
+          tag="omega-product-preview-${SOURCE_SHA:0:12}"
+          if gh release view "$tag" --repo "$PRIVATE_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$tag"               dist/OMEGA-Product-Preview.apk               dist/OMEGA-Product-Preview.apk.sha256               dist/OMEGA-Product-Preview.manifest.json               reports/product-summary.json               --repo "$PRIVATE_REPOSITORY" --clobber
+          else
+            gh release create "$tag"               dist/OMEGA-Product-Preview.apk               dist/OMEGA-Product-Preview.apk.sha256               dist/OMEGA-Product-Preview.manifest.json               reports/product-summary.json               --repo "$PRIVATE_REPOSITORY"               --target "$SOURCE_SHA"               --title "OMEGA Product Preview ${SOURCE_SHA:0:12}"               --notes "Fresh data -> T24 -> T60 -> Android viewer. Hosted on the free public control-plane runner. Preview/debug-signed; not the canonical production-signed release."               --prerelease
+          fi
+          echo "OMEGA_PRODUCT_RELEASE=https://github.com/$PRIVATE_REPOSITORY/releases/tag/$tag"
