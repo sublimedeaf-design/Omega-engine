@@ -28,14 +28,38 @@ jobs:
       sha: ${{ steps.pin.outputs.sha }}
       need_run: ${{ steps.pin.outputs.need_run }}
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
       - id: pin
         env:
           GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          EVENT_NAME: ${{ github.event_name }}
         shell: bash
         run: |
+          set -Eeuo pipefail
           set +x
-          sha="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/main" --jq '.sha')"
-          [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
+          main_sha="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/main" --jq '.sha')"
+          [[ "$main_sha" =~ ^[0-9a-f]{40}$ ]]
+          sha="$main_sha"
+          mode=main
+          if [ "$EVENT_NAME" = push ] && [ -s bootstrap/omega/recovery-trigger.txt ]; then
+            read -r marker candidate _ < bootstrap/omega/recovery-trigger.txt || true
+            if [ "${marker:-}" = recover-exact ]; then
+              [[ "${candidate:-}" =~ ^[0-9a-f]{40}$ ]] || { echo "OMEGA_RECOVERY_TRIGGER_SHA_INVALID" >&2; exit 64; }
+              if [ "$candidate" != "$main_sha" ]; then
+                compare="$(gh api "/repos/$PRIVATE_REPOSITORY/compare/$main_sha...$candidate")"
+                relation="$(printf '%s' "$compare" | jq -r '.status // ""')"
+                behind="$(printf '%s' "$compare" | jq -r '.behind_by // 999999')"
+                if [ "$relation" != ahead ] || [ "$behind" != 0 ]; then
+                  echo "OMEGA_RECOVERY_TRIGGER_NOT_CURRENT_BASE:status=$relation behind=$behind main=$main_sha candidate=$candidate" >&2
+                  exit 66
+                fi
+              fi
+              sha="$candidate"
+              mode=exact_candidate
+            fi
+          fi
           payload="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/$sha/status")"
           need_run=true
           if printf '%s' "$payload" | python3 -c 'import json,sys; d=json.load(sys.stdin); s={x.get("context"):x.get("state") for x in d.get("statuses",[])}; raise SystemExit(0 if s.get("omega/hosted-recovery")=="success" else 1)'; then
@@ -43,7 +67,7 @@ jobs:
           fi
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
           echo "need_run=$need_run" >> "$GITHUB_OUTPUT"
-          echo "OMEGA_HOSTED_RECOVERY_PIN sha=$sha need_run=$need_run"
+          echo "OMEGA_HOSTED_RECOVERY_PIN sha=$sha need_run=$need_run mode=$mode main=$main_sha"
 
   pre_recovery:
     needs: pin
