@@ -64,7 +64,12 @@ recovery = File.read(recovery_path, encoding: "UTF-8")
   "worker_model_pin" => "cc324af070c2ecbfd324a30884d2f951a7ff756aba85cb811a6ec436933bb046",
   "qa_model_pin" => "1d9614638d18024d0fbb36575a15f1302a3adf044df10345688ec4f6e1c4ff32",
   "artifact_checksum_verify" => "sha256sum -c",
+  "out_of_band_artifact_digest" => "recovery_package_sha256",
+  "artifact_hash_mismatch_fails" => "OMEGA_RECOVERY_ARTIFACT_HASH_MISMATCH",
   "hard_missing_artifact_failure" => "if-no-files-found: error",
+  "failure_diagnostics_preserved" => "Preserve failed pre-recovery diagnostics",
+  "model_only_cache_restore" => "actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9",
+  "gradle_cache_disabled" => "cache-disabled: true",
   "two_vm_post_recovery" => "post_recovery:",
   "bounded_job_timeout" => "timeout-minutes: 90"
 }.each do |name, needle|
