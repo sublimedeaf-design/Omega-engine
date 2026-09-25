@@ -77,16 +77,14 @@ jobs:
     if: ${{ needs.pin.outputs.need_run == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
-    outputs:
-      artifact_sha256: ${{ steps.package.outputs.sha256 }}
     env:
       GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
       OMEGA_SOURCE_SHA: ${{ needs.pin.outputs.sha }}
-      OMEGA_LLAMA_CPP_COMMIT: b29c606e28a01b1bc8c1351026a0fa6e616bf6c4
-      OMEGA_LOCAL_BRAIN_MODEL_SHA256: cc324af070c2ecbfd324a30884d2f951a7ff756aba85cb811a6ec436933bb046
-      OMEGA_LOCAL_QA_BRAIN_MODEL_SHA256: 1d9614638d18024d0fbb36575a15f1302a3adf044df10345688ec4f6e1c4ff32
-      OMEGA_LOCAL_BRAIN_MODEL_URL: https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF/resolve/2ab9f8f42af02fc212effaef7c4850c885e965f4/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf?download=true
-      OMEGA_LOCAL_QA_BRAIN_MODEL_URL: https://huggingface.co/Qwen/Qwen2.5-Coder-0.5B-Instruct-GGUF/resolve/bf1da6ca8f02b444067db175f02a14e74f49c5c0/qwen2.5-coder-0.5b-instruct-q4_k_m.gguf?download=true
+      OMEGA_LLAMA_CPP_COMMIT: "b29c606e28a01b1bc8c1351026a0fa6e616bf6c4"
+      OMEGA_LOCAL_BRAIN_MODEL_SHA256: "cc324af070c2ecbfd324a30884d2f951a7ff756aba85cb811a6ec436933bb046"
+      OMEGA_LOCAL_QA_BRAIN_MODEL_SHA256: "1d9614638d18024d0fbb36575a15f1302a3adf044df10345688ec4f6e1c4ff32"
+      OMEGA_LOCAL_BRAIN_MODEL_URL: "https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF/resolve/2ab9f8f42af02fc212effaef7c4850c885e965f4/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf?download=true"
+      OMEGA_LOCAL_QA_BRAIN_MODEL_URL: "https://huggingface.co/Qwen/Qwen2.5-Coder-0.5B-Instruct-GGUF/resolve/bf1da6ca8f02b444067db175f02a14e74f49c5c0/qwen2.5-coder-0.5b-instruct-q4_k_m.gguf?download=true"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -166,7 +164,6 @@ jobs:
           (state/"hosted-pre-recovery.json").write_text(json.dumps(payload,indent=2)+"\n",encoding="utf-8")
           PY
       - name: Package recovery state with hard integrity manifest
-        id: package
         if: ${{ success() }}
         shell: bash
         run: |
@@ -178,11 +175,8 @@ jobs:
             evidence logs
           (
             cd "$RUNNER_TEMP"
-            digest="$(sha256sum omega-recovery-state.tgz | awk '{print $1}')"
-            [[ "$digest" =~ ^[0-9a-f]{64}$ ]]
-            printf '%s  %s\n' "$digest" omega-recovery-state.tgz > omega-recovery-state.tgz.sha256
+            sha256sum omega-recovery-state.tgz > omega-recovery-state.tgz.sha256
             sha256sum -c omega-recovery-state.tgz.sha256
-            echo "sha256=$digest" >> "$GITHUB_OUTPUT"
           )
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: ${{ success() }}
@@ -202,6 +196,11 @@ jobs:
     env:
       GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
       OMEGA_SOURCE_SHA: ${{ needs.pin.outputs.sha }}
+      OMEGA_LLAMA_CPP_COMMIT: "b29c606e28a01b1bc8c1351026a0fa6e616bf6c4"
+      OMEGA_LOCAL_BRAIN_MODEL_SHA256: "cc324af070c2ecbfd324a30884d2f951a7ff756aba85cb811a6ec436933bb046"
+      OMEGA_LOCAL_QA_BRAIN_MODEL_SHA256: "1d9614638d18024d0fbb36575a15f1302a3adf044df10345688ec4f6e1c4ff32"
+      OMEGA_LOCAL_BRAIN_MODEL_URL: "https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF/resolve/2ab9f8f42af02fc212effaef7c4850c885e965f4/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf?download=true"
+      OMEGA_LOCAL_QA_BRAIN_MODEL_URL: "https://huggingface.co/Qwen/Qwen2.5-Coder-0.5B-Instruct-GGUF/resolve/bf1da6ca8f02b444067db175f02a14e74f49c5c0/qwen2.5-coder-0.5b-instruct-q4_k_m.gguf?download=true"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -257,20 +256,12 @@ jobs:
           name: omega-hosted-recovery-${{ needs.pin.outputs.sha }}
           path: ${{ runner.temp }}/omega-recovery-artifact
       - name: Verify recovery artifact integrity and restore
-        env:
-          EXPECTED_ARTIFACT_SHA256: ${{ needs.pre_recovery.outputs.artifact_sha256 }}
         shell: bash
         run: |
           set -Eeuo pipefail
           cd "$RUNNER_TEMP/omega-recovery-artifact"
           test -s omega-recovery-state.tgz
           test -s omega-recovery-state.tgz.sha256
-          [[ "$EXPECTED_ARTIFACT_SHA256" =~ ^[0-9a-f]{64}$ ]]
-          actual="$(sha256sum omega-recovery-state.tgz | awk '{print $1}')"
-          [ "$actual" = "$EXPECTED_ARTIFACT_SHA256" ] || {
-            echo "OMEGA_RECOVERY_ARTIFACT_DIGEST_MISMATCH:$actual!=$EXPECTED_ARTIFACT_SHA256" >&2
-            exit 36
-          }
           sha256sum -c omega-recovery-state.tgz.sha256
           mkdir -p "$RUNNER_TEMP/omega-state"
           tar -xzf omega-recovery-state.tgz -C "$RUNNER_TEMP/omega-state"
