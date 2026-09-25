@@ -46,8 +46,8 @@ jobs:
       - name: Validate Deno and Cloudflare wrapper contracts
         run: |
           set -euo pipefail
-          grep -q 'Deno.cron("omega-failproof-control", "*/15 * * * *"' control-plane/deno.ts
-          grep -q 'crons = \["*/15 \* \* \* \*"\]' control-plane/wrangler.toml
-          grep -q 'x-omega-control-key' control-plane/deno.ts
-          grep -q 'x-omega-control-key' control-plane/cloudflare-worker.mjs
+          grep -Fq 'Deno.cron("omega-failproof-control", "*/15 * * * *"' control-plane/deno.ts
+          grep -Fq 'crons = ["*/15 * * * *"]' control-plane/wrangler.toml
+          grep -Fq 'x-omega-control-key' control-plane/deno.ts
+          grep -Fq 'x-omega-control-key' control-plane/cloudflare-worker.mjs
           ! grep -R -E 'github_pat_|ghp_[A-Za-z0-9]+' control-plane
