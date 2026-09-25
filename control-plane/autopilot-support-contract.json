@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "purpose": "prevent duplicate work between OMEGA Final Autopilot and the independent audit/support/evidence lane",
+  "coordination_issue": {
+    "repository": "sublimedeaf-design/Omega-engines",
+    "number": 160
+  },
+  "source_of_truth": {
+    "canonical_product_repo": "sublimedeaf-design/Omega-engines",
+    "helper_control_plane_repo": "sublimedeaf-design/Omega-engine",
+    "current_candidate_from": [
+      "Omega-engine/bootstrap/omega/recovery-trigger.txt",
+      "Omega-engine/bootstrap/omega/pr-validation-trigger.txt",
+      "latest non-frozen current-base hardening PR"
+    ],
+    "never_trust_hardcoded_candidate_numbers": true
+  },
+  "dedupe_protocol": {
+    "claim_prefix": "SUPPORT-LANE CLAIM",
+    "release_prefix": "SUPPORT-LANE RELEASE",
+    "key_format": "goal|repo|candidate_sha|paths",
+    "before_start": [
+      "read latest issue #160 coordination comments",
+      "list open helper support/* pull requests",
+      "read current recovery/pr-validation/product trigger files",
+      "compare candidate SHA against current private main"
+    ],
+    "autopilot_behavior": "verify active support claims and skip reimplementation of the same goal/path/candidate until RELEASE, failure, or explicit takeover is recorded in issue #160",
+    "support_behavior": "claim before writing, use support/* branch, keep canonical private main untouched unless an exact promotion gate explicitly authorizes merge, publish evidence, then release claim"
+  },
+  "lane_boundaries": {
+    "support_lane": [
+      "control-plane acceleration",
+      "GitHub/Render independent evidence",
+      "freshness/deduplication",
+      "helper-only performance optimizations",
+      "small restacked trigger/control fixes"
+    ],
+    "final_autopilot": [
+      "project-wide prioritization",
+      "private candidate promotion after exact gates",
+      "cross-repo epoch promotion",
+      "integral delivery orchestration"
+    ]
+  },
+  "acceleration_rules": [
+    "events first, schedules remain watchdogs",
+    "cheap gates before expensive Android/LocalBrain/recovery",
+    "exact-SHA shallow checkout unless full history is a proof requirement",
+    "caches are restore-only in proof paths and never authority",
+    "verify runner prerequisites before network installation",
+    "reuse current support work instead of recreating it",
+    "every optimization must preserve exact-SHA, PIT, independent QA, signer and recovery guarantees"
+  ]
+}
