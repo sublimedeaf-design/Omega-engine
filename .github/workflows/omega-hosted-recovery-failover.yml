@@ -70,6 +70,18 @@ jobs:
       - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb
         with:
           gradle-version: "8.13"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: |
+            ${{ runner.temp }}/omega-state/llama.cpp
+            ${{ runner.temp }}/omega-state/model-cache
+          key: omega-localbrain-linux-x64-b29c606e28a01b1bc8c1351026a0fa6e616bf6c4-cc324af070c2ecbfd324a30884d2f951a7ff756aba85cb811a6ec436933bb046
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: |
+            ${{ runner.temp }}/omega-state/llama.cpp
+            ${{ runner.temp }}/omega-state/model-cache
+          key: omega-localbrain-linux-x64-b29c606e28a01b1bc8c1351026a0fa6e616bf6c4-cc324af070c2ecbfd324a30884d2f951a7ff756aba85cb811a6ec436933bb046
       - name: Prepare exact hosted runtime
         shell: bash
         run: |
