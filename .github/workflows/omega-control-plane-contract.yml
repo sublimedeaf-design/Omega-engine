@@ -1,0 +1,53 @@
+name: OMEGA Control Plane Contract
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "control-plane/**"
+      - ".github/workflows/omega-control-plane-contract.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Parse Node-compatible adapters
+        run: |
+          set -euo pipefail
+          node --check control-plane/reconcile.mjs
+          node --check control-plane/github.mjs
+          node --check control-plane/cloudflare-worker.mjs
+          node --check control-plane/render.mjs
+
+      - name: Enforce narrow authority and global budget
+        run: |
+          node --input-type=module <<'NODE'
+          import {POLICY} from "./control-plane/reconcile.mjs";
+          const requiredForbidden=["merge","release","sign","write-main","write-model","write-evidence"];
+          for (const item of requiredForbidden) {
+            if (!POLICY.forbidden.includes(item)) throw new Error("MISSING_FORBIDDEN:"+item);
+          }
+          if (POLICY.cooldownSeconds !== 3600) throw new Error("COOLDOWN_DRIFT");
+          if (POLICY.max24h !== 2) throw new Error("DAILY_BUDGET_DRIFT");
+          if (POLICY.max30d !== 6) throw new Error("MONTHLY_BUDGET_DRIFT");
+          if (POLICY.stabilitySeconds !== 900) throw new Error("STABILITY_DRIFT");
+          if (!POLICY.authority.includes("update-validation-refs")) throw new Error("REF_AUTHORITY_MISSING");
+          console.log("OMEGA_CONTROL_POLICY_GREEN", JSON.stringify(POLICY));
+          NODE
+
+      - name: Validate Deno and Cloudflare wrapper contracts
+        run: |
+          set -euo pipefail
+          grep -q 'Deno.cron("omega-failproof-control", "*/15 * * * *"' control-plane/deno.ts
+          grep -q 'crons = \["*/15 \* \* \* \*"\]' control-plane/wrangler.toml
+          grep -q 'x-omega-control-key' control-plane/deno.ts
+          grep -q 'x-omega-control-key' control-plane/cloudflare-worker.mjs
+          ! grep -R -E 'github_pat_|ghp_[A-Za-z0-9]+' control-plane
