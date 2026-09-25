@@ -19,14 +19,14 @@ env:
   PRIVATE_REPOSITORY: sublimedeaf-design/Omega-engines
   LIGHT_REF: omega-external-validation
   ANDROID_REF: omega-external-validation-android
-  INFRA_GRACE_SECONDS: "600"
+  STABILITY_GRACE_SECONDS: "900"
 
 jobs:
   arm:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Reconcile exact-main validation refs on primary CI outage
+      - name: Reconcile exact-main external validation refs
         env:
           GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
         shell: bash
@@ -46,69 +46,36 @@ jobs:
           now="$(date -u +%s)"
           main_epoch="$(date -u -d "$main_time" +%s)"
           commit_age=$((now-main_epoch))
-
-          runs="$(api "/repos/$PRIVATE_REPOSITORY/actions/runs?head_sha=$main_sha&event=push&per_page=100")"
-          ci="$(printf '%s' "$runs" | jq -c '[.workflow_runs[] | select(.name=="OMEGA CI")] | sort_by(.created_at) | last // {}')"
-          run_id="$(printf '%s' "$ci" | jq -r '.id // empty')"
-          run_status="$(printf '%s' "$ci" | jq -r '.status // "missing"')"
-          conclusion="$(printf '%s' "$ci" | jq -r '.conclusion // ""')"
-          created="$(printf '%s' "$ci" | jq -r '.created_at // empty')"
-
-          blocked=false
-          reason=healthy
-
-          if [ -z "$run_id" ]; then
-            if [ "$commit_age" -ge "$INFRA_GRACE_SECONDS" ]; then
-              blocked=true
-              reason=ci_run_missing_after_grace
-            else
-              reason=ci_run_missing_within_grace
-            fi
-          else
-            run_epoch="$(date -u -d "$created" +%s)"
-            run_age=$((now-run_epoch))
-            jobs="$(api "/repos/$PRIVATE_REPOSITORY/actions/runs/$run_id/jobs?per_page=100")"
-            jobs_count="$(printf '%s' "$jobs" | jq '.jobs | length')"
-            steps_count="$(printf '%s' "$jobs" | jq '[.jobs[].steps // [] | length] | add // 0')"
-
-            case "$run_status:$conclusion" in
-              completed:success)
-                blocked=false
-                reason=ci_green
-                ;;
-              completed:failure)
-                if [ "$steps_count" -eq 0 ]; then
-                  blocked=true
-                  reason=prestep_failure
-                else
-                  blocked=false
-                  reason=real_test_failure
-                fi
-                ;;
-              completed:cancelled|completed:skipped)
-                if [ "$steps_count" -eq 0 ]; then
-                  blocked=true
-                  reason=prestep_unavailable
-                else
-                  blocked=false
-                  reason=executed_then_stopped
-                fi
-                ;;
-              *)
-                if [ "$run_age" -ge "$INFRA_GRACE_SECONDS" ] && [ "$steps_count" -eq 0 ]; then
-                  blocked=true
-                  reason=stale_no_execution
-                else
-                  blocked=false
-                  reason=ci_active_or_within_grace
-                fi
-                ;;
-            esac
+          if [ "$commit_age" -lt "$STABILITY_GRACE_SECONDS" ]; then
+            echo "OMEGA_CONTROL wait=unstable_head age_seconds=$commit_age sha=$main_sha"
+            exit 0
           fi
 
-          echo "OMEGA_CONTROL primary_blocked=$blocked reason=$reason main_sha=$main_sha"
+          statuses="$(api "/repos/$PRIVATE_REPOSITORY/commits/$main_sha/status")"
+          gate="$(printf '%s' "$statuses" | python3 -c '
+          import json,sys
+          p=json.load(sys.stdin)
+          latest={}
+          for row in p.get("statuses",[]):
+              c=str(row.get("context") or "")
+              if c and c not in latest:
+                  latest[c]=str(row.get("state") or "")
+          core=[
+              "omega/hosted-ci/python311",
+              "omega/hosted-ci/python313",
+              "omega/hosted-ci/python314",
+              "omega/hosted-ci/storage",
+              "omega/hosted-governance",
+          ]
+          core_green=all(latest.get(x)=="success" for x in core)
+          android_green=latest.get("omega/hosted-android")=="success"
+          print(("true" if core_green else "false")+":"+("true" if android_green else "false"))
+          ')"
+          core_green="$(printf '%s' "$gate" | cut -d: -f1)"
+          android_green="$(printf '%s' "$gate" | cut -d: -f2)"
 
-          if [ "$blocked" != true ]; then
+          if [ "$core_green" != true ]; then
+            echo "OMEGA_CONTROL wait=hosted_core_not_green sha=$main_sha"
             exit 0
           fi
 
@@ -121,43 +88,43 @@ jobs:
               return 0
             fi
             if [ -z "$current" ]; then
-              api --method POST "/repos/$PRIVATE_REPOSITORY/git/refs"                 -f ref="refs/heads/$ref" -f sha="$main_sha" >/dev/null
+              api --method POST "/repos/$PRIVATE_REPOSITORY/git/refs" -f ref="refs/heads/$ref" -f sha="$main_sha" >/dev/null
               echo "OMEGA_CONTROL ref_created=$ref sha=$main_sha"
             else
-              api --method PATCH "/repos/$PRIVATE_REPOSITORY/git/refs/heads/$ref"                 -f sha="$main_sha" -F force=true >/dev/null
+              api --method PATCH "/repos/$PRIVATE_REPOSITORY/git/refs/heads/$ref" -f sha="$main_sha" -F force=true >/dev/null
               echo "OMEGA_CONTROL ref_updated=$ref old=$current new=$main_sha"
             fi
           }
 
           reconcile_ref "$LIGHT_REF"
 
-          # Android validation is expensive. Arm it only when Android/release-signing
-          # relevant content has diverged since the last Android validation ref.
           android_old="$(api "/repos/$PRIVATE_REPOSITORY/git/ref/heads/$ANDROID_REF" --jq '.object.sha' 2>/dev/null || true)"
           arm_android=false
-          if [ -z "$android_old" ]; then
-            arm_android=true
-          elif [ "$android_old" != "$main_sha" ]; then
-            compare="$(api "/repos/$PRIVATE_REPOSITORY/compare/$android_old...$main_sha" 2>/dev/null || printf '{}')"
-            if printf '%s' "$compare" | jq -e '
-              [.files[]?.filename] |
-              any(
-                startswith("android/") or
-                startswith(".github/workflows/android") or
-                startswith("tests/test_android") or
-                . == "android/signing-cert.sha256" or
-                . == "evidence/release-stage.json"
-              )
-            ' >/dev/null; then
+          if [ "$android_green" = true ]; then
+            if [ -z "$android_old" ]; then
               arm_android=true
+            elif [ "$android_old" != "$main_sha" ]; then
+              compare="$(api "/repos/$PRIVATE_REPOSITORY/compare/$android_old...$main_sha" 2>/dev/null || printf '{}')"
+              if printf '%s' "$compare" | jq -e '
+                [.files[]?.filename] |
+                any(
+                  startswith("android/") or
+                  startswith(".github/workflows/android") or
+                  startswith("tests/test_android") or
+                  . == "android/signing-cert.sha256" or
+                  . == "evidence/release-stage.json"
+                )
+              ' >/dev/null; then
+                arm_android=true
+              fi
             fi
           fi
 
           if [ "$arm_android" = true ]; then
             reconcile_ref "$ANDROID_REF"
           else
-            echo "OMEGA_CONTROL android_ref_not_armed=no_relevant_delta"
+            echo "OMEGA_CONTROL android_ref_not_armed hosted_android_green=$android_green"
           fi
 
           target="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$main_sha"             -f state=success             -f context="omega/control-plane/ref-sync"             -f description="external validation refs reconciled after primary CI outage"             -f target_url="$target" >/dev/null
+          api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$main_sha" -f state=success -f context="omega/control-plane/ref-sync" -f description="stable hosted-green SHA reconciled to external validation refs" -f target_url="$target" >/dev/null
