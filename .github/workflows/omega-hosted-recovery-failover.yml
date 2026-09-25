@@ -13,10 +13,10 @@ permissions:
   contents: read
 
 concurrency:
-  # Routine schedules serialize together. Explicit push probes are isolated by
-  # their immutable public trigger SHA: a newer probe can never cancel or evict
-  # a frozen release-candidate proof.
-  group: omega-hosted-recovery-${{ github.event_name == 'schedule' && 'routine' || github.sha }}
+  # Serialize explicit recovery proofs and keep their queue. The pin job rejects
+  # stale trigger revisions, preventing cancellation livelock and redundant
+  # parallel recovery jobs from exhausting hosted-runner capacity.
+  group: omega-hosted-recovery-${{ github.event_name == 'schedule' && 'routine' || 'exact-candidate' }}
   cancel-in-progress: false
   queue: max
 
@@ -47,6 +47,21 @@ jobs:
           sha="$main_sha"
           mode=main
           if [ "$EVENT_NAME" = push ] && [ -s bootstrap/omega/recovery-trigger.txt ]; then
+            local_trigger="$(tr -d '\r\n' < bootstrap/omega/recovery-trigger.txt)"
+            current_b64="$(gh api "/repos/${GITHUB_REPOSITORY}/contents/bootstrap/omega/recovery-trigger.txt?ref=main" --jq '.content' 2>/dev/null || true)"
+            current_trigger=""
+            if [ -n "$current_b64" ]; then
+              current_trigger="$(printf '%s' "$current_b64" | base64 -d | tr -d '\r\n')"
+            fi
+            [ -n "$current_trigger" ] || { echo "OMEGA_RECOVERY_CURRENT_TRIGGER_UNREADABLE" >&2; exit 68; }
+            if [ "$local_trigger" != "$current_trigger" ]; then
+              read -r _ stale_candidate _ < bootstrap/omega/recovery-trigger.txt || true
+              [[ "${stale_candidate:-}" =~ ^[0-9a-f]{40}$ ]] || stale_candidate="$main_sha"
+              echo "sha=$stale_candidate" >> "$GITHUB_OUTPUT"
+              echo "need_run=false" >> "$GITHUB_OUTPUT"
+              echo "OMEGA_HOSTED_RECOVERY_STALE_TRIGGER skipped local=$local_trigger current=$current_trigger"
+              exit 0
+            fi
             read -r marker candidate source_ref _ < bootstrap/omega/recovery-trigger.txt || true
             if [ "${marker:-}" = recover-exact ]; then
               [[ "${candidate:-}" =~ ^[0-9a-f]{40}$ ]] || { echo "OMEGA_RECOVERY_TRIGGER_SHA_INVALID" >&2; exit 64; }
