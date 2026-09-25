@@ -1,1 +1,1 @@
-validate-pr-head-android 69fc050c33bb2cf5d1dde054438afc0ac4e10638
+validate-signer-hotfix ba39ad8d88eb7d439a3e1aabb95613d8288000ee
