@@ -58,7 +58,8 @@ end
 recovery_path = WORKFLOWS.join("omega-hosted-recovery-failover.yml")
 recovery = File.read(recovery_path, encoding: "UTF-8")
 {
-  "stale_ref_tip_guard" => "OMEGA_RECOVERY_TRIGGER_NOT_REF_TIP",
+  "stale_ref_tip_reconciled" => "OMEGA_RECOVERY_TRIGGER_ADVANCED",
+  "stale_ref_tip_base_guard" => "OMEGA_RECOVERY_TRIGGER_NOT_CURRENT_BASE",
   "serialized_recovery_no_livelock" => "cancel-in-progress: false",
   "bounded_recovery_queue" => "queue: max",
   "worker_model_pin" => "cc324af070c2ecbfd324a30884d2f951a7ff756aba85cb811a6ec436933bb046",
