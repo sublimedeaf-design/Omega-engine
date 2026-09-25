@@ -35,7 +35,7 @@ jobs:
           for (const item of requiredForbidden) {
             if (!POLICY.forbidden.includes(item)) throw new Error("MISSING_FORBIDDEN:"+item);
           }
-          if (POLICY.cooldownSeconds !== 3600) throw new Error("COOLDOWN_DRIFT");
+          if (POLICY.cooldownSeconds !== 900) throw new Error("COOLDOWN_DRIFT");
           if (POLICY.max24h !== 2) throw new Error("DAILY_BUDGET_DRIFT");
           if (POLICY.max30d !== 6) throw new Error("MONTHLY_BUDGET_DRIFT");
           if (POLICY.stabilitySeconds !== 900) throw new Error("STABILITY_DRIFT");
