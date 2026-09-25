@@ -1,1 +1,1 @@
-validate-exact-pr 3c6170e73e13023808278c2f89b0d449bda0a605 hardening/failproof-dual-localbrain-recovery-20260925
+validate-exact-pr 105c01a57cee3623b6aa3fcc394237088283736d hardening/failproof-dual-localbrain-recovery-20260925
