@@ -6,7 +6,7 @@ The engine has deliberately narrow authority. It can read the private main SHA, 
 
 Required secret: `OMEGA_GITHUB_TOKEN`, stored in the provider secret manager, never source control. Each deployment should use its own minimally scoped credential. Optional authenticated manual reconcile endpoints use a separate `OMEGA_CONTROL_KEY`.
 
-Global policy is shared across providers: 15-minute stable-head delay, 60-minute dispatch cooldown, at most 2 external dispatches per rolling 24 hours and 6 per rolling 30 days. The public ledger makes these limits global instead of provider-local.
+Global policy is shared across providers: 15-minute stable-head delay, 15-minute dispatch cooldown, at most 2 external dispatches per rolling 24 hours and 6 per rolling 30 days. The public ledger makes these limits global instead of provider-local.
 
 Cloudflare: deploy this directory with `wrangler.toml`; configure both secrets in Workers secrets. Deno: deploy `deno.ts` and configure secrets in project environment variables. Render: run `node control-plane/render.mjs` from a scheduled service with the token in Render environment variables.
 
