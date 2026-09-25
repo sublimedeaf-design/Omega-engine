@@ -1,1 +1,1 @@
-recover-exact 7b825618360b356b221a4197e2f68905cfc6aefe hardening/failproof-dual-localbrain-recovery-20260925 recovery-v2-schema-v6
+recover-exact d3e53f1187342a45717beeaa56cb2ffab460591c hardening/failproof-dual-localbrain-recovery-20260925 union-free-sigstore-v5
