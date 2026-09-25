@@ -1,1 +1,1 @@
-validate-signer-hotfix-head 74c6e3a5160ed5264b21e2efafa9841e92275233
+validate-exact-pr 74c6e3a5160ed5264b21e2efafa9841e92275233
