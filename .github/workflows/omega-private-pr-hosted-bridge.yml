@@ -43,70 +43,63 @@ jobs:
         run: |
           set -Eeuo pipefail
           requested_sha=''
-          if [ "$EVENT_NAME" = push ] && [ -s bootstrap/omega/pr-validation-trigger.txt ]; then
+          if [ -s bootstrap/omega/pr-validation-trigger.txt ]; then
             read -r marker candidate _ < bootstrap/omega/pr-validation-trigger.txt || true
             if [ "${marker:-}" = validate-exact-pr ] && [[ "${candidate:-}" =~ ^[0-9a-f]{40}$ ]]; then
               requested_sha="$candidate"
             fi
           fi
 
-          if [ -n "$requested_sha" ]; then
-            gh api "/repos/$PRIVATE_REPOSITORY/commits/$requested_sha" --jq '.sha' | grep -Fx "$requested_sha" >/dev/null
-            base_sha="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/main" --jq '.sha')"
-            relation="$(gh api "/repos/$PRIVATE_REPOSITORY/compare/$base_sha...$requested_sha" --jq '.status')"
-            case "$relation" in
-              ahead|identical) ;;
-              *) echo "OMEGA_EXACT_TRIGGER_NOT_BASED_ON_CURRENT_MAIN relation=$relation" >&2; exit 41 ;;
-            esac
-            selected="$(printf '%s\t%s\t0' "$requested_sha" "$base_sha")"
-            mode=exact_trigger
-          else
-            payload="$(gh api "/repos/$PRIVATE_REPOSITORY/pulls?state=open&per_page=100")"
-            selected="$(printf '%s' "$payload" | jq -r '
-              [.[] | select(type=="object")
-                | select((.head|type)=="object" and (.base|type)=="object")
-                | select(.state=="open" and (.draft|not) and .base.ref=="main")
-                | select(
-                    (.head.ref|startswith("agent/orchestrator/vm-autonomous-")) or
-                    (.head.ref|startswith("hardening/failproof-")) or
-                    (.head.ref|startswith("fix/signer-")) or
-                    (.head.ref|startswith("hotfix/signer-")) or
-                    (.head.ref|startswith("hardening/hosted-signer-continuity-"))
-                  )]
-              | sort_by(.updated_at) | reverse
-              | if length==0 then "" else [.[0].head.sha,.[0].base.sha,(.[0].number|tostring)] | @tsv end
-            ')"
-            mode=scheduled_pull
-          fi
-
-          if [ -z "$selected" ]; then
+          if [ -z "$requested_sha" ]; then
             echo "found=false" >> "$GITHUB_OUTPUT"
-            echo "OMEGA_HOSTED_PR_NONE mode=$mode requested_sha=${requested_sha:-none}"
+            echo "OMEGA_HOSTED_PR_NONE reason=no_exact_trigger event=$EVENT_NAME"
             exit 0
           fi
 
-          IFS=$'\t' read -r sha base_sha number <<< "$selected"
-          [[ "$sha" =~ ^[0-9a-f]{40}$ && "$base_sha" =~ ^[0-9a-f]{40}$ && "$number" =~ ^[0-9]+$ ]]
+          branches="$(gh api "/repos/$PRIVATE_REPOSITORY/branches?per_page=100")"
+          selected_branch="$(printf '%s' "$branches" | jq -r --arg sha "$requested_sha" '
+            [.[] | select(type=="object")
+              | select(.commit.sha==$sha)
+              | select(
+                  (.name|startswith("agent/orchestrator/vm-autonomous-")) or
+                  (.name|startswith("hardening/failproof-")) or
+                  (.name|startswith("fix/signer-")) or
+                  (.name|startswith("hotfix/signer-")) or
+                  (.name|startswith("hardening/hosted-signer-continuity-"))
+                )]
+            | if length==1 then .[0].name
+              elif length==0 then ""
+              else error("OMEGA_EXACT_TRIGGER_BRANCH_AMBIGUOUS") end
+          ')"
+          if [ -z "$selected_branch" ]; then
+            echo "OMEGA_EXACT_TRIGGER_NOT_ON_ALLOWED_BRANCH:$requested_sha" >&2
+            exit 65
+          fi
+
+          base_sha="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/main" --jq '.sha')"
+          [[ "$base_sha" =~ ^[0-9a-f]{40}$ ]]
+          compare="$(gh api "/repos/$PRIVATE_REPOSITORY/compare/$base_sha...$requested_sha")"
+          relation="$(printf '%s' "$compare" | jq -r '.status // ""')"
+          behind="$(printf '%s' "$compare" | jq -r '.behind_by // 999999')"
+          if [ "$relation" != ahead ] || [ "$behind" != 0 ]; then
+            echo "OMEGA_EXACT_TRIGGER_NOT_CURRENT_BASE:status=$relation behind=$behind base=$base_sha head=$requested_sha" >&2
+            exit 66
+          fi
 
           android=false
-          if [ "$number" != "0" ]; then
-            if gh api --paginate "/repos/$PRIVATE_REPOSITORY/pulls/$number/files?per_page=100" --jq '.[].filename' \
-              | grep -Eq '^(android/|\.github/workflows/android-[^/]+\.yml$)'; then
-              android=true
-            fi
-          elif gh api "/repos/$PRIVATE_REPOSITORY/compare/$base_sha...$sha" --jq '.files[].filename' \
+          if printf '%s' "$compare" | jq -r '.files[]?.filename' \
             | grep -Eq '^(android/|\.github/workflows/android-[^/]+\.yml$)'; then
             android=true
           fi
 
           {
             echo "found=true"
-            echo "sha=$sha"
+            echo "sha=$requested_sha"
             echo "base_sha=$base_sha"
-            echo "number=$number"
+            echo "number=0"
             echo "android=$android"
           } >> "$GITHUB_OUTPUT"
-          echo "OMEGA_HOSTED_PR_PIN mode=$mode number=$number sha=$sha android=$android"
+          echo "OMEGA_HOSTED_PR_PIN mode=exact_branch branch=$selected_branch number=0 sha=$requested_sha android=$android"
 
   ci:
     needs: discover
