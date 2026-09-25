@@ -125,12 +125,20 @@ def main():
         "start_attempts":start_attempts,
         "credential_material_recorded":False,
     }
+    quota_blocked=(402 in start_attempts)
+    payload["quota_blocked"]=quota_blocked
+    payload["runtime_available"]=ok
     output_path=os.environ.get("GITHUB_OUTPUT","").strip()
     if output_path:
         with open(output_path,"a",encoding="utf-8") as fh:
             fh.write(f"codespace_name={name}\n")
             fh.write(f"codespace_state={state}\n")
+            fh.write(f"runtime_available={'true' if ok else 'false'}\n")
+            fh.write(f"quota_blocked={'true' if quota_blocked else 'false'}\n")
     print(json.dumps(payload,sort_keys=True))
+    if quota_blocked:
+        print("OMEGA_CODESPACE_QUOTA_BLOCKED_HOSTED_FAILOVER_ACTIVE")
+        return 0
     return 0 if ok else 8
 
 if __name__=="__main__":
