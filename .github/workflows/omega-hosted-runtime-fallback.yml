@@ -45,17 +45,10 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          if [ "$EVENT_NAME" = "push" ]; then
-            {
-              echo "run=false"
-              echo "mode=none"
-              echo "sha=0000000000000000000000000000000000000000"
-            } >> "$GITHUB_OUTPUT"
-            echo "OMEGA_HOSTED_RUNTIME_CONFIG_CHECK"
-            exit 0
-          fi
-
           mode="$REQUESTED_MODE"
+          if [ "$EVENT_NAME" = "push" ]; then
+            mode=t60
+          fi
           if [ "$EVENT_NAME" = "schedule" ]; then
             case "$EVENT_SCHEDULE" in
               "17 2 * * *") mode=daily ;;
@@ -144,7 +137,7 @@ jobs:
           auth_header=""
           unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
 
-      - name: Promote only bounded shadow/data evidence
+      - name: Stage immutable shadow/data handoff
         id: promote
         shell: bash
         run: |
@@ -175,42 +168,63 @@ jobs:
             exit 88
           fi
 
-          git config user.name omega-hosted-runtime
-          git config user.email omega-hosted-runtime@users.noreply.github.com
-          for f in "${files[@]}"; do
-            [ -e "$f" ] && git add "$f"
-          done
-          if git diff --cached --quiet; then
-            echo "promotion_status=no_change" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          git commit -m "omega: hosted $OMEGA_MODE fallback evidence"
+          handoff="$RUNNER_TEMP/omega-runtime-handoff"
+          rm -rf "$handoff"
+          mkdir -p "$handoff/files"
 
-          set +x
-          auth_header="$(python3 - <<'PY'
-          import base64,os
-          token=os.environ["OMEGA_BOOTSTRAP_TOKEN"]
-          print("AUTHORIZATION: basic "+base64.b64encode(("x-access-token:"+token).encode()).decode())
+          copied=0
+          for src in "${files[@]}"; do
+            if [ -e "$src" ]; then
+              mkdir -p "$handoff/files/$(dirname "$src")"
+              cp -a "$src" "$handoff/files/$src"
+              copied=$((copied+1))
+            fi
+          done
+          [ "$copied" -gt 0 ] || { echo "OMEGA_HOSTED_RUNTIME_HANDOFF_EMPTY" >&2; exit 89; }
+
+          python3 - "$handoff" "$OMEGA_SHA" "$OMEGA_MODE" <<'PY'
+          import hashlib,json,sys
+          from datetime import datetime,timezone
+          from pathlib import Path
+          root=Path(sys.argv[1])
+          source_sha=sys.argv[2]
+          mode=sys.argv[3]
+          rows=[]
+          for path in sorted((root/"files").rglob("*")):
+              if not path.is_file():
+                  continue
+              h=hashlib.sha256(path.read_bytes()).hexdigest()
+              rows.append({
+                  "path":str(path.relative_to(root/"files")),
+                  "sha256":h,
+                  "size":path.stat().st_size,
+              })
+          if not rows:
+              raise SystemExit("OMEGA_HOSTED_RUNTIME_HANDOFF_EMPTY")
+          payload={
+              "schema_version":1,
+              "source_sha":source_sha,
+              "mode":mode,
+              "generated_at":datetime.now(timezone.utc).isoformat(),
+              "semantics":"shadow_data_handoff_only",
+              "production_release_authority":False,
+              "signing_authority":False,
+              "files":rows,
+          }
+          (root/"manifest.json").write_text(json.dumps(payload,indent=2,sort_keys=True)+"\n",encoding="utf-8")
+          print(json.dumps(payload,sort_keys=True))
           PY
-          )"
-          export GIT_CONFIG_COUNT=1
-          export GIT_CONFIG_KEY_0='http.https://github.com/.extraheader'
-          export GIT_CONFIG_VALUE_0="$auth_header"
-          git fetch origin main
-          set +e
-          python scripts/verify_evidence_rebase.py --base "$OMEGA_SHA" --head origin/main
-          guard=$?
-          set -e
-          if [ "$guard" -eq 3 ]; then
-            echo "promotion_status=deferred" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          [ "$guard" -eq 0 ] || exit "$guard"
-          git rebase origin/main
-          git push origin HEAD:main
-          auth_header=""
-          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
-          echo "promotion_status=promoted" >> "$GITHUB_OUTPUT"
+
+          echo "promotion_status=handoff_ready" >> "$GITHUB_OUTPUT"
+          echo "handoff_path=$handoff" >> "$GITHUB_OUTPUT"
+
+      - name: Upload immutable runtime handoff
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: omega-runtime-handoff-${{ env.OMEGA_MODE }}-${{ env.OMEGA_SHA }}
+          path: ${{ runner.temp }}/omega-runtime-handoff
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Publish hosted runtime fallback status
         if: ${{ always() }}
@@ -225,5 +239,5 @@ jobs:
           gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$OMEGA_SHA" \
             -f state="$state" \
             -f context="omega/hosted-runtime-fallback/$OMEGA_MODE" \
-            -f description="public hosted shadow/data fallback: $RESULT" \
+            -f description="public hosted immutable shadow/data handoff: $RESULT" \
             -f target_url="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" >/dev/null
