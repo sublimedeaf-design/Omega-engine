@@ -1,1 +1,1 @@
-recover-exact 105c01a57cee3623b6aa3fcc394237088283736d hardening/failproof-dual-localbrain-recovery-20260925 sigstore-token-isolated-v4
+recover-exact 105c01a57cee3623b6aa3fcc394237088283736d hardening/failproof-dual-localbrain-recovery-20260925 auto-tip-schema-v5
