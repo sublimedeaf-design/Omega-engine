@@ -22,6 +22,9 @@ AUDIENCE = "omega-external-validator"
 ALLOWED_REPOSITORY = os.getenv("OMEGA_VALIDATOR_ALLOWED_REPOSITORY", "sublimedeaf-design/Omega-engine")
 ALLOWED_WORKFLOW = os.getenv("OMEGA_VALIDATOR_ALLOWED_WORKFLOW", "OMEGA External Validator Dispatch")
 PROVIDER = os.getenv("OMEGA_VALIDATOR_PROVIDER", "unknown")
+EXPECTED_PYTHON = os.getenv("OMEGA_VALIDATOR_EXPECTED_PYTHON", "3.13").strip()
+if EXPECTED_PYTHON not in {"3.11", "3.13", "3.14"}:
+    raise RuntimeError("OMEGA_VALIDATOR_EXPECTED_PYTHON_INVALID")
 MAX_BUNDLE = int(os.getenv("OMEGA_VALIDATOR_MAX_BUNDLE_BYTES", str(20 * 1024 * 1024)))
 STATE = Path(os.getenv("OMEGA_VALIDATOR_STATE", "/tmp/omega-validator-attestations"))
 STATE.mkdir(parents=True, exist_ok=True)
@@ -124,8 +127,8 @@ def _validate(sha: str, raw: bytes, bundle_sha: str, oidc_claims: dict) -> None:
         if head != sha:
             raise RuntimeError(f"EXACT_SHA_MISMATCH:{head}!={sha}")
         version = subprocess.check_output([os.sys.executable, "-c", "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"], text=True).strip()
-        if version != "3.13":
-            raise RuntimeError(f"PYTHON_VERSION_MISMATCH:{version}")
+        if version != EXPECTED_PYTHON:
+            raise RuntimeError(f"PYTHON_VERSION_MISMATCH:{version}!={EXPECTED_PYTHON}")
 
         venv = work / ".omega-validator-venv"
         commands = [
@@ -173,7 +176,7 @@ def _validate(sha: str, raw: bytes, bundle_sha: str, oidc_claims: dict) -> None:
 
 @app.get("/healthz")
 def healthz():
-    return jsonify({"ok": True, "provider": PROVIDER, "audience": AUDIENCE, "suite": "core"})
+    return jsonify({"ok": True, "provider": PROVIDER, "audience": AUDIENCE, "suite": "core", "python": EXPECTED_PYTHON})
 
 
 @app.post("/validate")
