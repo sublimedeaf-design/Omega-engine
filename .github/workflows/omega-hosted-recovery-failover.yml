@@ -316,7 +316,24 @@ jobs:
           [ "$actual" = "$expected" ] || { echo "OMEGA_RECOVERY_ARTIFACT_HASH_MISMATCH:$actual!=$expected" >&2; exit 43; }
           sha256sum -c omega-recovery-state.tgz.sha256
           mkdir -p "$RUNNER_TEMP/omega-state"
-          tar -xzf omega-recovery-state.tgz -C "$RUNNER_TEMP/omega-state"
+          python3 - "$RUNNER_TEMP/omega-recovery-state.tgz" "$RUNNER_TEMP/omega-state" <<'PY'
+          import pathlib,sys,tarfile
+          archive=pathlib.Path(sys.argv[1])
+          dest=pathlib.Path(sys.argv[2])
+          with tarfile.open(archive,"r:gz") as tf:
+              members=tf.getmembers()
+              if not members:
+                  raise SystemExit("OMEGA_RECOVERY_ARCHIVE_EMPTY")
+              for member in members:
+                  name=pathlib.PurePosixPath(member.name)
+                  if name.is_absolute() or ".." in name.parts:
+                      raise SystemExit(f"OMEGA_RECOVERY_ARCHIVE_PATH_UNSAFE:{member.name}")
+                  if not name.parts or name.parts[0] not in {"evidence","logs"}:
+                      raise SystemExit(f"OMEGA_RECOVERY_ARCHIVE_SCOPE_INVALID:{member.name}")
+                  if member.issym() or member.islnk() or member.isdev():
+                      raise SystemExit(f"OMEGA_RECOVERY_ARCHIVE_SPECIAL_FILE_REJECTED:{member.name}")
+              tf.extractall(dest,members=members,filter="data")
+          PY
           test -s "$RUNNER_TEMP/omega-state/evidence/acceptance-pre-rebuild.json"
           test -s "$RUNNER_TEMP/omega-state/evidence/hosted-pre-recovery.json"
       - name: Verify clean-environment recovery
