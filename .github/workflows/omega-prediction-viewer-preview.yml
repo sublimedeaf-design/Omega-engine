@@ -102,9 +102,13 @@ jobs:
           cp "$(one "$RUNNER_TEMP/t24" coverage-gaps.json)" omega/android/app/src/main/assets/evidence/coverage-gaps.json
           cp "$(one "$RUNNER_TEMP/t60" latest-t60.json)" omega/android/app/src/main/assets/evidence/latest-t60.json
 
-          python3 scripts/prepare_prediction_viewer_snapshot.py \
-            --hosted-dir android/app/src/main/assets/evidence \
-            --canonical-dir evidence
+          hosted_rows="$(jq -r '(.results // []) | length' omega/android/app/src/main/assets/evidence/latest-24h.json)"
+          canonical_rows="$(jq -r '(.results // []) | length' omega/evidence/latest-24h.json)"
+          if [ "$hosted_rows" -eq 0 ] && [ "$canonical_rows" -gt 0 ]; then
+            cp omega/evidence/latest-24h.json omega/android/app/src/main/assets/evidence/latest-24h.json
+            cp omega/evidence/coverage-gaps.json omega/android/app/src/main/assets/evidence/coverage-gaps.json
+            echo "OMEGA_VIEWER_CANONICAL_T24_FALLBACK rows=$canonical_rows"
+          fi
 
           python3 - <<'PY'
           import json
