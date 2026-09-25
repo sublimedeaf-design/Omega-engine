@@ -1,2 +1,2 @@
-private_main=aa51fe30b7222204e2170206ee8e29e856fb15af
-purpose=full-validation-after-self-hosted-queue-hardening
+private_main=d6b02b6c23e573253bb13c893072f229bb4b8fff
+purpose=validate-var-tmp-rebuild-proof-and-protocol-hardening
