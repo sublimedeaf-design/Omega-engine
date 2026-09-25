@@ -13,9 +13,11 @@ permissions:
   contents: read
 
 concurrency:
-  group: omega-hosted-recovery-failover
-  cancel-in-progress: false
-  queue: max
+  # Routine probes never cancel each other. Explicit exact-candidate probes
+  # supersede stale candidate runs so obsolete SHAs cannot block the newest
+  # failproof validation for tens of minutes.
+  group: omega-hosted-recovery-${{ github.event_name == 'schedule' && 'routine' || 'exact-candidate' }}
+  cancel-in-progress: ${{ github.event_name != 'schedule' }}
 
 env:
   PRIVATE_REPOSITORY: sublimedeaf-design/Omega-engines
