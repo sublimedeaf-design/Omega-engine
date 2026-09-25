@@ -1,2 +1,2 @@
-probe=latest-runtime-before-convergence
-private_main=8758c0e69df49377c66f851bb0acc756ae6c7ac5
+probe=runtime-recovery-state-before-fixed-bootstrap
+private_main=d6b02b6c23e573253bb13c893072f229bb4b8fff
