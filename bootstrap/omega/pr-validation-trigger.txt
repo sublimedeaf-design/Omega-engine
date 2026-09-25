@@ -1,1 +1,1 @@
-retry hosted pr discovery tsv=1
+retry hosted pr branch-fallback sorted=1
