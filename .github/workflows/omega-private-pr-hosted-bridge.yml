@@ -280,7 +280,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb
         with:
           gradle-version: "8.13"
-          cache-disabled: true
+          cache-read-only: true
       - name: Build, lint and verify debug APK
         working-directory: omega/android
         shell: bash
