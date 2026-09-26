@@ -7,7 +7,7 @@ on:
 
 permissions:
   contents: read
-  actions: read
+  actions: write
 
 concurrency:
   group: omega-candidate-evidence-root
@@ -300,3 +300,17 @@ jobs:
             -f context="omega/candidate-evidence-root" \
             -f description="$desc" \
             -f target_url="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" >/dev/null
+
+      - name: Dispatch exact evidence run to release stager
+        if: ${{ steps.pin.outputs.ready == 'true' && steps.root.outputs.root_sha256 != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVIDENCE_RUN_ID: ${{ github.run_id }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          gh workflow run omega-recovery-evidence-release-stager.yml \
+            -R "$GITHUB_REPOSITORY" \
+            --ref main \
+            -f evidence_run_id="$EVIDENCE_RUN_ID"
+          echo "OMEGA_RELEASE_STAGER_DISPATCHED evidence_run=$EVIDENCE_RUN_ID"
