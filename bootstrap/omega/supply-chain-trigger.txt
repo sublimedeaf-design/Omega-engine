@@ -1,1 +1,1 @@
-generate-supply-chain-locks e82d2831aa1fc1425b4a90af19c6fceef8e21734
+bootstrap-supply-chain 6321e1a095f197332c6985bd91d1f5d419cdaa34 hardening/supply-chain-bom-hashlocks-20260926 initial
