@@ -84,3 +84,4 @@ fail!("pr_bridge_stale_ref_reconcile_missing") unless pr_bridge.include?("OMEGA_
 fail!("pr_bridge_stale_ref_base_guard_missing") unless pr_bridge.include?("OMEGA_EXACT_TRIGGER_NOT_CURRENT_BASE")
 
 puts "OMEGA_CONTROL_PLANE_INTEGRITY_GREEN workflows=#{files.length}"
+# support fastpath restack v2 exact-head trigger
