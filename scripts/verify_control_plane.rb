@@ -103,5 +103,21 @@ end
 integrity_workflow = File.read(WORKFLOWS.join("omega-control-plane-integrity.yml"), encoding: "UTF-8")
 fail!("gate_classifier_self_test_missing") unless integrity_workflow.include?("omega_gate_classifier.py --self-test")
 
+release_fifo_workflows = %w[
+  omega-candidate-evidence-root.yml
+  omega-recovery-evidence-release-stager.yml
+  omega-canonical-android-signer.yml
+  omega-release-federation-rollover.yml
+  omega-release-federation-certifier.yml
+  omega-android-runtime-coldstart.yml
+  omega-final-release-promoter.yml
+  omega-post-live-verification.yml
+]
+release_fifo_workflows.each do |name|
+  text = File.read(WORKFLOWS.join(name), encoding: "UTF-8")
+  fail!("release_fifo_cancel_must_be_false:#{name}") unless text.include?("cancel-in-progress: false")
+  fail!("release_fifo_queue_max_missing:#{name}") unless text.include?("queue: max")
+end
+
 puts "OMEGA_CONTROL_PLANE_INTEGRITY_GREEN workflows=#{files.length}"
 # support fastpath restack v2 exact-head trigger
