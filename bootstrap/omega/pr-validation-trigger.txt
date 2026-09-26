@@ -1,1 +1,1 @@
-validate-exact-pr 34c5c3cca5a2085ab482dce2fbfac8d2e9903277 hardening/canonical-evidence-envelope-20260926 least-privilege-hf-cache-identity
+validate-exact-pr cf7def4dc026efc83b0dbde97edb2ffc93cae18d hardening/canonical-evidence-envelope-20260926 deep-hardening-ms-openai-hf-v3
