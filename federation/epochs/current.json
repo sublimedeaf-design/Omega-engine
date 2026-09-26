@@ -76,6 +76,7 @@
   },
   "release_rollover": {
     "source_ref": "release/final-51fac141-20260926",
-    "stage": "PEERS_ALIGNED_PENDING_EXTERNAL_VALIDATION"
+    "stage": "PEERS_ALIGNED_PENDING_EXTERNAL_VALIDATION",
+    "retry_reason": "repo_scoped_certifier_write_authority"
   }
 }
