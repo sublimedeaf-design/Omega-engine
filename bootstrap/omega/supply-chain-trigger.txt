@@ -1,1 +1,1 @@
-generate-supply-chain-locks 14727063ff00b145ea0334b41694115c02263fd8 hardening/canonical-evidence-envelope-20260926 exact-wheel-gradle-hashlock-v1
+generate-supply-chain-locks 22173336a0862a1a8f5e3ee71fbb3038b6e15a30 hardening/canonical-evidence-envelope-20260926 final-dependency-root-v3
