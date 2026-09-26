@@ -1,0 +1,172 @@
+name: OMEGA Supply Chain Lock Lab
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/omega-supply-chain-lock-lab.yml"
+      - "bootstrap/omega/supply-chain-trigger.txt"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: omega-supply-chain-lock-lab
+  cancel-in-progress: true
+
+env:
+  PRIVATE_REPOSITORY: sublimedeaf-design/Omega-engines
+
+jobs:
+  discover:
+    runs-on: ubuntu-24.04
+    outputs:
+      sha: ${{ steps.pin.outputs.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - id: pin
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          read -r marker sha _ < bootstrap/omega/supply-chain-trigger.txt
+          test "$marker" = "generate-supply-chain-locks"
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
+          gh api "/repos/$PRIVATE_REPOSITORY/commits/$sha" --jq '.sha' | grep -qx "$sha"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+  python-locks:
+    needs: discover
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - lane: py311
+            python: "3.11"
+          - lane: py313
+            python: "3.13"
+          - lane: py314
+            python: "3.14"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: ${{ env.PRIVATE_REPOSITORY }}
+          ref: ${{ needs.discover.outputs.sha }}
+          token: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          persist-credentials: false
+          path: omega
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Generate exact wheel hash lock
+        working-directory: omega
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python -m pip install --disable-pip-version-check "packaging==26.3"
+          rm -rf .lock-wheelhouse
+          mkdir -p .lock-wheelhouse reports/supply-chain
+          python -m pip download --disable-pip-version-check --only-binary=:all:             --dest .lock-wheelhouse -r requirements-ci.lock
+          PYVER="${{ matrix.python }}" LANE="${{ matrix.lane }}" python - <<'PY'
+          import hashlib, os, pathlib, zipfile
+          from email.parser import Parser
+          from packaging.requirements import Requirement
+          from packaging.utils import canonicalize_name
+
+          root=pathlib.Path(".")
+          wheels=list((root/".lock-wheelhouse").glob("*.whl"))
+          found={}
+          for wheel in wheels:
+              with zipfile.ZipFile(wheel) as z:
+                  meta=next(n for n in z.namelist() if n.endswith(".dist-info/METADATA"))
+                  msg=Parser().parsestr(z.read(meta).decode("utf-8","replace"))
+              name=canonicalize_name(msg["Name"])
+              version=msg["Version"]
+              digest=hashlib.sha256(wheel.read_bytes()).hexdigest()
+              found[(name,version)]=(wheel.name,digest)
+
+          active=[]
+          for raw in (root/"requirements-ci.lock").read_text(encoding="utf-8").splitlines():
+              line=raw.strip()
+              if not line or line.startswith("#"):
+                  continue
+              req=Requirement(line)
+              if req.marker and not req.marker.evaluate():
+                  continue
+              specs=list(req.specifier)
+              if len(specs)!=1 or specs[0].operator!="==":
+                  raise SystemExit(f"NON_EXACT_REQUIREMENT:{line}")
+              key=(canonicalize_name(req.name),specs[0].version)
+              if key not in found:
+                  raise SystemExit(f"WHEEL_NOT_FOUND:{key}")
+              _,digest=found[key]
+              active.append(f"{req.name}=={specs[0].version} --hash=sha256:{digest}")
+
+          out=root/"reports"/"supply-chain"/f"requirements-ci-{os.environ['LANE']}-linux-x86_64.lock"
+          out.write_text(
+              "# Generated on GitHub-hosted Ubuntu from exact wheels; review before promotion.\n"
+              + "\n".join(active) + "\n",
+              encoding="utf-8",
+          )
+          print(out.read_text())
+          PY
+          python -m pip install --dry-run --disable-pip-version-check             --require-hashes --only-binary=:all:             -r "reports/supply-chain/requirements-ci-${{ matrix.lane }}-linux-x86_64.lock"
+          rm -rf .lock-wheelhouse
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: omega-python-lock-${{ matrix.lane }}-${{ needs.discover.outputs.sha }}
+          path: omega/reports/supply-chain/requirements-ci-${{ matrix.lane }}-linux-x86_64.lock
+          if-no-files-found: error
+          retention-days: 7
+
+  gradle-lock:
+    needs: discover
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: ${{ env.PRIVATE_REPOSITORY }}
+          ref: ${{ needs.discover.outputs.sha }}
+          token: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          persist-credentials: false
+          path: omega
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb
+        with:
+          gradle-version: "8.13"
+          cache-disabled: true
+      - name: Install Android SDK 36
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install             "platforms;android-36" "build-tools;36.0.0" >/dev/null
+      - name: Generate and prove Gradle verification metadata
+        working-directory: omega/android
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          rm -f gradle/verification-metadata.xml
+          gradle --no-daemon --stacktrace --write-verification-metadata sha256 lintDebug assembleDebug
+          test -s gradle/verification-metadata.xml
+          gradle --no-daemon --stacktrace --dependency-verification strict lintDebug assembleDebug
+          mkdir -p ../reports/supply-chain
+          cp gradle/verification-metadata.xml ../reports/supply-chain/gradle-verification-metadata.xml
+          sha256sum ../reports/supply-chain/gradle-verification-metadata.xml             > ../reports/supply-chain/gradle-verification-metadata.xml.sha256
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: omega-gradle-verification-${{ needs.discover.outputs.sha }}
+          path: |
+            omega/reports/supply-chain/gradle-verification-metadata.xml
+            omega/reports/supply-chain/gradle-verification-metadata.xml.sha256
+          if-no-files-found: error
+          retention-days: 7
