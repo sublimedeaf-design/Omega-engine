@@ -41,11 +41,17 @@ jobs:
               m=re.fullmatch(r"omega-candidate-evidence-root-([0-9a-f]{40})",n)
               if m and not a.get("expired"):
                   rows.append((m.group(1),n,str(a.get("id"))))
-          if len(rows)!=1:
-              raise SystemExit(f"OMEGA_RELEASE_STAGE_EVIDENCE_ARTIFACT_COUNT:{len(rows)}")
-          print("|".join(rows[0]))
+          if len(rows)>1:
+              raise SystemExit(f"OMEGA_RELEASE_STAGE_EVIDENCE_ARTIFACT_AMBIGUOUS:{len(rows)}")
+          if rows:
+              print("|".join(rows[0]))
           PY
           )"
+          if [ -z "$row" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "OMEGA_RELEASE_STAGE_NOT_EXECUTED_NO_EVIDENCE_ARTIFACT run=$EVIDENCE_RUN_ID"
+            exit 0
+          fi
           IFS='|' read -r source artifact artifact_id <<<"$row"
           [[ "$source" =~ ^[0-9a-f]{40}$ ]]
           [[ "$artifact_id" =~ ^[0-9]+$ ]]
