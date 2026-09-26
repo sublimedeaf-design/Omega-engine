@@ -7,6 +7,7 @@ import sys
 from typing import Any
 
 MARKERS = (
+    ("MAIN_PROTOCOL_NOT_EXECUTED", "NOT_EXECUTED", "NOT_EXECUTED", "protocol-generation", "recovery"),
     ("FEDERATION_PRIMARY_SOURCE_MISMATCH", "FEDERATION_IDENTITY", "FAIL", "federation", "federation"),
     ("FEDERATION_", "FEDERATION", "FAIL", "federation", "federation"),
     ("EVIDENCE_IDENTITY_MISMATCH", "EXECUTION_IDENTITY", "FAIL", "evidence", "evidence-root"),
