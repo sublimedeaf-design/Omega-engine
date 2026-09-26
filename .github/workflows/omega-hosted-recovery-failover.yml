@@ -172,6 +172,8 @@ jobs:
           test "$(git rev-parse HEAD)" = "$OMEGA_SOURCE_SHA"
           python -m venv .venv
           .venv/bin/python scripts/install_locked_ci_deps.py
+          .venv/bin/python scripts/materialize_gradle_verification.py
+          .venv/bin/python scripts/validate_supply_chain_locks.py --out reports/recovery-supply-chain-locks.json
           {
             echo "OMEGA_STATE=$RUNNER_TEMP/omega-state"
             echo "OMEGA_AUTO_REBUILD=0"
@@ -300,6 +302,8 @@ jobs:
           test "$(git rev-parse HEAD)" = "$OMEGA_SOURCE_SHA"
           python -m venv .venv
           .venv/bin/python scripts/install_locked_ci_deps.py
+          .venv/bin/python scripts/materialize_gradle_verification.py
+          .venv/bin/python scripts/validate_supply_chain_locks.py --out reports/recovery-supply-chain-locks.json
           echo "OMEGA_STATE=$RUNNER_TEMP/omega-state" >> "$GITHUB_ENV"
           echo "OMEGA_LOCAL_BRAIN_CONTEXT=4096" >> "$GITHUB_ENV"
           echo "OMEGA_LOCAL_BRAIN_THREADS=4" >> "$GITHUB_ENV"
