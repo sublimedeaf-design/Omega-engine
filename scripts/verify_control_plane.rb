@@ -401,5 +401,24 @@ fail!("federation_peer_certifier_duplicate_guard_missing") unless peer_bridge.in
 fail!("federation_certifier_manual_exact_handoff_missing") unless certifier.include?("bridge_run_id:") && certifier.include?("bridge_head_sha:") && certifier.include?("inputs.bridge_run_id") && certifier.include?("inputs.bridge_head_sha")
 fail!("federation_certifier_exact_bridge_api_verification_missing") unless certifier.include?("OMEGA_RELEASE_CERTIFIER_BRIDGE_IDENTITY_MISMATCH") && certifier.include?("/actions/runs/$BRIDGE_RUN_ID")
 
+# TUF-style rollback/freeze semantics for release control identity: every
+# orchestrator deviation creates a new immutable, monotonically sequenced epoch.
+fail!("release_epoch_monotonic_sequence_missing") unless rollover_script.include?('"monotonic_epoch_sequence": True') && rollover_script.include?("sequence = prior_sequence + 1")
+fail!("release_epoch_unfinished_supersede_missing") unless rollover_script.include?("safe_unfinished_supersede") && rollover_script.include?("OMEGA_RELEASE_EPOCH_SUPERSEDE_UNFINISHED_CONTROL_DEVIATION")
+fail!("release_epoch_supersede_policy_missing") unless rollover_script.include?('"supersedes_unfinished_epoch_on_control_deviation": True')
+fail!("release_epoch_parent_control_binding_missing") unless rollover_script.include?('"control_contract_sha": prior_control_contract or None') && rollover_script.include?('"parent_sequence": prior_sequence')
+
+epoch_verifier = File.read(ROOT.join("scripts", "verify_federation_epoch.py"), encoding: "UTF-8")
+fail!("release_epoch_sequence_verifier_missing") unless epoch_verifier.include?("release_epoch_sequence_not_monotonic") && epoch_verifier.include?("release_epoch_parent_control_sha")
+
+peer_bridge = File.read(WORKFLOWS.join("omega-federation-v3-peer-bridge.yml"), encoding: "UTF-8")
+fail!("federation_control_rollback_guard_missing") unless peer_bridge.include?("OMEGA_FEDERATION_CONTROL_ROLLBACK_DETECTED") && peer_bridge.include?("git merge-base --is-ancestor")
+fail!("federation_control_drift_guard_missing") unless peer_bridge.include?("OMEGA_FEDERATION_CONTROL_DRIFT_REQUIRES_NEW_EPOCH")
+fail!("federation_epoch_sequence_required_missing") unless peer_bridge.include?("OMEGA_FEDERATION_EPOCH_SEQUENCE_REQUIRED")
+fail!("federation_peer_control_binding_missing") unless peer_bridge.include?('"control_contract_sha":control_contract') && peer_bridge.include?('"release_epoch_sequence":sequence')
+
+certifier = File.read(WORKFLOWS.join("omega-release-federation-certifier.yml"), encoding: "UTF-8")
+fail!("federation_certifier_control_binding_missing") unless certifier.include?("OMEGA_RELEASE_CERTIFIER_PROOF_CONTROL_BINDING_MISMATCH") && certifier.include?("release_epoch_sequence")
+
 puts "OMEGA_CONTROL_PLANE_INTEGRITY_GREEN workflows=#{files.length}"
 # support fastpath restack v2 exact-head trigger
