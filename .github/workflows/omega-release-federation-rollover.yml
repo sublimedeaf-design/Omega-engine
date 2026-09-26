@@ -31,11 +31,12 @@ jobs:
         run: |
           set -Eeuo pipefail
           read -r marker candidate source_ref _ < bootstrap/omega/pr-validation-trigger.txt
-          if [ "$marker" != validate-exact-pr ] || [[ ! "$candidate" =~ ^[0-9a-f]{40}$ ]] || [[ ! "$source_ref" =~ ^release/recovery-evidence- ]]; then
+          if [ "$marker" != validate-exact-pr ] || [[ ! "$candidate" =~ ^[0-9a-f]{40}$ ]] || [[ ! "$source_ref" =~ ^release/[A-Za-z0-9._/-]+$ ]]; then
             echo "found=false" >> "$GITHUB_OUTPUT"
             echo "OMEGA_RELEASE_FEDERATION_NO_RELEASE_TRIGGER"
             exit 0
           fi
+          case "$source_ref" in *..*|/*|-*) echo "OMEGA_RELEASE_FEDERATION_REF_UNSAFE:$source_ref" >&2; exit 64 ;; esac
           tip="$(gh api "/repos/sublimedeaf-design/Omega-engines/commits/$source_ref" --jq .sha)"
           if [ "$tip" != "$candidate" ]; then
             echo "found=false" >> "$GITHUB_OUTPUT"
