@@ -138,6 +138,7 @@ fail!("recovery_model_cache_must_follow_manifest") unless recovery.include?("has
 pr_bridge = File.read(WORKFLOWS.join("omega-private-pr-hosted-bridge.yml"), encoding: "UTF-8")
 fail!("pr_bridge_stale_ref_rejection_missing") unless pr_bridge.include?("OMEGA_EXACT_TRIGGER_STALE")
 fail!("pr_bridge_stale_ref_base_guard_missing") unless pr_bridge.include?("OMEGA_EXACT_TRIGGER_NOT_CURRENT_BASE")
+fail!("pr_bridge_python_syntax_preflight_missing") unless pr_bridge.include?("Preflight Python syntax once before matrix") && pr_bridge.include?("python -m compileall -q src scripts tests")
 
 classifier_path = ROOT.join("scripts", "omega_gate_classifier.py")
 fail!("gate_classifier_missing") unless classifier_path.exist?
