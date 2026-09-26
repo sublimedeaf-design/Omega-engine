@@ -1,1 +1,1 @@
-validate-exact-pr 8e85cb73432bde93d605eba89d981b735af1cc17 hardening/shadow-only-recommendation-contract-20260926 deterministic-recovery-authority-v4
+validate-exact-pr 1c6be61b211b664d6a56bfe7db79519f54f3566a hardening/shadow-only-recommendation-contract-20260926 deterministic-recovery-authority-v5
