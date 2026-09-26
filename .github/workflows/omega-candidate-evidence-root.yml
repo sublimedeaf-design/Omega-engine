@@ -12,6 +12,7 @@ permissions:
 concurrency:
   group: omega-candidate-evidence-root
   cancel-in-progress: false
+  queue: max
 
 env:
   PRIVATE_REPOSITORY: sublimedeaf-design/Omega-engines
