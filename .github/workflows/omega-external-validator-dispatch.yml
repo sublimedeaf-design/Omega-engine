@@ -157,6 +157,13 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+          path: control
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
           repository: ${{ env.PRIVATE_REPOSITORY }}
           ref: ${{ needs.discover.outputs.sha }}
           token: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
@@ -178,6 +185,32 @@ jobs:
           sha256sum /tmp/omega-exact-source.tgz | tee /tmp/omega-exact-source.tgz.sha256
           echo "OMEGA_RENDER_BUNDLE bytes=$bytes source=$SHA"
 
+      - name: Verify deployed validator code identity
+        env:
+          VALIDATOR_URL: ${{ matrix.url }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          expected="$(sha256sum control/external_validator/app.py | awk '{print $1}')"
+          [[ "$expected" =~ ^[0-9a-f]{64}$ ]]
+          curl -fsS --retry 4 --retry-all-errors --connect-timeout 20 --max-time 90 \
+            "$VALIDATOR_URL/healthz" > /tmp/omega-validator-health.json
+          EXPECTED="$expected" python3 - <<'PY'
+          import json,os,re
+          p=json.load(open("/tmp/omega-validator-health.json",encoding="utf-8"))
+          expected=os.environ["EXPECTED"]
+          actual=str(p.get("validator_code_sha256") or "")
+          commit=str(p.get("render_git_commit") or "")
+          if p.get("ok") is not True:
+              raise SystemExit("OMEGA_RENDER_VALIDATOR_HEALTH_NOT_OK")
+          if actual != expected:
+              raise SystemExit(f"OMEGA_RENDER_VALIDATOR_CODE_MISMATCH:{actual}!={expected}")
+          if commit and not re.fullmatch(r"[0-9a-f]{40}",commit):
+              raise SystemExit("OMEGA_RENDER_VALIDATOR_DEPLOY_COMMIT_INVALID")
+          print(f"OMEGA_RENDER_VALIDATOR_IDENTITY_PASS code_sha256={actual} render_commit={commit or 'unknown'}")
+          PY
+          echo "VALIDATOR_CODE_SHA256=$expected" >> "$GITHUB_ENV"
+
       - name: Request GitHub OIDC token for external validator
         id: oidc
         shell: bash
@@ -195,6 +228,7 @@ jobs:
         env:
           SHA: ${{ needs.discover.outputs.sha }}
           VALIDATOR_URL: ${{ matrix.url }}
+          VALIDATOR_CODE_SHA256: ${{ env.VALIDATOR_CODE_SHA256 }}
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -203,6 +237,7 @@ jobs:
           curl -fsS --retry 5 --retry-all-errors --connect-timeout 30 --max-time 180 \
             -H "Authorization: Bearer $token" \
             -H "X-OMEGA-SHA: $SHA" \
+            -H "X-OMEGA-VALIDATOR-CODE-SHA256: $VALIDATOR_CODE_SHA256" \
             -H "Content-Type: application/gzip" \
             --data-binary @/tmp/omega-exact-source.tgz \
             "$VALIDATOR_URL/validate" | tee /tmp/omega-validator-dispatch.json
@@ -217,6 +252,7 @@ jobs:
         env:
           SHA: ${{ needs.discover.outputs.sha }}
           VALIDATOR_URL: ${{ matrix.url }}
+          VALIDATOR_CODE_SHA256: ${{ env.VALIDATOR_CODE_SHA256 }}
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -226,12 +262,17 @@ jobs:
               -o /tmp/omega-render-attestation.json -w '%{http_code}' \
               "$VALIDATOR_URL/attestation/$SHA" || true)"
             if [ "$code" = 200 ]; then
-              state="$(python3 -c 'import json; print(json.load(open("/tmp/omega-render-attestation.json")).get("state",""))')"
+              state="$(VALIDATOR_CODE_SHA256="$VALIDATOR_CODE_SHA256" python3 -c 'import json,os; p=json.load(open("/tmp/omega-render-attestation.json")); v=p.get("validator") or {}; expected=os.environ["VALIDATOR_CODE_SHA256"]; actual=str(v.get("code_sha256") or ""); print(p.get("state","") if actual==expected else "validator_identity_mismatch")')"
               case "$state" in
                 success) exit 0 ;;
                 failure)
                   cat /tmp/omega-render-attestation.json
                   exit 20
+                  ;;
+                validator_identity_mismatch)
+                  cat /tmp/omega-render-attestation.json
+                  echo "OMEGA_RENDER_ATTESTATION_VALIDATOR_IDENTITY_MISMATCH" >&2
+                  exit 22
                   ;;
               esac
             fi
