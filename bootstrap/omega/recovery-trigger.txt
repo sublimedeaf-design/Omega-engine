@@ -1,1 +1,1 @@
-recover-exact 51fac1413e2177c7c94207a4c24dccd7657a6d3b release/final-51fac141-20260926 release-federation-second-proof
+recover-exact 8bb4f93855c3be15fd2cee707ff1424171eecdc9 release/final-8bb4f938-20260926 release-v3-reconciled-authority
