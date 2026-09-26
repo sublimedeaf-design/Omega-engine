@@ -251,8 +251,11 @@ jobs:
           python3 - <<'PY'
           import hashlib,json,os,pathlib,shutil
 
-          source=pathlib.Path("evidence").resolve()
-          destination=(pathlib.Path(os.environ["OMEGA_STATE"])/"evidence").resolve()
+          # Acceptance generates the authoritative recovery bindings and ledgers
+          # directly under OMEGA_STATE/evidence. Packaging must preserve that
+          # exact dynamic evidence root instead of reading stale checkout evidence.
+          source=(pathlib.Path(os.environ["OMEGA_STATE"])/"evidence").resolve()
+          destination=source
           destination.mkdir(parents=True,exist_ok=True)
 
           required={
@@ -319,7 +322,8 @@ jobs:
                   raise SystemExit("OMEGA_RECOVERY_RELEASE_EVIDENCE_SYMLINK:"+raw)
               dst=destination/pathlib.Path(*logical.parts)
               dst.parent.mkdir(parents=True,exist_ok=True)
-              shutil.copy2(src,dst)
+              if src.resolve()!=dst.resolve():
+                  shutil.copy2(src,dst)
               manifest.append({
                   "path":raw,
                   "sha256":digest(dst),
