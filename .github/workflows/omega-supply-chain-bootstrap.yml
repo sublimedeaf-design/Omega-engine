@@ -1,0 +1,172 @@
+name: OMEGA Supply Chain Bootstrap
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "bootstrap/omega/supply-chain-trigger.txt"
+      - ".github/workflows/omega-supply-chain-bootstrap.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: omega-supply-chain-bootstrap
+  cancel-in-progress: true
+
+env:
+  PRIVATE_REPOSITORY: sublimedeaf-design/Omega-engines
+
+jobs:
+  discover:
+    runs-on: ubuntu-24.04
+    outputs:
+      sha: ${{ steps.pin.outputs.sha }}
+      ref: ${{ steps.pin.outputs.ref }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - id: pin
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          read -r marker sha ref _ < bootstrap/omega/supply-chain-trigger.txt
+          [ "$marker" = "bootstrap-supply-chain" ]
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$ref" =~ ^[A-Za-z0-9._/-]+$ ]]
+          case "$ref" in *..*|/*|-*) exit 67 ;; esac
+          tip="$(gh api "/repos/$PRIVATE_REPOSITORY/commits?sha=$ref&per_page=1" --jq '.[0].sha // empty')"
+          [ "$tip" = "$sha" ] || {
+            echo "OMEGA_SUPPLY_CHAIN_TRIGGER_STALE expected=$sha actual=$tip" >&2
+            exit 68
+          }
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+
+  python-lock:
+    needs: discover
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - lane: py311
+            python: "3.11"
+          - lane: py313
+            python: "3.13"
+          - lane: py314
+            python: "3.14"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: ${{ env.PRIVATE_REPOSITORY }}
+          ref: ${{ needs.discover.outputs.sha }}
+          token: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          persist-credentials: false
+          path: omega
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Resolve exact environment and build hash lock
+        working-directory: omega
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python -m pip --retries 5 --timeout 60 install -c requirements-ci.lock -e '.[dev,data]'
+          mkdir -p "/tmp/omega-lock/wheels"
+          python -m pip freeze --exclude-editable             | grep -v -E '^(omega-engine|omega_engine)=='             | LC_ALL=C sort > "/tmp/omega-lock/freeze.txt"
+          while IFS= read -r req; do
+            [ -n "$req" ] || continue
+            python -m pip download --no-deps --only-binary=:all:               --dest "/tmp/omega-lock/wheels" "$req"
+          done < "/tmp/omega-lock/freeze.txt"
+          python - "/tmp/omega-lock/freeze.txt" "/tmp/omega-lock/wheels" "requirements-ci-${{ matrix.lane }}-hashes.lock" <<'PY'
+          import hashlib, pathlib, re, sys
+          freeze=pathlib.Path(sys.argv[1]).read_text().splitlines()
+          wheel_dir=pathlib.Path(sys.argv[2])
+          out=pathlib.Path(sys.argv[3])
+          def norm(s): return re.sub(r"[-_.]+","-",s).lower()
+          wheels=list(wheel_dir.glob("*.whl"))
+          lines=["--only-binary :all:"]
+          for req in freeze:
+              if "==" not in req:
+                  raise SystemExit("NON_EXACT_REQUIREMENT:"+req)
+              name,version=req.split("==",1)
+              prefix=norm(name)+"-"+version.lower()
+              candidates=[]
+              for whl in wheels:
+                  base=norm(whl.name)
+                  if base.startswith(prefix+"-"):
+                      candidates.append(whl)
+              if len(candidates)!=1:
+                  raise SystemExit(f"WHEEL_RESOLUTION_AMBIGUOUS:{req}:{[x.name for x in candidates]}")
+              p=candidates[0]
+              digest=hashlib.sha256(p.read_bytes()).hexdigest()
+              lines.append(f"{name}=={version} \\")
+              lines.append(f"    --hash=sha256:{digest}")
+          out.write_text("\n".join(lines)+"\n",encoding="utf-8")
+          PY
+          python -m venv /tmp/omega-lock/check
+          /tmp/omega-lock/check/bin/python -m pip install --upgrade pip >/dev/null
+          /tmp/omega-lock/check/bin/python -m pip install             --require-hashes -r "requirements-ci-${{ matrix.lane }}-hashes.lock"
+          /tmp/omega-lock/check/bin/python -m pip check
+          sha256sum "requirements-ci-${{ matrix.lane }}-hashes.lock"             > "requirements-ci-${{ matrix.lane }}-hashes.lock.sha256"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: omega-python-hashlock-${{ matrix.lane }}-${{ needs.discover.outputs.sha }}
+          path: |
+            omega/requirements-ci-${{ matrix.lane }}-hashes.lock
+            omega/requirements-ci-${{ matrix.lane }}-hashes.lock.sha256
+          retention-days: 7
+          if-no-files-found: error
+
+  gradle-lock:
+    needs: discover
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: ${{ env.PRIVATE_REPOSITORY }}
+          ref: ${{ needs.discover.outputs.sha }}
+          token: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          persist-credentials: false
+          path: omega
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Install Android SDK 36
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"             --install "platforms;android-36" "build-tools;36.0.0" >/dev/null
+      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb
+        with:
+          gradle-version: "8.13"
+          cache-disabled: true
+      - name: Generate and enforce Gradle dependency verification
+        working-directory: omega/android
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p gradle
+          rm -f gradle/verification-metadata.xml
+          gradle --no-daemon --stacktrace --write-verification-metadata sha256 lintDebug assembleDebug
+          test -s gradle/verification-metadata.xml
+          grep -q '<sha256 value=' gradle/verification-metadata.xml
+          gradle --no-daemon --stacktrace lintDebug assembleDebug
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify app/build/outputs/apk/debug/app-debug.apk
+          sha256sum gradle/verification-metadata.xml > gradle/verification-metadata.xml.sha256
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: omega-gradle-verification-${{ needs.discover.outputs.sha }}
+          path: |
+            omega/android/gradle/verification-metadata.xml
+            omega/android/gradle/verification-metadata.xml.sha256
+          retention-days: 7
+          if-no-files-found: error
