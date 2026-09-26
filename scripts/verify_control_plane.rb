@@ -162,6 +162,10 @@ coldstart = File.read(WORKFLOWS.join("omega-android-runtime-coldstart.yml"), enc
 promoter = File.read(WORKFLOWS.join("omega-final-release-promoter.yml"), encoding: "UTF-8")
 fail!("single_promotion_unsigned_handoff_missing") unless signer.include?("OMEGA-Unsigned-Release-")
 fail!("single_promotion_signed_handoff_missing") unless signer.include?("OMEGA-Signed-Release-") && coldstart.include?("OMEGA-Signed-Release-") && promoter.include?("OMEGA-Signed-Release-")
+fail!("coldstart_must_break_workflow_run_depth") if coldstart.include?("workflow_run:")
+fail!("coldstart_exact_signer_input_missing") unless coldstart.include?("signer_run_id:")
+fail!("signer_coldstart_dispatch_missing") unless signer.include?("gh workflow run omega-android-runtime-coldstart.yml") && signer.include?('signer_run_id="$SIGNER_RUN_ID"')
+fail!("signer_actions_write_missing") unless signer.include?("actions: write")
 fail!("single_promotion_release_ref_guard_missing") unless promoter.include?("release/recovery-evidence-")
 
 puts "OMEGA_CONTROL_PLANE_INTEGRITY_GREEN workflows=#{files.length}"
