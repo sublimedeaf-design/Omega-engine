@@ -52,7 +52,9 @@ jobs:
           set -Eeuo pipefail
           mode="$REQUESTED_MODE"
           if [ "$EVENT_NAME" = "push" ]; then
-            mode=t60
+            # Workflow/control-plane changes re-prove the complete dependency
+            # chain once on the newest private main SHA.
+            mode=settlement
           fi
           if [ "$EVENT_NAME" = "schedule" ]; then
             case "$EVENT_SCHEDULE" in
