@@ -6,7 +6,7 @@ on:
     types: [completed]
 
 permissions:
-  contents: read
+  contents: write
   actions: read
 
 concurrency:
@@ -272,6 +272,21 @@ jobs:
           echo "FINAL_SHA=$final" >> "$GITHUB_ENV"
           echo "RELEASE_BRANCH=$branch" >> "$GITHUB_ENV"
           echo "OMEGA_RELEASE_EVIDENCE_STAGED source=$SOURCE_SHA final=$final branch=$branch"
+
+      - name: Dispatch exact final-SHA hosted validation
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          payload="validate-exact-pr $FINAL_SHA $RELEASE_BRANCH recovery-evidence-release-stager"
+          path="bootstrap/omega/pr-validation-trigger.txt"
+          current="$(gh api "/repos/${{ github.repository }}/contents/$path" --jq '.sha')"
+          encoded="$(printf '%s\n' "$payload" | base64 -w0)"
+          gh api --method PUT "/repos/${{ github.repository }}/contents/$path" \
+            -f message="Validation: prove exact staged Android release SHA" \
+            -f content="$encoded" -f sha="$current" -f branch=main >/dev/null
+          echo "OMEGA_FINAL_SHA_VALIDATION_DISPATCHED sha=$FINAL_SHA branch=$RELEASE_BRANCH"
 
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6
         with:
