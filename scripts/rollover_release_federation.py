@@ -258,7 +258,7 @@ for repo, role in PEERS:
 
 seed_core = {
     "schema_version": 1,
-    "release_epoch_version": 1,
+    "release_epoch_version": 2,
     "sequence": sequence,
     "authority_repository": CONTROL,
     "control_contract_sha": CONTROL_CONTRACT_SHA,
@@ -367,6 +367,7 @@ primary["source_ref"] = SOURCE_REF
 primary["certification_state"] = "NOT_EXECUTED"
 primary["pull_request"] = None
 projection["release_epoch"] = {
+    "contract_version": 2,
     "id": epoch_id,
     "sequence": sequence,
     "immutable_path": seed_path,
