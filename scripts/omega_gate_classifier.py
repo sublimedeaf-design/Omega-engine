@@ -12,6 +12,7 @@ HEX40 = re.compile(r"^[0-9a-f]{40}$")
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
 
 MARKERS = (
+    ("EVIDENCE_ROOT_UPSTREAM_NOT_PASS", "UPSTREAM_PREREQUISITE", "BLOCKED", "upstream-proof", "recovery"),
     ("MAIN_PROTOCOL_NOT_EXECUTED", "NOT_EXECUTED", "NOT_EXECUTED", "protocol-generation", "recovery"),
     ("FEDERATION_PRIMARY_SOURCE_MISMATCH", "FEDERATION_IDENTITY", "FAIL", "federation", "federation"),
     ("FEDERATION_", "FEDERATION", "FAIL", "federation", "federation"),
@@ -54,6 +55,7 @@ POLICIES = {
     "FEDERATION_IDENTITY": (False, 1, "repin_federation_epoch_then_reprove"),
     "FEDERATION": (False, 1, "repair_federation_then_reprove"),
     "CODE_TEST": (False, 1, "repair_code_then_reprove"),
+    "UPSTREAM_PREREQUISITE": (False, 1, "reprove_from_upstream_boundary"),
     "UNKNOWN_FAILURE": (False, 1, "minimal_isolation_then_classify"),
     "UNKNOWN_STATE": (False, 1, "orchestrator_reconcile"),
 }
