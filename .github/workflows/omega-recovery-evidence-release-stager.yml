@@ -202,9 +202,21 @@ jobs:
               tf.extractall(dest,members=members,filter="data")
           PY
           ev="$RUNNER_TEMP/recovered/evidence"
-          for name in execution-envelope.json t24-binding.json t60-binding.json qa-binding.json latest-24h.json latest-t60.json coverage-gaps.json forecast-ledger.jsonl shadow-ledger.jsonl prematch-intelligence.jsonl; do
+          for name in execution-envelope.json t24-binding.json t60-binding.json qa-binding.json latest-24h.json latest-t60.json coverage-gaps.json; do
             test -s "$ev/$name" || { echo "OMEGA_RELEASE_STAGE_EVIDENCE_MISSING:$name" >&2; exit 52; }
           done
+          for name in forecast-ledger.jsonl shadow-ledger.jsonl prematch-intelligence.jsonl; do
+            test -e "$ev/$name" || { echo "OMEGA_RELEASE_STAGE_LEDGER_MISSING:$name" >&2; exit 52; }
+          done
+          PYTHONPATH="$PWD/omega/src" python3 - "$ev" <<'PY'
+          import pathlib,sys
+          from omega.live.ledger import verify_ledger
+          ev=pathlib.Path(sys.argv[1])
+          for name in ("forecast-ledger.jsonl","shadow-ledger.jsonl","prematch-intelligence.jsonl"):
+              path=ev/name
+              if not verify_ledger(path):
+                  raise SystemExit("OMEGA_RELEASE_STAGE_LEDGER_INTEGRITY_FAILURE:"+name)
+          PY
           python3 - "$ev" "$SOURCE_SHA" "$OMEGA_EXECUTION_ID" <<'PY'
           import json,pathlib,sys
           ev=pathlib.Path(sys.argv[1]); source=sys.argv[2]; xid=sys.argv[3]
