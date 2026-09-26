@@ -91,6 +91,15 @@ jobs:
                 echo "OMEGA_RECOVERY_TRIGGER_ADVANCED stale=$candidate current=$ref_tip ref=$source_ref"
                 candidate="$ref_tip"
               fi
+              if [ "$candidate" != "$main_sha" ] && [ "$EVENT_NAME" = schedule ]; then
+                existing="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/$candidate/status?per_page=100")"
+                if STATUS_PAYLOAD="$existing" python3 -c 'import json,os; p=json.loads(os.environ["STATUS_PAYLOAD"]); latest={}; [(latest.setdefault(str(r.get("context") or ""),str(r.get("state") or ""))) for r in p.get("statuses",[]) if r.get("context")]; raise SystemExit(0 if latest.get("omega/hosted-recovery")=="success" and latest.get("omega/recovery-attestation")=="success" else 1)'; then
+                  echo "sha=$candidate" >> "$GITHUB_OUTPUT"
+                  echo "need_run=false" >> "$GITHUB_OUTPUT"
+                  echo "OMEGA_HOSTED_RECOVERY_CERTIFICATE_REUSED sha=$candidate event=schedule"
+                  exit 0
+                fi
+              fi
               if [ "$candidate" != "$main_sha" ]; then
                 compare="$(gh api "/repos/$PRIVATE_REPOSITORY/compare/$main_sha...$candidate")"
                 relation="$(printf '%s' "$compare" | jq -r '.status // ""')"
