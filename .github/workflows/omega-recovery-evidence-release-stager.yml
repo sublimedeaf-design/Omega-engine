@@ -40,15 +40,14 @@ jobs:
           run_id="${EVIDENCE_RUN_ID:-}"
           if [ -z "$run_id" ]; then
             trigger="bootstrap/omega/release-stager-trigger.txt"
-            test -s "$trigger"
-            local_trigger="$(tr -d '\r\n' < "$trigger")"
             current_b64="$(gh api "/repos/${GITHUB_REPOSITORY}/contents/$trigger?ref=main" --jq .content)"
-            current_trigger="$(printf '%s' "$current_b64" | tr -d '\n' | base64 -d | tr -d '\r\n')"
-            [ "$local_trigger" = "$current_trigger" ] || {
-              echo "OMEGA_RELEASE_STAGER_STALE_TRIGGER local=$local_trigger current=$current_trigger" >&2
-              exit 75
-            }
-            read -r marker run_id _ < "$trigger" || true
+            current_trigger="$(ENCODED="$current_b64" python3 - <<'PY'
+          import base64,os
+          raw="".join(os.environ["ENCODED"].split())
+          print(base64.b64decode(raw,validate=True).decode("utf-8").strip())
+          PY
+            )"
+            read -r marker run_id _ <<<"$current_trigger"
             [ "${marker:-}" = stage-exact ] || { echo "OMEGA_RELEASE_STAGER_TRIGGER_INVALID" >&2; exit 64; }
           fi
           [[ "$run_id" =~ ^[0-9]+$ ]] || { echo "OMEGA_RELEASE_STAGER_RUN_ID_INVALID:$run_id" >&2; exit 64; }
