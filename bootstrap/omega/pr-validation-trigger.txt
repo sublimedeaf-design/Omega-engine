@@ -1,1 +1,1 @@
-validate-exact-pr 22173336a0862a1a8f5e3ee71fbb3038b6e15a30 hardening/canonical-evidence-envelope-20260926 supply-chain-sbom-gradle-strict-python-hashes-final
+validate-exact-pr f4d61fea4ccb0e678cc46c265d3af68699dea1a4 hardening/canonical-evidence-envelope-20260926 final-security-supply-chain-freeze-v4
