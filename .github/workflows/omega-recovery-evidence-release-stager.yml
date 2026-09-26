@@ -478,6 +478,10 @@ jobs:
         shell: bash
         env:
           OMEGA_SOURCE_SHA: ${{ env.FINAL_SHA }}
+          OMEGA_CONTROL_WORKFLOW_SHA: ${{ github.workflow_sha }}
+          OMEGA_CONTROL_WORKFLOW_REF: ${{ github.workflow_ref }}
+          OMEGA_RUN_ID: ${{ github.run_id }}
+          OMEGA_CONTROL_REPOSITORY: ${{ github.repository }}
         run: |
           set -Eeuo pipefail
           test "$(git rev-parse HEAD)" = "$FINAL_SHA"
@@ -526,6 +530,44 @@ jobs:
           }
           pathlib.Path("dist/OMEGA-Engine-unsigned.provenance.json").write_text(
               json.dumps(payload,indent=2,sort_keys=True)+"\n",encoding="utf-8")
+          workflow_sha=os.environ["OMEGA_CONTROL_WORKFLOW_SHA"]
+          workflow_ref=os.environ["OMEGA_CONTROL_WORKFLOW_REF"]
+          run_id=os.environ["OMEGA_RUN_ID"]
+          control_repo=os.environ["OMEGA_CONTROL_REPOSITORY"]
+          if not re.fullmatch(r"[0-9a-f]{40}",workflow_sha):
+              raise SystemExit("OMEGA_UNSIGNED_RELEASE_WORKFLOW_SHA_INVALID")
+          def file_digest(path):
+              return hashlib.sha256(pathlib.Path(path).read_bytes()).hexdigest()
+          statement={
+              "_type":"https://in-toto.io/Statement/v1",
+              "subject":[{"name":"OMEGA-Engine-unsigned.apk","digest":{"sha256":digest}}],
+              "predicateType":"https://slsa.dev/provenance/v1",
+              "predicate":{
+                  "buildDefinition":{
+                      "buildType":"https://github.com/sublimedeaf-design/Omega-engine/.github/workflows/omega-recovery-evidence-release-stager.yml@v1",
+                      "externalParameters":{
+                          "source_commit":source,
+                          "code_source_sha":code_source,
+                          "workflow_ref":workflow_ref,
+                          "expected_signer_certificate_sha256":payload["expected_signer_certificate_sha256"],
+                      },
+                      "resolvedDependencies":[
+                          {"uri":"git+https://github.com/sublimedeaf-design/Omega-engines@"+source,
+                           "digest":{"gitCommit":source}},
+                          {"uri":"file:reports/omega-sbom.spdx.json",
+                           "digest":{"sha256":file_digest("reports/omega-sbom.spdx.json")}},
+                          {"uri":"file:reports/release-stage-supply-chain.json",
+                           "digest":{"sha256":file_digest("reports/release-stage-supply-chain.json")}},
+                      ],
+                  },
+                  "runDetails":{
+                      "builder":{"id":"https://github.com/"+control_repo+"/.github/workflows/omega-recovery-evidence-release-stager.yml@"+workflow_sha},
+                      "metadata":{"invocationId":"https://github.com/"+control_repo+"/actions/runs/"+run_id},
+                  },
+              },
+          }
+          pathlib.Path("dist/OMEGA-Engine-unsigned.intoto.jsonl").write_text(
+              json.dumps(statement,sort_keys=True,separators=(",",":"))+"\n",encoding="utf-8")
           PY
           echo "apk_sha256=$(awk '{print $1}' dist/OMEGA-Engine-unsigned.apk.sha256)" >> "$GITHUB_OUTPUT"
 
@@ -539,6 +581,7 @@ jobs:
             omega/dist/OMEGA-Engine-unsigned.apk
             omega/dist/OMEGA-Engine-unsigned.apk.sha256
             omega/dist/OMEGA-Engine-unsigned.provenance.json
+            omega/dist/OMEGA-Engine-unsigned.intoto.jsonl
             omega/reports/omega-sbom.spdx.json
             omega/reports/release-stage-supply-chain.json
 
