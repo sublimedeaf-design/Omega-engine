@@ -81,9 +81,8 @@ jobs:
           echo "sha=$candidate" >> "$GITHUB_OUTPUT"
           echo "source_ref=$source_ref" >> "$GITHUB_OUTPUT"
           if [ "$rc" -eq 75 ]; then
-            echo "ready=false" >> "$GITHUB_OUTPUT"
-            echo "OMEGA_EVIDENCE_ROOT_NOT_READY sha=$candidate recovery_run=$RECOVERY_RUN_ID"
-            exit 0
+            echo "OMEGA_EVIDENCE_ROOT_UPSTREAM_NOT_PASS sha=$candidate recovery_run=$RECOVERY_RUN_ID" >&2
+            exit 75
           fi
           [ "$rc" -eq 0 ] || exit "$rc"
           echo "ready=true" >> "$GITHUB_OUTPUT"
