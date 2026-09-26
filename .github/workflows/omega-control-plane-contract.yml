@@ -51,3 +51,4 @@ jobs:
           grep -Fq 'x-omega-control-key' control-plane/deno.ts
           grep -Fq 'x-omega-control-key' control-plane/cloudflare-worker.mjs
           ! grep -R -E 'github_pat_|ghp_[A-Za-z0-9]+' control-plane
+# support fastpath restack v2 exact-head gate
