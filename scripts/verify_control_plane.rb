@@ -330,5 +330,8 @@ fail!("federation_certifier_stale_status_dependency_forbidden") if certifier.inc
 epoch_verifier = File.read(ROOT.join("scripts", "verify_federation_epoch.py"), encoding: "UTF-8")
 fail!("release_epoch_verifier_missing") unless epoch_verifier.include?("release_epoch_deviation_policy") && epoch_verifier.include?("external_epoch")
 
+fail!("postlive_live_certified_artifact_missing") unless postlive.include?('"state":"LIVE-CERTIFIED"') && postlive.include?("live-certified.json")
+fail!("postlive_release_epoch_policy_missing") unless postlive.include?('"new_deviation_requires_new_epoch":True') && postlive.include?('"old_evidence_runs_are_never_mutated":True')
+
 puts "OMEGA_CONTROL_PLANE_INTEGRITY_GREEN workflows=#{files.length}"
 # support fastpath restack v2 exact-head trigger
