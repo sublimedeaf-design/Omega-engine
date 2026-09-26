@@ -1,1 +1,1 @@
-validate-exact-pr b3ee2470063c76bb1302a1ea0b93ef0da7a621a1 fix/private-source-provenance-main-20260926 deterministic-recovery-authority-v3
+validate-exact-pr 8e85cb73432bde93d605eba89d981b735af1cc17 hardening/shadow-only-recommendation-contract-20260926 deterministic-recovery-authority-v4
