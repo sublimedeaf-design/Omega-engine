@@ -74,9 +74,10 @@
   },
   "release_rollover": {
     "source_ref": "release/final-51fac141-20260926",
-    "stage": "CERTIFIED_PASS_PENDING_SECOND_PROOF",
+    "stage": "CERTIFIED_PASS",
     "retry_reason": "repo_scoped_certifier_write_authority",
     "first_peer_bridge_run_id": "36250855269",
-    "second_proof_dispatch_reason": "explicit_workflow_dispatch_hardening_verified"
+    "second_proof_dispatch_reason": "explicit_workflow_dispatch_hardening_verified",
+    "second_peer_bridge_run_id": "36258897538"
   }
 }
