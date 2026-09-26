@@ -69,6 +69,16 @@ def _jobs_all_prestep(jobs: Any) -> bool:
             return False
     return True
 
+def _diagnostic_sha256(log: str) -> str:
+    interesting = []
+    needles = ("OMEGA_", "FAILED ", "ERROR", "MISMATCH", "MISSING", "BLOCKED", "NOT_EXECUTED")
+    for raw in log.splitlines():
+        line = " ".join(raw.strip().split())
+        if line and any(needle in line.upper() for needle in needles):
+            interesting.append(line[:512])
+    normalized = "\n".join(sorted(set(interesting))[:32])
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
 def _decorate(payload: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
     failure_class = str(result["failure_class"])
     retryable, max_attempts, next_action = POLICIES.get(
@@ -77,6 +87,7 @@ def _decorate(payload: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]
     promotion_sha = str(payload.get("promotion_sha") or "").lower()
     execution_id = str(payload.get("omega_execution_id") or "").lower()
     evidence_root = str(payload.get("evidence_root") or "").lower()
+    diagnostic_sha256 = _diagnostic_sha256(str(payload.get("log") or ""))
     if promotion_sha and not HEX40.fullmatch(promotion_sha):
         promotion_sha = ""
     if execution_id and not HEX64.fullmatch(execution_id):
@@ -91,6 +102,7 @@ def _decorate(payload: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]
         "gate": result["gate"],
         "failure_class": failure_class,
         "reprove_from": result["reprove_from"],
+        "diagnostic_sha256": diagnostic_sha256,
     }
     canonical = json.dumps(
         material, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False
@@ -99,6 +111,7 @@ def _decorate(payload: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]
         "promotion_sha": promotion_sha,
         "omega_execution_id": execution_id,
         "evidence_root": evidence_root,
+        "diagnostic_sha256": diagnostic_sha256,
         "incident_id": hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
         "retryable": retryable,
         "max_attempts": max_attempts,
@@ -235,6 +248,24 @@ def _self_test() -> None:
     })
     if infra["incident_id"] != same["incident_id"] or infra["incident_id"] == changed["incident_id"]:
         raise SystemExit("SELF_TEST_FAIL incident_dedup_identity")
+    diag_a = classify({
+        "status": "completed",
+        "conclusion": "failure",
+        "jobs": [{"steps": [{"name": "pytest"}]}],
+        "log": "FAILED tests/test_alpha.py::test_a",
+        "gate": "hosted-ci",
+        "promotion_sha": "a" * 40,
+    })
+    diag_b = classify({
+        "status": "completed",
+        "conclusion": "failure",
+        "jobs": [{"steps": [{"name": "pytest"}]}],
+        "log": "FAILED tests/test_beta.py::test_b",
+        "gate": "hosted-ci",
+        "promotion_sha": "a" * 40,
+    })
+    if diag_a["incident_id"] == diag_b["incident_id"]:
+        raise SystemExit("SELF_TEST_FAIL distinct_diagnostics_must_not_collide")
     print("OMEGA_GATE_CLASSIFIER_SELF_TEST_PASS")
 
 def main() -> int:
