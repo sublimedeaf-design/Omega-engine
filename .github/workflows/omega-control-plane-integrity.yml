@@ -14,6 +14,9 @@ on:
       - ".github/workflows/**"
       - "scripts/verify_control_plane.rb"
       - "scripts/omega_gate_classifier.py"
+      - "scripts/rollover_release_federation.py"
+      - "scripts/verify_federation_epoch.py"
+      - "federation/epochs/**"
       - "external_validator/**"
 
 permissions:

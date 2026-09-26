@@ -228,10 +228,34 @@ jobs:
           issuer="https://token.actions.githubusercontent.com"
           cosign verify-blob OMEGA-Engine.apk             --bundle OMEGA-Engine.apk.sigstore.json             --certificate-identity "$identity"             --certificate-oidc-issuer "$issuer" >/dev/null
           cosign verify-blob OMEGA-Engine.provenance.json             --bundle OMEGA-Engine.provenance.sigstore.json             --certificate-identity "$identity"             --certificate-oidc-issuer "$issuer" >/dev/null
+          FINAL_SHA="$FINAL_SHA" python3 <<'PY' > "$RUNNER_TEMP/post-live/report/live-certified.json"
+          import datetime,hashlib,json,os,pathlib
+          def sha(name):
+              return hashlib.sha256(pathlib.Path(name).read_bytes()).hexdigest()
+          prov=json.loads(pathlib.Path("OMEGA-Engine.provenance.json").read_text(encoding="utf-8"))
+          print(json.dumps({
+              "schema_version":1,
+              "state":"LIVE-CERTIFIED",
+              "source_sha":os.environ["FINAL_SHA"],
+              "apk_sha256":sha("OMEGA-Engine.apk"),
+              "provenance_sha256":sha("OMEGA-Engine.provenance.json"),
+              "sbom_sha256":sha("OMEGA-Engine.sbom.spdx.json"),
+              "supply_chain_sha256":sha("OMEGA-Engine.supply-chain.json"),
+              "final_recovery_root_sha256":sha("OMEGA-Engine.final-recovery-root.json"),
+              "signer_certificate_sha256":prov.get("signer_certificate_sha256"),
+              "sigstore_verified":True,
+              "post_live_run_id":os.environ.get("GITHUB_RUN_ID"),
+              "certified_at":datetime.datetime.now(datetime.timezone.utc).isoformat(),
+              "immutability":{
+                  "new_deviation_requires_new_epoch":True,
+                  "old_evidence_runs_are_never_mutated":True
+              }
+          },indent=2,sort_keys=True,allow_nan=False))
+          PY
           for ctx in omega/post-live-smoke omega/live-certified; do
             gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$FINAL_SHA"               -f state=success -f context="$ctx"               -f description="published production release and immediate health/provenance independently verified"               -f target_url="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" >/dev/null
           done
-          echo "OMEGA_POST_LIVE_PASS sha=$FINAL_SHA"
+          echo "OMEGA_POST_LIVE_PASS sha=$FINAL_SHA state=LIVE-CERTIFIED"
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always() && steps.live.outputs.ready == 'true'

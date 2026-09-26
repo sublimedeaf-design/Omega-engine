@@ -58,27 +58,60 @@ jobs:
           echo "source_ref=$source_ref" >> "$GITHUB_OUTPUT"
           echo "stage=$stage" >> "$GITHUB_OUTPUT"
 
-      - name: Require exact peer statuses from this proven epoch
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        if: steps.epoch.outputs.release_epoch == 'true'
+        with:
+          pattern: OMEGA-Federation-Peer-Proof-*
+          path: ${{ runner.temp }}/release-peer-proofs
+          merge-multiple: true
+          github-token: ${{ github.token }}
+          run-id: ${{ github.event.workflow_run.id }}
+
+      - name: Require fresh 4-of-4 read-only proofs from this exact bridge run
         if: steps.epoch.outputs.release_epoch == 'true'
         env:
-          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
           BRIDGE_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          BRIDGE_RUN_ID: ${{ github.event.workflow_run.id }}
         shell: bash
         run: |
           set -Eeuo pipefail
+          run="$(gh api "/repos/$CONTROL_REPOSITORY/actions/runs/$BRIDGE_RUN_ID")"
+          RUN_PAYLOAD="$run" BRIDGE_HEAD_SHA="$BRIDGE_HEAD_SHA" python3 <<'PY'
+          import json,os
+          d=json.loads(os.environ["RUN_PAYLOAD"])
+          if d.get("name")!="OMEGA Federation v3 Peer Bridge":
+              raise SystemExit("OMEGA_RELEASE_CERTIFIER_BRIDGE_NAME_MISMATCH")
+          if d.get("conclusion")!="success" or d.get("head_sha")!=os.environ["BRIDGE_HEAD_SHA"]:
+              raise SystemExit("OMEGA_RELEASE_CERTIFIER_BRIDGE_IDENTITY_MISMATCH")
+          PY
           epoch="$(gh api "/repos/$CONTROL_REPOSITORY/contents/federation/epochs/current.json?ref=$BRIDGE_HEAD_SHA" --jq '.content' | python3 -c 'import base64,sys; print(base64.b64decode("".join(sys.stdin.read().split()),validate=True).decode(),end="")')"
           EPOCH_PAYLOAD="$epoch" python3 <<'PY'
-          import json,os,subprocess
+          import json,os,pathlib
           d=json.loads(os.environ["EPOCH_PAYLOAD"])
-          for peer in d["peers"]:
-              repo=peer["repository"]; sha=peer["sha"]
-              raw=subprocess.check_output(["gh","api",f"/repos/{repo}/commits/{sha}/status?per_page=100"],text=True)
-              status=json.loads(raw); latest={}
-              for row in status.get("statuses",[]):
-                  ctx=str(row.get("context") or "")
-                  if ctx and ctx not in latest: latest[ctx]=row
-              if (latest.get("omega/federation-v3-peer-contract") or {}).get("state")!="success":
-                  raise SystemExit(f"OMEGA_RELEASE_PEER_STATUS_NOT_PASS:{repo}:{sha}")
+          expected={x["repository"]:(x["sha"],x["role"]) for x in d.get("peers") or []}
+          source=str((d.get("primary") or {}).get("source_sha") or "")
+          epoch_id=str((d.get("release_epoch") or {}).get("id") or "")
+          root=pathlib.Path(os.environ["RUNNER_TEMP"])/"release-peer-proofs"
+          rows=[json.loads(p.read_text(encoding="utf-8")) for p in root.glob("*.json")]
+          if len(rows)!=4:
+              raise SystemExit(f"OMEGA_RELEASE_CERTIFIER_PROOF_COUNT:{len(rows)}")
+          seen=set()
+          for row in rows:
+              repo=str(row.get("peer_repository") or "")
+              if repo not in expected or repo in seen:
+                  raise SystemExit("OMEGA_RELEASE_CERTIFIER_PROOF_SET_INVALID")
+              seen.add(repo)
+              sha,role=expected[repo]
+              if row.get("state")!="PASS" or row.get("peer_sha")!=sha or row.get("peer_role")!=role:
+                  raise SystemExit("OMEGA_RELEASE_CERTIFIER_PROOF_IDENTITY_INVALID:"+repo)
+              if row.get("source_sha")!=source or str(row.get("release_epoch_id") or "")!=epoch_id:
+                  raise SystemExit("OMEGA_RELEASE_CERTIFIER_PROOF_EPOCH_MISMATCH:"+repo)
+              if row.get("peer_repository_mutated") is not False:
+                  raise SystemExit("OMEGA_RELEASE_CERTIFIER_PEER_MUTATION_FLAG_INVALID:"+repo)
+          if set(expected)!=seen:
+              raise SystemExit("OMEGA_RELEASE_CERTIFIER_PROOF_SET_INCOMPLETE")
+          print("OMEGA_RELEASE_CERTIFIER_FRESH_4_OF_4_PASS",source,epoch_id)
           PY
 
       - name: Promote staged authority to PASS only after external 4-of-4 proof
