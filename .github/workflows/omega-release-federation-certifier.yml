@@ -11,6 +11,7 @@ permissions:
 concurrency:
   group: omega-release-federation-certifier
   cancel-in-progress: false
+  queue: max
 
 env:
   PRIVATE_REPOSITORY: sublimedeaf-design/Omega-engines
