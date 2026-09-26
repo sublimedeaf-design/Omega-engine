@@ -1,1 +1,1 @@
-recover-exact 6560946cda03347289a76172b6a6a9b9b39bb1b2 hardening/canonical-evidence-envelope-20260926 recovery-integrity-rerun-v5
+recover-exact 6560946cda03347289a76172b6a6a9b9b39bb1b2 hardening/canonical-evidence-envelope-20260926 recovery-integrity-rerun-v6
