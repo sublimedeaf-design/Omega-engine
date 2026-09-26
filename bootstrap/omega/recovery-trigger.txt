@@ -1,1 +1,1 @@
-recover-exact 6321e1a095f197332c6985bd91d1f5d419cdaa34 hardening/canonical-evidence-envelope-20260926 integral-optimization-v1
+recover-exact 14727063ff00b145ea0334b41694115c02263fd8 hardening/canonical-evidence-envelope-20260926 integral-optimization-v1
