@@ -269,8 +269,13 @@ jobs:
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           ev="$RUNNER_TEMP/recovered/evidence"
           mkdir -p evidence
-          for name in execution-envelope.json execution-runtime.json federation-epoch.json federation-epoch.authority.json t24-binding.json t60-binding.json qa-binding.json settlement-binding.json latest-24h.json latest-t60.json latest-settlement.json coverage-gaps.json forecast-ledger.jsonl shadow-ledger.jsonl prematch-intelligence.jsonl prematch-intelligence-refresh-24h.json prematch-intelligence-refresh-t60.json; do
-            [ -s "$ev/$name" ] && cp "$ev/$name" "evidence/$name"
+          for name in execution-envelope.json execution-runtime.json federation-epoch.json federation-epoch.authority.json t24-binding.json t60-binding.json qa-binding.json settlement-binding.json latest-24h.json latest-t60.json latest-settlement.json coverage-gaps.json intelligence-refresh-t24.json intelligence-refresh-t60.json; do
+            test -s "$ev/$name" || { echo "OMEGA_RELEASE_STAGE_REQUIRED_EVIDENCE_MISSING:$name" >&2; exit 52; }
+            cp "$ev/$name" "evidence/$name"
+          done
+          for name in forecast-ledger.jsonl shadow-ledger.jsonl prematch-intelligence.jsonl; do
+            test -e "$ev/$name" || { echo "OMEGA_RELEASE_STAGE_REQUIRED_LEDGER_MISSING:$name" >&2; exit 52; }
+            cp "$ev/$name" "evidence/$name"
           done
           python3 scripts/evidence_identity.py verify             --envelope evidence/execution-envelope.json             --binding evidence/t24-binding.json             --binding evidence/t60-binding.json             --binding evidence/qa-binding.json             --json-file evidence/latest-24h.json             --json-file evidence/latest-t60.json
           python3 - <<'PY'
