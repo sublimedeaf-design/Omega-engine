@@ -36,11 +36,43 @@ jobs:
           echo "EVIDENCE_RUN_ID=$EVIDENCE_RUN_ID" >> "$GITHUB_ENV"
           echo "OMEGA_RELEASE_STAGER_EXPLICIT_HANDOFF run=$EVIDENCE_RUN_ID"
 
+      - name: Mint scoped private release authority
+        id: release_app
+        if: ${{ vars.OMEGA_RELEASE_APP_CLIENT_ID != '' && secrets.OMEGA_RELEASE_APP_PRIVATE_KEY != '' }}
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          client-id: ${{ vars.OMEGA_RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.OMEGA_RELEASE_APP_PRIVATE_KEY }}
+          owner: sublimedeaf-design
+          repositories: Omega-engines
+          permission-contents: write
+          permission-statuses: write
+
+      - name: Select private release authority
+        env:
+          APP_TOKEN: ${{ steps.release_app.outputs.token }}
+          LEGACY_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          if [ -n "${APP_TOKEN:-}" ]; then
+            token="$APP_TOKEN"
+            source=github-app
+          else
+            token="${LEGACY_TOKEN:-}"
+            source=legacy-bootstrap
+          fi
+          [ -n "$token" ] || { echo "OMEGA_RELEASE_AUTHORITY_MISSING" >&2; exit 77; }
+          echo "::add-mask::$token"
+          echo "OMEGA_PRIVATE_RELEASE_TOKEN=$token" >> "$GITHUB_ENV"
+          echo "OMEGA_RELEASE_AUTH_SOURCE=$source" >> "$GITHUB_ENV"
+          echo "OMEGA_RELEASE_AUTHORITY_SELECTED source=$source"
+
       - name: Resolve exact proven source from evidence-root artifact
         id: pin
         env:
           GH_TOKEN: ${{ github.token }}
-          PRIVATE_GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          PRIVATE_GH_TOKEN: ${{ env.OMEGA_PRIVATE_RELEASE_TOKEN }}
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -95,7 +127,7 @@ jobs:
         env:
           SOURCE_SHA: ${{ steps.pin.outputs.source_sha }}
           EVIDENCE_RUN_ID: ${{ env.EVIDENCE_RUN_ID }}
-          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          GH_TOKEN: ${{ env.OMEGA_PRIVATE_RELEASE_TOKEN }}
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -165,7 +197,7 @@ jobs:
         with:
           repository: ${{ env.PRIVATE_REPOSITORY }}
           ref: ${{ steps.pin.outputs.source_sha }}
-          token: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          token: ${{ env.OMEGA_PRIVATE_RELEASE_TOKEN }}
           persist-credentials: true
           fetch-depth: 0
           path: omega
@@ -271,7 +303,7 @@ jobs:
       - name: Preflight private release mutation capability
         if: steps.pin.outputs.skip != 'true'
         env:
-          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          GH_TOKEN: ${{ env.OMEGA_PRIVATE_RELEASE_TOKEN }}
           SOURCE_SHA: ${{ steps.pin.outputs.source_sha }}
         shell: bash
         run: |
@@ -498,7 +530,7 @@ jobs:
       - name: Publish unsigned release payload status
         if: steps.pin.outputs.skip != 'true'
         env:
-          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          GH_TOKEN: ${{ env.OMEGA_PRIVATE_RELEASE_TOKEN }}
           APK_SHA256: ${{ steps.unsigned.outputs.apk_sha256 }}
         shell: bash
         run: |
@@ -514,7 +546,7 @@ jobs:
       - name: Publish staged release evidence status
         if: steps.pin.outputs.skip != 'true'
         env:
-          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          GH_TOKEN: ${{ env.OMEGA_PRIVATE_RELEASE_TOKEN }}
         shell: bash
         run: |
           set -Eeuo pipefail
