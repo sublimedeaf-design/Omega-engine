@@ -7,6 +7,10 @@ on:
         description: "Exact successful OMEGA Candidate Evidence Root run id"
         required: true
         type: string
+  push:
+    branches: [main]
+    paths:
+      - "bootstrap/omega/release-stager-trigger.txt"
 permissions:
   contents: write
   actions: write
@@ -28,13 +32,18 @@ jobs:
     steps:
       - name: Validate explicit evidence handoff
         env:
-          EVIDENCE_RUN_ID: ${{ inputs.evidence_run_id }}
+          INPUT_EVIDENCE_RUN_ID: ${{ inputs.evidence_run_id || '' }}
         shell: bash
         run: |
           set -Eeuo pipefail
-          [[ "$EVIDENCE_RUN_ID" =~ ^[0-9]+$ ]] || { echo "OMEGA_RELEASE_STAGER_RUN_ID_INVALID:$EVIDENCE_RUN_ID" >&2; exit 64; }
-          echo "EVIDENCE_RUN_ID=$EVIDENCE_RUN_ID" >> "$GITHUB_ENV"
-          echo "OMEGA_RELEASE_STAGER_EXPLICIT_HANDOFF run=$EVIDENCE_RUN_ID"
+          evidence="${INPUT_EVIDENCE_RUN_ID:-}"
+          if [ -z "$evidence" ]; then
+            read -r marker evidence < bootstrap/omega/release-stager-trigger.txt
+            [ "$marker" = "stage-evidence" ] || { echo "OMEGA_RELEASE_STAGER_TRIGGER_INVALID:$marker" >&2; exit 64; }
+          fi
+          [[ "$evidence" =~ ^[0-9]+$ ]] || { echo "OMEGA_RELEASE_STAGER_RUN_ID_INVALID:$evidence" >&2; exit 64; }
+          echo "EVIDENCE_RUN_ID=$evidence" >> "$GITHUB_ENV"
+          echo "OMEGA_RELEASE_STAGER_EXPLICIT_HANDOFF run=$evidence"
 
       - name: Resolve exact proven source from evidence-root artifact
         id: pin
@@ -270,6 +279,7 @@ jobs:
 
       - name: Preflight private release mutation capability
         if: steps.pin.outputs.skip != 'true'
+        id: private_write
         env:
           GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
           SOURCE_SHA: ${{ steps.pin.outputs.source_sha }}
@@ -277,14 +287,16 @@ jobs:
         run: |
           set -Eeuo pipefail
           probe="omega-capability-probe-${GITHUB_RUN_ID}"
-          gh api --method POST "/repos/$PRIVATE_REPOSITORY/git/refs" -f ref="refs/heads/$probe" -f sha="$SOURCE_SHA" >/dev/null || {
-            echo "OMEGA_RELEASE_CAPABILITY_MISSING:private_contents_write" >&2
-            exit 77
-          }
+          if ! gh api --method POST "/repos/$PRIVATE_REPOSITORY/git/refs" -f ref="refs/heads/$probe" -f sha="$SOURCE_SHA" >/dev/null 2>&1; then
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "OMEGA_RELEASE_CAPABILITY_FALLBACK:artifact_first_private_write_unavailable"
+            exit 0
+          fi
           gh api --method DELETE "/repos/$PRIVATE_REPOSITORY/git/refs/heads/$probe" >/dev/null || {
             echo "OMEGA_RELEASE_CAPABILITY_CLEANUP_FAILED:$probe" >&2
             exit 78
           }
+          echo "available=true" >> "$GITHUB_OUTPUT"
           echo "OMEGA_RELEASE_CAPABILITY_PASS:private_contents_write"
 
       - name: Stage immutable recovery evidence and Android versionCode
@@ -358,22 +370,32 @@ jobs:
           python3 scripts/evidence_identity.py verify             --envelope evidence/execution-envelope.json             --binding evidence/t24-binding.json             --binding evidence/t60-binding.json             --binding evidence/qa-binding.json             --json-file evidence/latest-24h.json             --json-file evidence/latest-t60.json             --json-file evidence/release-stage.json
           illegal="$(git status --porcelain | awk '{print $2}' | grep -Ev '^(evidence/|android/app/build.gradle.kts$)' || true)"
           [ -z "$illegal" ] || { echo "OMEGA_RELEASE_STAGE_ILLEGAL_DELTA:$illegal" >&2; exit 61; }
-          git config user.name omega-release-bot
-          git config user.email omega-release-bot@users.noreply.github.com
-          branch="release/recovery-evidence-${SOURCE_SHA:0:12}-${EVIDENCE_RUN_ID}"
-          git checkout -b "$branch"
-          git add evidence android/app/build.gradle.kts
-          git commit -m "release: finalize attested recovery evidence and Android versionCode"
-          final="$(git rev-parse HEAD)"
-          parent="$(git rev-parse HEAD^)"
-          [ "$parent" = "$SOURCE_SHA" ] || { echo "OMEGA_RELEASE_STAGE_PARENT_MISMATCH:$parent!=$SOURCE_SHA" >&2; exit 62; }
-          git push origin "HEAD:refs/heads/$branch"
+          if [ "${{ steps.private_write.outputs.available }}" = "true" ]; then
+            git config user.name omega-release-bot
+            git config user.email omega-release-bot@users.noreply.github.com
+            branch="release/recovery-evidence-${SOURCE_SHA:0:12}-${EVIDENCE_RUN_ID}"
+            git checkout -b "$branch"
+            git add evidence android/app/build.gradle.kts
+            git commit -m "release: finalize attested recovery evidence and Android versionCode"
+            final="$(git rev-parse HEAD)"
+            parent="$(git rev-parse HEAD^)"
+            [ "$parent" = "$SOURCE_SHA" ] || { echo "OMEGA_RELEASE_STAGE_PARENT_MISMATCH:$parent!=$SOURCE_SHA" >&2; exit 62; }
+            git push origin "HEAD:refs/heads/$branch"
+            mode=private-branch
+          else
+            final="$SOURCE_SHA"
+            branch="artifact-first/$SOURCE_SHA"
+            mode=artifact-first
+            test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+            echo "OMEGA_RELEASE_STAGE_ARTIFACT_FIRST source=$SOURCE_SHA evidence_run=$EVIDENCE_RUN_ID"
+          fi
           echo "FINAL_SHA=$final" >> "$GITHUB_ENV"
           echo "RELEASE_BRANCH=$branch" >> "$GITHUB_ENV"
-          echo "OMEGA_RELEASE_EVIDENCE_STAGED source=$SOURCE_SHA final=$final branch=$branch"
+          echo "STAGING_MODE=$mode" >> "$GITHUB_ENV"
+          echo "OMEGA_RELEASE_EVIDENCE_STAGED source=$SOURCE_SHA final=$final branch=$branch mode=$mode"
 
       - name: Dispatch exact final-SHA hosted validation
-        if: steps.pin.outputs.skip != 'true'
+        if: steps.pin.outputs.skip != 'true' && steps.private_write.outputs.available == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -466,12 +488,19 @@ jobs:
           code_source=json.loads(pathlib.Path("evidence/release-stage.json").read_text())["code_source_sha"]
           if not re.fullmatch(r"[0-9a-f]{40}",source) or not re.fullmatch(r"[0-9a-f]{40}",code_source):
               raise SystemExit("OMEGA_UNSIGNED_RELEASE_SOURCE_INVALID")
+          release_stage_path=pathlib.Path("evidence/release-stage.json")
+          stage=json.loads(release_stage_path.read_text())
+          release_stage_sha=hashlib.sha256(release_stage_path.read_bytes()).hexdigest()
           payload={
-              "schema_version":1,
+              "schema_version":2,
               "classification":"PRODUCTION_RELEASE_PAYLOAD_UNSIGNED",
               "production_final":False,
               "source_commit":source,
               "code_source_sha":code_source,
+              "omega_execution_id":stage.get("omega_execution_id"),
+              "candidate_evidence_root_run_id":stage.get("candidate_evidence_root_run_id"),
+              "recovery_run_id":stage.get("recovery_run_id"),
+              "release_stage_sha256":release_stage_sha,
               "signer_state":"PENDING_CANONICAL_SIGNER",
               "expected_signer_certificate_sha256":pathlib.Path("android/signing-cert.sha256").read_text().strip().lower(),
               "apk_sha256":digest,
