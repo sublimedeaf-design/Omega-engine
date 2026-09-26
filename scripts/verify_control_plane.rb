@@ -35,6 +35,23 @@ def check_duplicate_keys(node, file, path = [])
   end
 end
 
+def check_forbidden_secret_conditionals(value, file, path = [])
+  case value
+  when Hash
+    value.each do |key, child|
+      here = path + [key.to_s]
+      if key.to_s == "if" && child.to_s.include?("secrets.")
+        fail!("#{file}:secret_context_forbidden_in_if:#{here.join('.')}")
+      end
+      check_forbidden_secret_conditionals(child, file, here)
+    end
+  when Array
+    value.each_with_index do |child, index|
+      check_forbidden_secret_conditionals(child, file, path + [index.to_s])
+    end
+  end
+end
+
 files = Dir[WORKFLOWS.join("*.{yml,yaml}").to_s].sort
 fail!("no_workflows_found") if files.empty?
 
@@ -62,6 +79,8 @@ files.each do |file|
   end
   fail!("#{file}:empty_yaml") unless tree
   check_duplicate_keys(tree, file)
+  loaded = Psych.safe_load_file(file, aliases: true)
+  check_forbidden_secret_conditionals(loaded, file)
   text = File.read(file, encoding: "UTF-8")
   text.scan(/^\s*-\s+uses:\s+([^\s#]+)/).flatten.each do |action|
     next if action.start_with?("./", "docker://")
@@ -336,6 +355,28 @@ fail!("release_epoch_verifier_missing") unless epoch_verifier.include?("release_
 
 fail!("postlive_live_certified_artifact_missing") unless postlive.include?('"state":"LIVE-CERTIFIED"') && postlive.include?("live-certified.json")
 fail!("postlive_release_epoch_policy_missing") unless postlive.include?('"new_deviation_requires_new_epoch":True') && postlive.include?('"old_evidence_runs_are_never_mutated":True')
+
+# Cross-repository release authority must prefer a repository-scoped, short-lived
+# GitHub App token when configured. Legacy bootstrap credentials remain only as a
+# fail-closed compatibility fallback until the external App authority is installed.
+release_app_action = "actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1"
+[stager_text, promoter].each_with_index do |text, index|
+  label = index.zero? ? "stager" : "promoter"
+  fail!("release_app_action_missing:#{label}") unless text.include?(release_app_action)
+  fail!("release_app_repo_scope_missing:#{label}") unless text.include?("repositories: Omega-engines")
+  fail!("release_app_contents_write_missing:#{label}") unless text.include?("permission-contents: write")
+  fail!("release_app_statuses_write_missing:#{label}") unless text.include?("permission-statuses: write")
+  fail!("release_app_config_probe_missing:#{label}") unless text.include?("release_app_config.outputs.configured == 'true'") && text.include?("OMEGA_RELEASE_APP_CONFIG")
+  fail!("release_app_selected_token_missing:#{label}") unless text.include?("OMEGA_PRIVATE_RELEASE_TOKEN")
+end
+fail!("release_app_stager_fail_fast_missing") unless stager_text.index("Preflight private release mutation capability").to_i < stager_text.index("actions/download-artifact@").to_i
+fail!("release_app_promoter_preflight_missing") unless promoter.include?("OMEGA_FINAL_RELEASE_CAPABILITY_PASS:private_contents_write")
+
+# GITHUB_TOKEN-authored pushes intentionally do not recurse into new workflow
+# runs. Every immutable epoch projection therefore needs an explicit dispatch.
+fail!("federation_rollover_actions_write_missing") unless rollover_workflow.include?("actions: write")
+fail!("federation_rollover_explicit_peer_dispatch_missing") unless rollover_workflow.include?("gh workflow run omega-federation-v3-peer-bridge.yml") && rollover_workflow.include?("OMEGA_RELEASE_FEDERATION_PROOF_DISPATCHED")
+fail!("federation_rollover_duplicate_active_guard_missing") unless rollover_workflow.include?("status=queued") && rollover_workflow.include?("status=in_progress") && rollover_workflow.include?("OMEGA_RELEASE_FEDERATION_PROOF_ALREADY_ACTIVE")
 
 puts "OMEGA_CONTROL_PLANE_INTEGRITY_GREEN workflows=#{files.length}"
 # support fastpath restack v2 exact-head trigger
