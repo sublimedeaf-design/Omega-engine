@@ -1,1 +1,1 @@
-validate-exact-pr 6e5b7854c081a1669ddfadf7200b2eb1e6a6cc3a hardening/canonical-evidence-envelope-20260926 execution-identity-v5
+validate-exact-pr ef4864da91dc97094ad839765cce92c697efe086 hardening/canonical-evidence-envelope-20260926 hf-integral-hardening-v1
