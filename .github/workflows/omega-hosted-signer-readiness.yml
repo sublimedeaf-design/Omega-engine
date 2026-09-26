@@ -1,0 +1,56 @@
+name: OMEGA Hosted Signer Readiness
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/omega-hosted-signer-readiness.yml"
+  schedule:
+    - cron: "37 * * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: omega-hosted-signer-readiness
+  cancel-in-progress: true
+
+env:
+  PRIVATE_REPOSITORY: sublimedeaf-design/Omega-engines
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Verify hosted escrow availability and canonical fingerprint
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          OMEGA_ANDROID_KEYSTORE_B64: ${{ secrets.OMEGA_ANDROID_KEYSTORE_B64 }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          set +x
+          read -r marker candidate source_ref _ < bootstrap/omega/pr-validation-trigger.txt || true
+          if [ "${marker:-}" != validate-exact-pr ] || [[ ! "${candidate:-}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo OMEGA_HOSTED_SIGNER_READINESS_NOT_EXECUTED_NO_CANDIDATE
+            exit 0
+          fi
+          if [ -z "${OMEGA_ANDROID_KEYSTORE_B64:-}" ]; then
+            echo "OMEGA_HOSTED_SIGNER_ESCROW_NOT_CONFIGURED candidate=$candidate"
+            exit 0
+          fi
+          expected="$(gh api "/repos/$PRIVATE_REPOSITORY/contents/android/signing-cert.sha256?ref=$candidate" --jq '.content' | tr -d '\n' | base64 -d | tr -d '[:space:]' | tr -d ':' | tr 'A-F' 'a-f')"
+          [[ "$expected" =~ ^[0-9a-f]{64}$ ]] || { echo OMEGA_HOSTED_SIGNER_EXPECTED_FINGERPRINT_INVALID >&2; exit 31; }
+          key="$(mktemp)"
+          cleanup(){ rm -f "$key"; }
+          trap cleanup EXIT
+          umask 077
+          printf '%s' "$OMEGA_ANDROID_KEYSTORE_B64" | base64 -d > "$key" || { echo OMEGA_HOSTED_SIGNER_ESCROW_DECODE_FAILED >&2; exit 32; }
+          actual="$(keytool -list -v -keystore "$key" -storepass android -alias androiddebugkey 2>/dev/null | sed -n 's/.*SHA256: //p' | head -1 | tr -d ':' | tr 'A-F' 'a-f')"
+          [ "$actual" = "$expected" ] || { echo OMEGA_HOSTED_SIGNER_ESCROW_FINGERPRINT_MISMATCH >&2; exit 33; }
+          echo "OMEGA_HOSTED_SIGNER_ESCROW_READY candidate=$candidate"
