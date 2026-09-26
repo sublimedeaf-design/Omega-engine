@@ -1,0 +1,211 @@
+name: OMEGA Play Content-Addressed Builder
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "bootstrap/omega/play-release-trigger.json"
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+concurrency:
+  group: omega-play-content-addressed-builder
+  cancel-in-progress: false
+
+env:
+  PRIVATE_REPOSITORY: sublimedeaf-design/Omega-engines
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout public control plane
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Resolve exact frozen private candidate
+        id: source
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          trigger=bootstrap/omega/play-release-trigger.json
+          test -s "$trigger"
+          readarray -t fields < <(python3 - "$trigger" <<'PY'
+          import json,re,sys
+          p=json.load(open(sys.argv[1],encoding="utf-8"))
+          source=str(p.get("source_sha") or "").lower()
+          ref=str(p.get("source_ref") or "")
+          if not re.fullmatch(r"[0-9a-f]{40}",source):
+              raise SystemExit("OMEGA_PLAY_SOURCE_INVALID")
+          if not re.fullmatch(r"[A-Za-z0-9._/-]+",ref) or ".." in ref or ref.startswith(("/", "-")):
+              raise SystemExit("OMEGA_PLAY_REF_INVALID")
+          print(source); print(ref)
+          PY
+          )
+          source="${fields[0]}"; ref="${fields[1]}"
+          tip="$(gh api "/repos/$PRIVATE_REPOSITORY/commits?sha=$ref&per_page=1" --jq '.[0].sha // empty')"
+          test "$tip" = "$source" || { echo "OMEGA_PLAY_REF_MOVED:$tip!=$source" >&2; exit 68; }
+          echo "source_sha=$source" >> "$GITHUB_OUTPUT"
+          echo "source_ref=$ref" >> "$GITHUB_OUTPUT"
+          echo "SOURCE_SHA=$source" >> "$GITHUB_ENV"
+
+      - name: Checkout exact private source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: ${{ env.PRIVATE_REPOSITORY }}
+          ref: ${{ steps.source.outputs.source_sha }}
+          token: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          persist-credentials: false
+          fetch-depth: 1
+          path: omega
+
+      - name: Verify exact source and code19 policy
+        working-directory: omega
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          grep -Fq 'applicationId = "com.omega.app"' android/app/build.gradle.kts
+          grep -Eq 'versionCode[[:space:]]*=[[:space:]]*19' android/app/build.gradle.kts
+          grep -Fq 'versionName = "3.5.4-live.12"' android/app/build.gradle.kts
+          ! grep -Fq 'android.permission.REQUEST_INSTALL_PACKAGES' android/app/src/main/AndroidManifest.xml
+          ! grep -Fq 'android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION' android/app/src/main/AndroidManifest.xml
+
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Ensure Android SDK 36
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "platforms;android-36" "build-tools;36.0.0" >/dev/null
+
+      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb
+        with:
+          gradle-version: "8.13"
+          cache-read-only: true
+
+      - name: Restore fingerprint-bound upload signer from encrypted escrow
+        working-directory: omega
+        env:
+          OMEGA_ANDROID_KEYSTORE_B64: ${{ secrets.OMEGA_ANDROID_KEYSTORE_B64 }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          set +x
+          test -n "${OMEGA_ANDROID_KEYSTORE_B64:-}" || { echo OMEGA_PLAY_SIGNER_ESCROW_MISSING >&2; exit 34; }
+          mkdir -p "$HOME/.android"
+          umask 077
+          printf '%s' "$OMEGA_ANDROID_KEYSTORE_B64" | base64 -d > "$HOME/.android/debug.keystore"
+          expected="$(tr -d '[:space:]' < android/signing-cert.sha256 | tr 'A-F' 'a-f')"
+          actual="$(keytool -list -v -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey 2>/dev/null | sed -n 's/.*SHA256: //p' | head -1 | tr -d ':' | tr 'A-F' 'a-f')"
+          test "$actual" = "$expected" || { echo OMEGA_PLAY_SIGNER_FINGERPRINT_MISMATCH >&2; exit 35; }
+          echo "EXPECTED_FINGERPRINT=$expected" >> "$GITHUB_ENV"
+
+      - name: Materialize locked build inputs and stable release identity
+        working-directory: omega
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/materialize_gradle_verification.py
+          mkdir -p dist reports
+          python3 scripts/evidence_identity.py release-id --source-sha "$SOURCE_SHA" --out dist/release-identity.json
+          release_id="$(python3 -c 'import json; print(json.load(open("dist/release-identity.json"))["release_id"])')"
+          echo "RELEASE_ID=$release_id" >> "$GITHUB_ENV"
+          python3 scripts/generate_omega_sbom.py --out reports/omega-sbom.spdx.json
+
+      - name: Build exact signed code19 AAB once
+        working-directory: omega/android
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          gradle --no-daemon --max-workers=2 --dependency-verification strict --stacktrace --console=plain :app:bundleRelease
+          test -s app/build/outputs/bundle/release/app-release.aab
+
+      - name: Verify artifact identity and emit provenance
+        working-directory: omega
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cp android/app/build/outputs/bundle/release/app-release.aab dist/OMEGA-Engine-code19.aab
+          aab_sha="$(sha256sum dist/OMEGA-Engine-code19.aab | awk '{print $1}')"
+          printf '%s  OMEGA-Engine-code19.aab\n' "$aab_sha" > dist/OMEGA-Engine-code19.aab.sha256
+          keytool -printcert -jarfile dist/OMEGA-Engine-code19.aab > dist/play-upload-certificate.txt
+          cert="$(sed -n 's/.*SHA256: //p' dist/play-upload-certificate.txt | head -1 | tr -d ':' | tr 'A-F' 'a-f')"
+          test "$cert" = "$EXPECTED_FINGERPRINT" || { echo OMEGA_PLAY_AAB_CERT_MISMATCH >&2; exit 36; }
+          AAB=dist/OMEGA-Engine-code19.aab SOURCE="$SOURCE_SHA" python3 - <<'PY'
+          import os,zipfile
+          needle=os.environ["SOURCE"].encode("ascii")
+          with zipfile.ZipFile(os.environ["AAB"]) as z:
+              dex=[n for n in z.namelist() if n.endswith(".dex")]
+              if not dex or not any(needle in z.read(n) for n in dex):
+                  raise SystemExit("OMEGA_PLAY_SOURCE_SHA_NOT_EMBEDDED")
+          PY
+          AAB_SHA="$aab_sha" python3 - <<'PY'
+          import datetime,json,os,pathlib
+          p={
+              "schema_version":2,
+              "classification":"GOOGLE_PLAY_INTERNAL_CANDIDATE",
+              "release_id":os.environ["RELEASE_ID"],
+              "source_sha":os.environ["SOURCE_SHA"],
+              "aab_sha256":os.environ["AAB_SHA"],
+              "upload_signer_sha256":os.environ["EXPECTED_FINGERPRINT"],
+              "package_id":"com.omega.app",
+              "version_code":19,
+              "version_name":"3.5.4-live.12",
+              "builder_repository":os.environ["GITHUB_REPOSITORY"],
+              "builder_run_id":os.environ["GITHUB_RUN_ID"],
+              "built_at":datetime.datetime.now(datetime.timezone.utc).isoformat(),
+          }
+          pathlib.Path("dist/OMEGA-Play.provenance.json").write_text(
+              json.dumps(p,indent=2,sort_keys=True)+"\n",encoding="utf-8"
+          )
+          PY
+          echo "AAB_SHA=$aab_sha" >> "$GITHUB_ENV"
+
+      - name: Attest exact AAB with GitHub OIDC provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6
+        with:
+          subject-path: omega/dist/OMEGA-Engine-code19.aab
+
+      - name: Upload immutable Play handoff
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: OMEGA-Play-${{ env.RELEASE_ID }}-code19
+          retention-days: 30
+          if-no-files-found: error
+          path: |
+            omega/dist/OMEGA-Engine-code19.aab
+            omega/dist/OMEGA-Engine-code19.aab.sha256
+            omega/dist/OMEGA-Play.provenance.json
+            omega/dist/release-identity.json
+            omega/dist/play-upload-certificate.txt
+            omega/reports/omega-sbom.spdx.json
+
+      - name: Publish exact private release status
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          RESULT: ${{ job.status }}
+        shell: bash
+        run: |
+          set +x
+          state=failure
+          [ "$RESULT" = success ] && state=success
+          description="content-addressed code19 AAB: $RESULT"
+          gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$SOURCE_SHA"             -f state="$state" -f context="omega/play-aab-build"             -f description="$description"             -f target_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
+
+      - name: Remove signer material from runner
+        if: always()
+        shell: bash
+        run: rm -f "$HOME/.android/debug.keystore" || true
