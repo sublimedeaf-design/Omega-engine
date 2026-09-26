@@ -122,7 +122,7 @@ jobs:
         working-directory: srcdir
         shell: bash
         run: |
-          python -m pip install -c requirements-ci.lock -e '.[${{ matrix.extra }}]'
+          python scripts/install_locked_ci_deps.py
           ${{ matrix.command }}
       - name: Publish exact-SHA lane status
         if: ${{ always() }}
