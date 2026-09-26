@@ -1,1 +1,1 @@
-recover-exact 6e5b7854c081a1669ddfadf7200b2eb1e6a6cc3a hardening/canonical-evidence-envelope-20260926 execution-identity-v5
+recover-exact 28b9595503f81b2a69dbe6bc9de22725809bb703 hardening/canonical-evidence-envelope-20260926 hf-offline-recovery-v3
