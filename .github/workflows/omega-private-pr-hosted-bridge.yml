@@ -102,21 +102,7 @@ jobs:
           if { [ "$relation" != ahead ] || [ "$behind" != 0 ]; } && [[ "$source_ref" == release/recovery-evidence-* ]]; then
             trigger_encoded="$(gh api "/repos/$PRIVATE_REPOSITORY/contents/bootstrap/omega/private-release-stage-trigger.json?ref=main" --jq '.content // empty' 2>/dev/null || true)"
             [ -n "$trigger_encoded" ] || { echo "OMEGA_EXACT_STAGE_TRIGGER_UNREADABLE" >&2; exit 66; }
-            trigger_row="$(TRIGGER_B64="$trigger_encoded" python3 - <<'PY'
-import base64,json,os,re
-raw="".join(os.environ["TRIGGER_B64"].split())
-p=json.loads(base64.b64decode(raw,validate=True))
-source=str(p.get("source_sha") or "").lower()
-evidence=str(p.get("evidence_run_id") or "")
-state=str(p.get("state") or "")
-xid=str(p.get("omega_execution_id") or "").lower()
-if not re.fullmatch(r"[0-9a-f]{40}",source): raise SystemExit(1)
-if not re.fullmatch(r"[0-9]+",evidence): raise SystemExit(1)
-if state!="STAGE_EXACT": raise SystemExit(1)
-if not re.fullmatch(r"[0-9a-f]{64}",xid): raise SystemExit(1)
-print(source+"|"+evidence+"|"+xid,end="")
-PY
-)" || { echo "OMEGA_EXACT_STAGE_TRIGGER_INVALID" >&2; exit 66; }
+            trigger_row="$(TRIGGER_B64="$trigger_encoded" python3 -c 'import base64,json,os,re; raw="".join(os.environ["TRIGGER_B64"].split()); p=json.loads(base64.b64decode(raw,validate=True)); source=str(p.get("source_sha") or "").lower(); evidence=str(p.get("evidence_run_id") or ""); state=str(p.get("state") or ""); xid=str(p.get("omega_execution_id") or "").lower(); ok=bool(re.fullmatch(r"[0-9a-f]{40}",source) and re.fullmatch(r"[0-9]+",evidence) and state=="STAGE_EXACT" and re.fullmatch(r"[0-9a-f]{64}",xid)); print(source+"|"+evidence+"|"+xid,end="") if ok else (_ for _ in ()).throw(SystemExit(1))')" || { echo "OMEGA_EXACT_STAGE_TRIGGER_INVALID" >&2; exit 66; }
             IFS='|' read -r stage_source stage_evidence stage_xid <<<"$trigger_row"
             expected_ref="release/recovery-evidence-${stage_source:0:12}-${stage_evidence}"
             [ "$source_ref" = "$expected_ref" ] || {
