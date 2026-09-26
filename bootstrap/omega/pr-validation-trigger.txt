@@ -1,1 +1,1 @@
-validate-exact-pr 7fc496473a525b80c02c73c99e0574556df6835f hardening/canonical-evidence-envelope-20260926 integral-optimization-v1
+validate-exact-pr 6321e1a095f197332c6985bd91d1f5d419cdaa34 hardening/canonical-evidence-envelope-20260926 integral-optimization-v1-governance-fix
