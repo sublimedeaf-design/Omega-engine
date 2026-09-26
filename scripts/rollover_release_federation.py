@@ -9,6 +9,7 @@ SOURCE_REF=os.environ["OMEGA_TARGET_SOURCE_REF"].strip()
 CORE="sublimedeaf-design/Omega-engines"
 CONTROL="sublimedeaf-design/Omega-engine"
 HEX40=re.compile(r"^[0-9a-f]{40}$")
+RELEASE_REF=re.compile(r"^release/[A-Za-z0-9._/-]+$")
 PEERS=[
     ("sublimedeaf-design/Omega-recovery","control_recovery"),
     ("sublimedeaf-design/Omega-agents","agent_execution"),
@@ -54,8 +55,10 @@ def replace_exact(obj,old,new):
 def latest_main(repo):
     return api("GET",f"/repos/{repo}/git/ref/heads/main")["object"]["sha"]
 
-def update_peer(repo):
+def update_peer(repo,expected_source,expected_commit):
     base=latest_main(repo)
+    if base!=expected_commit:
+        raise SystemExit(f"OMEGA_PEER_MAIN_DRIFT:{repo}:{base}!={expected_commit}")
     rows={}
     docs={}
     for path in FILES:
@@ -71,8 +74,8 @@ def update_peer(repo):
         raise SystemExit(f"OMEGA_PEER_PRE_ROLLOVER_SPLIT:{repo}")
     if old==TARGET:
         return base
-    if old!="6560946cda03347289a76172b6a6a9b9b39bb1b2":
-        raise SystemExit(f"OMEGA_PEER_UNEXPECTED_PREVIOUS_SOURCE:{repo}:{old}")
+    if old!=expected_source:
+        raise SystemExit(f"OMEGA_PEER_UNEXPECTED_PREVIOUS_SOURCE:{repo}:{old}!={expected_source}")
     tree_entries=[]
     for path in FILES:
         newdoc=replace_exact(docs[path],old,TARGET)
@@ -89,7 +92,7 @@ def update_peer(repo):
     return commit
 
 if not HEX40.fullmatch(TARGET): raise SystemExit("OMEGA_RELEASE_FEDERATION_TARGET_INVALID")
-if not re.fullmatch(r"release/recovery-evidence-[A-Za-z0-9._/-]+",SOURCE_REF):
+if not RELEASE_REF.fullmatch(SOURCE_REF) or ".." in SOURCE_REF or SOURCE_REF.startswith("/") or SOURCE_REF.startswith("-"):
     raise SystemExit("OMEGA_RELEASE_FEDERATION_REF_INVALID")
 tip=api("GET",f"/repos/{CORE}/commits/{urllib.parse.quote(SOURCE_REF,safe='')}")["sha"]
 if tip!=TARGET: raise SystemExit(f"OMEGA_RELEASE_FEDERATION_REF_MOVED:{tip}!={TARGET}")
@@ -107,12 +110,27 @@ required={
 bad=sorted(x for x in required if (latest.get(x) or {}).get("state")!="success")
 if bad: raise SystemExit("OMEGA_RELEASE_FEDERATION_PREREQUISITE_NOT_PASS:"+",".join(bad))
 
-peer_shas={}
-for repo,role in PEERS:
-    peer_shas[repo]=update_peer(repo)
-
 meta,raw=content(CONTROL,"federation/epochs/current.json","main")
 epoch=json.loads(raw)
+if epoch.get("state")!="PASS" or (epoch.get("primary") or {}).get("certification_state")!="PASS":
+    raise SystemExit("OMEGA_FEDERATION_AUTHORITY_NOT_PASS")
+current_source=str((epoch.get("primary") or {}).get("source_sha") or "")
+if not HEX40.fullmatch(current_source):
+    raise SystemExit("OMEGA_FEDERATION_AUTHORITY_SOURCE_INVALID")
+authority_peers={str(row.get("repository") or ""):row for row in (epoch.get("peers") or [])}
+if set(authority_peers)!={repo for repo,_ in PEERS}:
+    raise SystemExit("OMEGA_FEDERATION_AUTHORITY_PEER_SET_MISMATCH")
+if current_source==TARGET:
+    print(json.dumps({"ok":True,"already_current":True,"source_sha":TARGET,"source_ref":SOURCE_REF},sort_keys=True))
+    raise SystemExit(0)
+
+peer_shas={}
+for repo,role in PEERS:
+    row=authority_peers[repo]
+    expected_commit=str(row.get("sha") or "")
+    if row.get("state")!="PASS" or row.get("contract_state")!="PASS" or not HEX40.fullmatch(expected_commit):
+        raise SystemExit(f"OMEGA_FEDERATION_AUTHORITY_PEER_NOT_PASS:{repo}")
+    peer_shas[repo]=update_peer(repo,current_source,expected_commit)
 epoch["state"]="NOT_EXECUTED"
 epoch["blockers"]=["external exact-SHA peer validation pending"]
 epoch["primary"]["source_sha"]=TARGET
