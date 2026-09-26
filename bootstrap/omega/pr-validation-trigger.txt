@@ -1,1 +1,1 @@
-validate-exact-pr a90fd56f48328f4322e6c7ab5469f1468714b575 release/final-gradle-release-metadata-20260926 exact-final-gradle-release-metadata-v1
+validate-exact-pr f3625181c29054d083db59d8c17d5e4ec78f259b hardening/release-versioncode-lock-v2-mainmerge-20260926 candidate-v2-supply-chain
