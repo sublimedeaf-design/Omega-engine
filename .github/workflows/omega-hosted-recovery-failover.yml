@@ -364,7 +364,7 @@ jobs:
           [ "$actual" = "$expected" ] || { echo "OMEGA_RECOVERY_ARTIFACT_HASH_MISMATCH:$actual!=$expected" >&2; exit 43; }
           sha256sum -c omega-recovery-state.tgz.sha256
           mkdir -p "$RUNNER_TEMP/omega-state"
-          python3 - "$RUNNER_TEMP/omega-recovery-state.tgz" "$RUNNER_TEMP/omega-state" <<'PY'
+          python3 - "$RUNNER_TEMP/omega-recovery-artifact/omega-recovery-state.tgz" "$RUNNER_TEMP/omega-state" <<'PY'
           import pathlib,sys,tarfile
           archive=pathlib.Path(sys.argv[1])
           dest=pathlib.Path(sys.argv[2])
