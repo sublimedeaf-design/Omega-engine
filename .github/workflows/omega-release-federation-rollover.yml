@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: omega-release-federation-rollover
@@ -23,6 +23,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
+
       - name: Resolve exact staged release candidate
         id: candidate
         env:
@@ -46,10 +47,13 @@ jobs:
           echo "found=true" >> "$GITHUB_OUTPUT"
           echo "sha=$candidate" >> "$GITHUB_OUTPUT"
           echo "source_ref=$source_ref" >> "$GITHUB_OUTPUT"
-      - name: Atomically align peers and stage fail-closed authority
+
+      - name: Freeze one immutable release epoch without mutating peers
         if: steps.candidate.outputs.found == 'true'
         env:
           OMEGA_BOOTSTRAP_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          OMEGA_CONTROL_TOKEN: ${{ github.token }}
+          OMEGA_CONTROL_CONTRACT_SHA: ${{ github.sha }}
           OMEGA_TARGET_SOURCE_SHA: ${{ steps.candidate.outputs.sha }}
           OMEGA_TARGET_SOURCE_REF: ${{ steps.candidate.outputs.source_ref }}
         run: python3 scripts/rollover_release_federation.py
