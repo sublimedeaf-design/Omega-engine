@@ -141,7 +141,7 @@ jobs:
           GH_TOKEN="$OMEGA_BOOTSTRAP_TOKEN" gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$SOURCE_SHA" \
             -f state=success -f context="omega/federation-v3-release" \
             -f description="release federation exact-SHA PASS after second external peer proof" \
-            -f target_url="https://github.com/${{ github.repository }}/actions/runs/$BRIDGE_RUN_ID" >/dev/null
+            -f target_url="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" >/dev/null
 
           path="bootstrap/omega/recovery-trigger.txt"
           desired="recover-exact $SOURCE_SHA $SOURCE_REF release-federation-second-proof"
@@ -156,6 +156,31 @@ jobs:
           gh api --method PUT "/repos/$CONTROL_REPOSITORY/contents/$path" \
             -f message="Recovery: prove exact certified release SHA ${SOURCE_SHA:0:12}" \
             -f content="$encoded" -f sha="$blob_sha" -f branch=main >/dev/null
+          # Consume the second-proof transition exactly once. This closes the
+          # rollover state machine before dispatching recovery so later peer
+          # bridge watchdogs cannot re-arm the same certified release.
+          meta="$(gh api "/repos/$CONTROL_REPOSITORY/contents/federation/epochs/current.json?ref=main")"
+          current="$(printf '%s' "$meta" | jq -r '.content' | python3 -c 'import base64,sys; print(base64.b64decode("".join(sys.stdin.read().split()),validate=True).decode(),end="")')"
+          blob_sha="$(printf '%s' "$meta" | jq -r '.sha')"
+          CURRENT="$current" SOURCE_SHA="$SOURCE_SHA" SOURCE_REF="$SOURCE_REF" BRIDGE_RUN_ID="$BRIDGE_RUN_ID" python3 <<'PY' > "$RUNNER_TEMP/epoch-final.json"
+          import json,os
+          d=json.loads(os.environ["CURRENT"])
+          p=d.get("primary") or {}
+          rr=d.setdefault("release_rollover",{})
+          if d.get("state")!="PASS" or p.get("source_sha")!=os.environ["SOURCE_SHA"] or p.get("source_ref")!=os.environ["SOURCE_REF"]:
+              raise SystemExit("OMEGA_RELEASE_CERTIFIER_FINALIZE_AUTHORITY_MOVED")
+          if rr.get("stage")!="CERTIFIED_PASS_PENDING_SECOND_PROOF":
+              raise SystemExit("OMEGA_RELEASE_CERTIFIER_FINALIZE_STAGE_MOVED")
+          rr["stage"]="CERTIFIED_PASS"
+          rr["second_peer_bridge_run_id"]=os.environ["BRIDGE_RUN_ID"]
+          print(json.dumps(d,indent=2,ensure_ascii=False))
+          PY
+          encoded="$(base64 -w0 "$RUNNER_TEMP/epoch-final.json")"
+          gh api --method PUT "/repos/$CONTROL_REPOSITORY/contents/federation/epochs/current.json" \
+            -f message="Federation v3: finalize second proof for ${SOURCE_SHA:0:12}" \
+            -f content="$encoded" -f sha="$blob_sha" -f branch=main >/dev/null
+          echo "OMEGA_RELEASE_FEDERATION_SECOND_PROOF_FINALIZED source=$SOURCE_SHA bridge_run=$BRIDGE_RUN_ID"
+
           echo "OMEGA_RELEASE_FINAL_RECOVERY_ARMED source=$SOURCE_SHA ref=$SOURCE_REF"
           gh workflow run omega-hosted-recovery-failover.yml -R "$CONTROL_REPOSITORY" --ref main
           echo "OMEGA_RELEASE_FINAL_RECOVERY_DISPATCHED source=$SOURCE_SHA"
