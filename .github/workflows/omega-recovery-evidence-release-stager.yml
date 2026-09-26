@@ -271,7 +271,7 @@ jobs:
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           ev="$RUNNER_TEMP/recovered/evidence"
           mkdir -p evidence
-          for name in execution-envelope.json execution-runtime.json federation-epoch.json federation-epoch.authority.json t24-binding.json t60-binding.json qa-binding.json settlement-binding.json latest-24h.json latest-t60.json latest-settlement.json coverage-gaps.json intelligence-refresh-t24.json intelligence-refresh-t60.json; do
+          for name in execution-envelope.json execution-runtime.json federation-epoch.json federation-epoch.authority.json t24-binding.json t60-binding.json qa-binding.json settlement-binding.json latest-24h.json latest-t60.json latest-settlement.json coverage-gaps.json intelligence-refresh-t24.json intelligence-refresh-t60.json acceptance-agents.json; do
             test -s "$ev/$name" || { echo "OMEGA_RELEASE_STAGE_REQUIRED_EVIDENCE_MISSING:$name" >&2; exit 52; }
             cp "$ev/$name" "evidence/$name"
           done
