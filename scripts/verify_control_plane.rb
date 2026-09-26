@@ -129,7 +129,7 @@ recovery = File.read(recovery_path, encoding: "UTF-8")
   "stale_ref_tip_reconciled" => "OMEGA_RECOVERY_TRIGGER_ADVANCED",
   "stale_ref_tip_base_guard" => "OMEGA_RECOVERY_TRIGGER_NOT_CURRENT_BASE",
   "serialized_recovery_explicit_supersede" => "cancel-in-progress: ${{ github.event_name == 'push' }}",
-  "bounded_recovery_queue" => "queue: max",
+  "bounded_recovery_queue" => "queue: single",
   "dynamic_evidence_root_packaging" => 'source=(pathlib.Path(os.environ["OMEGA_STATE"])/"evidence").resolve()',
   "artifact_checksum_verify" => "sha256sum -c",
   "out_of_band_artifact_digest" => "recovery_package_sha256",
