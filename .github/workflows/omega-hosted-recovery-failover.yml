@@ -24,7 +24,10 @@ concurrency:
   # This prevents duplicate clean-recovery runs for the same frozen candidate
   # from consuming hosted-runner minutes in parallel. Routine-main stays isolated.
   group: omega-hosted-recovery-v3-${{ (github.event_name == 'push' || (github.event_name == 'schedule' && github.event.schedule == '22,52 * * * *')) && 'candidate' || 'routine-main' }}
-  cancel-in-progress: false
+  # An explicit exact-candidate push is authoritative and may supersede an
+  # older scheduled candidate watchdog still consuming the candidate lane.
+  # Routine-main uses a distinct group and is never cancelled by this rule.
+  cancel-in-progress: ${{ github.event_name == 'push' }}
   queue: max
 
 env:
