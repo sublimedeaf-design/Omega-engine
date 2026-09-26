@@ -5,7 +5,7 @@
   "state": "NOT_EXECUTED",
   "blockers": [
     "primary exact-SHA end-to-end certification pending",
-    "peer PRs not merged to main"
+    "merged peer main contract revalidation pending"
   ],
   "primary": {
     "repository": "sublimedeaf-design/Omega-engines",
@@ -16,35 +16,35 @@
   "peers": [
     {
       "repository": "sublimedeaf-design/Omega-recovery",
-      "sha": "35496f359bc48b0027366a512dbf6d55a0b5d10c",
+      "sha": "c421dee8d3169ed24a665d2184ec3ec8fae6c4ad",
       "role": "control_recovery",
       "state": "NOT_EXECUTED",
       "contract_state": "NOT_EXECUTED",
-      "reason": "exact v3 peer SHA bound; external bridge validation pending"
+      "reason": "merged main exact SHA bound; external bridge validation pending"
     },
     {
       "repository": "sublimedeaf-design/Omega-agents",
-      "sha": "99c648d837b111ffbb4e1a5111cb9f5d74a6bd2c",
+      "sha": "3bf3b297aca0954726cab1a5511db8580d978f9d",
       "role": "agent_execution",
       "state": "NOT_EXECUTED",
       "contract_state": "NOT_EXECUTED",
-      "reason": "exact v3 peer SHA bound; external bridge validation pending"
+      "reason": "merged main exact SHA bound; external bridge validation pending"
     },
     {
       "repository": "sublimedeaf-design/Omega-validation",
-      "sha": "d5dcc3e6f0ede9ce0a5f9d1ab9836db24400cd7d",
+      "sha": "6ea5732578997432a02adf406204aff469769545",
       "role": "independent_validation",
       "state": "NOT_EXECUTED",
       "contract_state": "NOT_EXECUTED",
-      "reason": "exact v3 peer SHA bound; external bridge validation pending"
+      "reason": "merged main exact SHA bound; external bridge validation pending"
     },
     {
       "repository": "sublimedeaf-design/Omega-release",
-      "sha": "16311a0b4a774be28fb1431f604d387956376a31",
+      "sha": "96902d851723f8a8af05113095604338347a8587",
       "role": "release_promotion",
       "state": "NOT_EXECUTED",
       "contract_state": "NOT_EXECUTED",
-      "reason": "exact v3 peer SHA bound; external bridge validation pending"
+      "reason": "merged main exact SHA bound; external bridge validation pending"
     }
   ],
   "hf": {
