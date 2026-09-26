@@ -12,6 +12,9 @@ HEX40 = re.compile(r"^[0-9a-f]{40}$")
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
 
 MARKERS = (
+    ("OMEGA_RELEASE_CAPABILITY_MISSING:PRIVATE_CONTENTS_WRITE", "AUTHORIZATION", "BLOCKED", "private-writer-capability", "release-stager"),
+    ("REQUESTED URL RETURNED ERROR: 403", "AUTHORIZATION", "BLOCKED", "private-writer-capability", "release-stager"),
+    ("HTTP 403", "AUTHORIZATION", "BLOCKED", "authorization", "release-stager"),
     ("EVIDENCE_ROOT_UPSTREAM_NOT_PASS", "UPSTREAM_PREREQUISITE", "BLOCKED", "upstream-proof", "recovery"),
     ("MAIN_PROTOCOL_NOT_EXECUTED", "NOT_EXECUTED", "NOT_EXECUTED", "protocol-generation", "recovery"),
     ("FEDERATION_PRIMARY_SOURCE_MISMATCH", "FEDERATION_IDENTITY", "FAIL", "federation", "federation"),
@@ -56,6 +59,7 @@ POLICIES = {
     "FEDERATION": (False, 1, "repair_federation_then_reprove"),
     "CODE_TEST": (False, 1, "repair_code_then_reprove"),
     "UPSTREAM_PREREQUISITE": (False, 1, "reprove_from_upstream_boundary"),
+    "AUTHORIZATION": (False, 1, "switch_to_authorized_writer_then_reprove_same_gate"),
     "UNKNOWN_FAILURE": (False, 1, "minimal_isolation_then_classify"),
     "UNKNOWN_STATE": (False, 1, "orchestrator_reconcile"),
 }
@@ -208,6 +212,7 @@ def _self_test() -> None:
         ({"status": "completed", "conclusion": "success", "proof_present": True}, "NONE"),
         ({"status": "completed", "conclusion": "failure", "log": "FAILED tests/test_x.py::test_y\nshort test summary"}, "CODE_TEST"),
         ({"status": "completed", "conclusion": "failure", "log": "OMEGA_CANONICAL_SIGNER_BLOCKED_AUTORETRY"}, "SIGNER_CONTINUITY"),
+        ({"status": "completed", "conclusion": "failure", "jobs": [{"steps": [{"name": "capability"}]}], "log": "OMEGA_RELEASE_CAPABILITY_MISSING:private_contents_write"}, "AUTHORIZATION"),
     ]
     for payload, expected in cases:
         got = classify(payload)
