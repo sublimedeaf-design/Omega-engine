@@ -26,9 +26,57 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      - name: Detect scoped private release authority configuration
+        id: release_app_config
+        env:
+          RELEASE_APP_CLIENT_ID: ${{ vars.OMEGA_RELEASE_APP_CLIENT_ID }}
+          RELEASE_APP_PRIVATE_KEY: ${{ secrets.OMEGA_RELEASE_APP_PRIVATE_KEY }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          configured=false
+          if [ -n "${RELEASE_APP_CLIENT_ID:-}" ] && [ -n "${RELEASE_APP_PRIVATE_KEY:-}" ]; then
+            configured=true
+          fi
+          echo "configured=$configured" >> "$GITHUB_OUTPUT"
+          echo "OMEGA_RELEASE_APP_CONFIG configured=$configured"
+
+      - name: Mint scoped signer Actions authority
+        id: release_app
+        if: steps.release_app_config.outputs.configured == 'true'
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          client-id: ${{ vars.OMEGA_RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.OMEGA_RELEASE_APP_PRIVATE_KEY }}
+          owner: sublimedeaf-design
+          repositories: Omega-engines
+          permission-actions: write
+          permission-contents: read
+          permission-statuses: write
+
+      - name: Select signer Actions authority
+        env:
+          APP_TOKEN: ${{ steps.release_app.outputs.token }}
+          LEGACY_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          if [ -n "${APP_TOKEN:-}" ]; then
+            token="$APP_TOKEN"
+            source=github-app
+          else
+            token="${LEGACY_TOKEN:-}"
+            source=legacy-bootstrap
+          fi
+          [ -n "$token" ] || { echo "OMEGA_SIGNER_AUTHORITY_MISSING" >&2; exit 77; }
+          echo "::add-mask::$token"
+          echo "OMEGA_PRIVATE_SIGNER_TOKEN=$token" >> "$GITHUB_ENV"
+          echo "OMEGA_SIGNER_AUTH_SOURCE=$source" >> "$GITHUB_ENV"
+          echo "OMEGA_SIGNER_AUTHORITY_SELECTED source=$source"
+
       - name: Dispatch canonical private signer proof only when needed
         env:
-          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          GH_TOKEN: ${{ env.OMEGA_PRIVATE_SIGNER_TOKEN }}
         shell: bash
         run: |
           set -Eeuo pipefail
