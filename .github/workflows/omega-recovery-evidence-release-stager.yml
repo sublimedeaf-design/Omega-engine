@@ -7,6 +7,10 @@ on:
         description: "Exact successful OMEGA Candidate Evidence Root run id"
         required: true
         type: string
+  push:
+    branches: [main]
+    paths:
+      - "bootstrap/omega/release-stager-trigger.txt"
 
 permissions:
   contents: write
@@ -24,13 +28,38 @@ jobs:
   stage:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      EVIDENCE_RUN_ID: ${{ inputs.evidence_run_id || '' }}
     steps:
+      - name: Resolve exact evidence run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          run_id="${EVIDENCE_RUN_ID:-}"
+          if [ -z "$run_id" ]; then
+            trigger="bootstrap/omega/release-stager-trigger.txt"
+            test -s "$trigger"
+            local_trigger="$(tr -d '\r\n' < "$trigger")"
+            current_b64="$(gh api "/repos/${GITHUB_REPOSITORY}/contents/$trigger?ref=main" --jq .content)"
+            current_trigger="$(printf '%s' "$current_b64" | tr -d '\n' | base64 -d | tr -d '\r\n')"
+            [ "$local_trigger" = "$current_trigger" ] || {
+              echo "OMEGA_RELEASE_STAGER_STALE_TRIGGER local=$local_trigger current=$current_trigger" >&2
+              exit 75
+            }
+            read -r marker run_id _ < "$trigger" || true
+            [ "${marker:-}" = stage-exact ] || { echo "OMEGA_RELEASE_STAGER_TRIGGER_INVALID" >&2; exit 64; }
+          fi
+          [[ "$run_id" =~ ^[0-9]+$ ]] || { echo "OMEGA_RELEASE_STAGER_RUN_ID_INVALID:$run_id" >&2; exit 64; }
+          echo "EVIDENCE_RUN_ID=$run_id" >> "$GITHUB_ENV"
+          echo "OMEGA_RELEASE_STAGER_RUN_PIN run=$run_id"
+
       - name: Resolve exact proven source from evidence-root artifact
         id: pin
         env:
           GH_TOKEN: ${{ github.token }}
           PRIVATE_GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
-          EVIDENCE_RUN_ID: ${{ inputs.evidence_run_id }}
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -77,14 +106,14 @@ jobs:
           name: ${{ steps.pin.outputs.artifact_name }}
           path: ${{ runner.temp }}/candidate-root
           github-token: ${{ github.token }}
-          run-id: ${{ inputs.evidence_run_id }}
+          run-id: ${{ env.EVIDENCE_RUN_ID }}
 
       - name: Verify evidence root and resolve recovery run
         if: steps.pin.outputs.skip != 'true'
         id: root
         env:
           SOURCE_SHA: ${{ steps.pin.outputs.source_sha }}
-          EVIDENCE_RUN_ID: ${{ inputs.evidence_run_id }}
+          EVIDENCE_RUN_ID: ${{ env.EVIDENCE_RUN_ID }}
           GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
         shell: bash
         run: |
@@ -204,7 +233,7 @@ jobs:
               tf.extractall(dest,members=members,filter="data")
           PY
           ev="$RUNNER_TEMP/recovered/evidence"
-          for name in execution-envelope.json t24-binding.json t60-binding.json qa-binding.json latest-24h.json latest-t60.json coverage-gaps.json; do
+          for name in execution-envelope.json t24-binding.json t60-binding.json qa-binding.json latest-24h.json latest-t60.json coverage-gaps.json acceptance-agents.json latest-agent-promotion.json repo-audit-after-agents.json; do
             test -s "$ev/$name" || { echo "OMEGA_RELEASE_STAGE_EVIDENCE_MISSING:$name" >&2; exit 52; }
           done
           for name in forecast-ledger.jsonl shadow-ledger.jsonl prematch-intelligence.jsonl; do
@@ -263,7 +292,7 @@ jobs:
         env:
           SOURCE_SHA: ${{ steps.pin.outputs.source_sha }}
           OMEGA_EXECUTION_ID: ${{ steps.root.outputs.omega_execution_id }}
-          EVIDENCE_RUN_ID: ${{ inputs.evidence_run_id }}
+          EVIDENCE_RUN_ID: ${{ env.EVIDENCE_RUN_ID }}
           RECOVERY_RUN_ID: ${{ steps.root.outputs.recovery_run_id }}
         shell: bash
         run: |
@@ -271,7 +300,7 @@ jobs:
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           ev="$RUNNER_TEMP/recovered/evidence"
           mkdir -p evidence
-          for name in execution-envelope.json execution-runtime.json federation-epoch.json federation-epoch.authority.json t24-binding.json t60-binding.json qa-binding.json settlement-binding.json latest-24h.json latest-t60.json latest-settlement.json coverage-gaps.json intelligence-refresh-t24.json intelligence-refresh-t60.json; do
+          for name in execution-envelope.json execution-runtime.json federation-epoch.json federation-epoch.authority.json t24-binding.json t60-binding.json qa-binding.json settlement-binding.json latest-24h.json latest-t60.json latest-settlement.json coverage-gaps.json intelligence-refresh-t24.json intelligence-refresh-t60.json acceptance-agents.json latest-agent-promotion.json repo-audit-after-agents.json; do
             test -s "$ev/$name" || { echo "OMEGA_RELEASE_STAGE_REQUIRED_EVIDENCE_MISSING:$name" >&2; exit 52; }
             cp "$ev/$name" "evidence/$name"
           done

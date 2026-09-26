@@ -230,6 +230,10 @@ fail!("candidate_root_actions_write_missing") unless candidate_root.include?("ac
 stager_text = File.read(WORKFLOWS.join("omega-recovery-evidence-release-stager.yml"), encoding: "UTF-8")
 fail!("release_stager_must_not_use_workflow_run") if stager_text.include?("workflow_run:")
 fail!("release_stager_exact_evidence_input_missing") unless stager_text.include?("evidence_run_id:") && stager_text.include?("inputs.evidence_run_id")
+%w[acceptance-agents.json latest-agent-promotion.json repo-audit-after-agents.json].each do |artifact|
+  fail!("release_stager_qa_bound_artifact_missing:#{artifact}") unless stager_text.include?(artifact)
+end
+fail!("release_stager_rearm_trigger_missing") unless stager_text.include?("bootstrap/omega/release-stager-trigger.txt") && stager_text.include?("OMEGA_RELEASE_STAGER_STALE_TRIGGER")
 fail!("release_stager_missing_artifact_must_fail") unless stager_text.include?("OMEGA_RELEASE_STAGE_NOT_EXECUTED_NO_EVIDENCE_ARTIFACT") && stager_text.include?("exit 75")
 fail!("signer_workflow_handoff_must_fail") unless signer.include?("OMEGA_SIGNER_NO_UNSIGNED_HANDOFF upstream_run=") && signer.include?("exit 75")
 postlive = File.read(WORKFLOWS.join("omega-post-live-verification.yml"), encoding: "UTF-8")
