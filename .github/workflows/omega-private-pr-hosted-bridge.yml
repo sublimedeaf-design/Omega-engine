@@ -280,11 +280,14 @@ jobs:
         with:
           gradle-version: "8.13"
           cache-disabled: true
+      - name: Materialize exact Gradle verification metadata
+        working-directory: omega
+        run: python3 scripts/materialize_gradle_verification.py
       - name: Build, lint and verify debug APK
         working-directory: omega/android
         shell: bash
         run: |
-          gradle --no-daemon --stacktrace lintDebug assembleDebug
+          gradle --no-daemon --dependency-verification strict --stacktrace lintDebug assembleDebug
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify app/build/outputs/apk/debug/app-debug.apk
       - name: Publish hosted Android status
         if: ${{ always() }}
