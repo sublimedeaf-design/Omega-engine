@@ -84,6 +84,14 @@ def main():
             return fail("release_epoch_monotonic_policy")
         if release_epoch.get("supersedes_unfinished_epoch_on_control_deviation") not in (None,True):
             return fail("release_epoch_supersede_policy")
+        contract_version=release_epoch.get("contract_version")
+        if contract_version is not None and (isinstance(contract_version,bool) or not isinstance(contract_version,int) or contract_version < 1):
+            return fail("release_epoch_contract_version")
+        if contract_version is not None and contract_version >= 2:
+            if release_epoch.get("supersedes_certified_pre_live_epoch_on_control_deviation") is not True:
+                return fail("release_epoch_pre_live_supersede_policy")
+            if release_epoch.get("live_certified_epoch_is_immutable") is not True:
+                return fail("release_epoch_live_immutability_policy")
         if not HEX64.fullmatch(epoch_id):
             return fail("release_epoch_id")
         if release_epoch.get("source_binding_mode")!="external_epoch":

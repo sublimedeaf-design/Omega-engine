@@ -214,19 +214,45 @@ jobs:
           apk="$(find "$RUNNER_TEMP/unsigned" -type f -name OMEGA-Engine-unsigned.apk -print -quit)"
           checksum="$(find "$RUNNER_TEMP/unsigned" -type f -name OMEGA-Engine-unsigned.apk.sha256 -print -quit)"
           prov="$(find "$RUNNER_TEMP/unsigned" -type f -name OMEGA-Engine-unsigned.provenance.json -print -quit)"
-          test -s "$apk"; test -s "$checksum"; test -s "$prov"
+          intoto="$(find "$RUNNER_TEMP/unsigned" -type f -name OMEGA-Engine-unsigned.intoto.jsonl -print -quit)"
+          sbom="$(find "$RUNNER_TEMP/unsigned" -type f -name omega-sbom.spdx.json -print -quit)"
+          supply="$(find "$RUNNER_TEMP/unsigned" -type f -name release-stage-supply-chain.json -print -quit)"
+          test -s "$apk"; test -s "$checksum"; test -s "$prov"; test -s "$intoto"; test -s "$sbom"; test -s "$supply"
           actual="$(sha256sum "$apk" | awk '{print $1}')"
           recorded="$(awk '{print $1}' "$checksum")"
           [ "$actual" = "$recorded" ]
-          python3 - "$prov" "$FINAL_SHA" "$actual" <<'PY' > "$RUNNER_TEMP/signer-artifact.txt"
-          import json,re,sys
-          p=json.load(open(sys.argv[1],encoding="utf-8")); final=sys.argv[2]; digest=sys.argv[3]
+          python3 - "$prov" "$intoto" "$sbom" "$supply" "$FINAL_SHA" "$actual" <<'PY' > "$RUNNER_TEMP/signer-artifact.txt"
+          import hashlib,json,pathlib,re,sys
+          p=json.load(open(sys.argv[1],encoding="utf-8"))
+          stmt=json.loads(pathlib.Path(sys.argv[2]).read_text(encoding="utf-8").strip())
+          sbom=pathlib.Path(sys.argv[3]); supply=pathlib.Path(sys.argv[4])
+          final=sys.argv[5]; digest=sys.argv[6]
           if p.get("classification")!="PRODUCTION_RELEASE_PAYLOAD_UNSIGNED" or p.get("production_final") is not False:
               raise SystemExit("OMEGA_SIGNER_UNSIGNED_CLASSIFICATION_INVALID")
           if p.get("source_commit")!=final or p.get("apk_sha256")!=digest or p.get("signer_state")!="PENDING_CANONICAL_SIGNER":
               raise SystemExit("OMEGA_SIGNER_UNSIGNED_PROVENANCE_MISMATCH")
           fp=str(p.get("expected_signer_certificate_sha256") or "").replace(":","").lower()
           if not re.fullmatch(r"[0-9a-f]{64}",fp): raise SystemExit("OMEGA_SIGNER_EXPECTED_FINGERPRINT_INVALID")
+          if stmt.get("_type")!="https://in-toto.io/Statement/v1" or stmt.get("predicateType")!="https://slsa.dev/provenance/v1":
+              raise SystemExit("OMEGA_SIGNER_SLSA_STATEMENT_TYPE_INVALID")
+          subjects=stmt.get("subject") or []
+          if len(subjects)!=1 or subjects[0].get("name")!="OMEGA-Engine-unsigned.apk" or (subjects[0].get("digest") or {}).get("sha256")!=digest:
+              raise SystemExit("OMEGA_SIGNER_SLSA_SUBJECT_MISMATCH")
+          pred=stmt.get("predicate") or {}; definition=pred.get("buildDefinition") or {}; details=pred.get("runDetails") or {}
+          external=definition.get("externalParameters") or {}
+          if external.get("source_commit")!=final or external.get("expected_signer_certificate_sha256")!=fp:
+              raise SystemExit("OMEGA_SIGNER_SLSA_EXTERNAL_PARAMETERS_MISMATCH")
+          builder=str((details.get("builder") or {}).get("id") or "")
+          if not re.fullmatch(r"https://github\.com/sublimedeaf-design/Omega-engine/\.github/workflows/omega-recovery-evidence-release-stager\.yml@[0-9a-f]{40}",builder):
+              raise SystemExit("OMEGA_SIGNER_SLSA_BUILDER_INVALID")
+          deps={str(x.get("uri") or ""):x.get("digest") or {} for x in definition.get("resolvedDependencies") or []}
+          expected_deps={
+              "git+https://github.com/sublimedeaf-design/Omega-engines@"+final:{"gitCommit":final},
+              "file:reports/omega-sbom.spdx.json":{"sha256":hashlib.sha256(sbom.read_bytes()).hexdigest()},
+              "file:reports/release-stage-supply-chain.json":{"sha256":hashlib.sha256(supply.read_bytes()).hexdigest()},
+          }
+          for uri,want in expected_deps.items():
+              if deps.get(uri)!=want: raise SystemExit("OMEGA_SIGNER_SLSA_DEPENDENCY_MISMATCH:"+uri)
           print(fp)
           PY
           expected="$(cat "$RUNNER_TEMP/signer-artifact.txt")"
