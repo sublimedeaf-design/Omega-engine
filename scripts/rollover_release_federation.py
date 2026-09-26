@@ -172,10 +172,39 @@ if bad:
 control_head = control_api("GET", f"/repos/{CONTROL}/git/ref/heads/main")["object"]["sha"]
 meta, raw = content(CONTROL_TOKEN, CONTROL, "federation/epochs/current.json", "main")
 epoch = json.loads(raw)
-if epoch.get("state") != "PASS" or (epoch.get("primary") or {}).get("certification_state") != "PASS":
+primary_epoch = epoch.get("primary") or {}
+prior_release_epoch = epoch.get("release_epoch") or {}
+prior_control_contract = str(prior_release_epoch.get("control_contract_sha") or "")
+prior_sequence_raw = prior_release_epoch.get("sequence", 0)
+if isinstance(prior_sequence_raw, bool) or not isinstance(prior_sequence_raw, int) or prior_sequence_raw < 0:
+    raise SystemExit("OMEGA_RELEASE_EPOCH_SEQUENCE_INVALID")
+prior_sequence = int(prior_sequence_raw)
+prior_state = str(epoch.get("state") or "")
+prior_certification = str(primary_epoch.get("certification_state") or "")
+same_target = str(primary_epoch.get("source_sha") or "") == TARGET
+same_ref = str(primary_epoch.get("source_ref") or "") == SOURCE_REF
+control_deviation = bool(
+    prior_control_contract
+    and HEX40.fullmatch(prior_control_contract)
+    and prior_control_contract != CONTROL_CONTRACT_SHA
+)
+authority_pass = prior_state == "PASS" and prior_certification == "PASS"
+safe_unfinished_supersede = (
+    prior_state == "NOT_EXECUTED"
+    and prior_certification == "NOT_EXECUTED"
+    and same_target
+    and same_ref
+    and control_deviation
+)
+if not authority_pass and not safe_unfinished_supersede:
     raise SystemExit("OMEGA_FEDERATION_AUTHORITY_NOT_PASS")
+if safe_unfinished_supersede:
+    print(
+        f"OMEGA_RELEASE_EPOCH_SUPERSEDE_UNFINISHED_CONTROL_DEVIATION:"
+        f"{prior_control_contract}->{CONTROL_CONTRACT_SHA}"
+    )
 
-current_source = str((epoch.get("primary") or {}).get("source_sha") or "")
+current_source = str(primary_epoch.get("source_sha") or "")
 if not HEX40.fullmatch(current_source):
     raise SystemExit("OMEGA_FEDERATION_AUTHORITY_SOURCE_INVALID")
 
@@ -185,10 +214,10 @@ authority_peers = {
 if set(authority_peers) != {repo for repo, _ in PEERS}:
     raise SystemExit("OMEGA_FEDERATION_AUTHORITY_PEER_SET_MISMATCH")
 
-prior_release_epoch = epoch.get("release_epoch") or {}
 baseline_source = str(
     prior_release_epoch.get("peer_contract_source_sha") or current_source
 )
+sequence = prior_sequence + 1
 if not HEX40.fullmatch(baseline_source):
     raise SystemExit("OMEGA_FEDERATION_PEER_BASELINE_SOURCE_INVALID")
 
@@ -215,6 +244,7 @@ for repo, role in PEERS:
 seed_core = {
     "schema_version": 1,
     "release_epoch_version": 1,
+    "sequence": sequence,
     "authority_repository": CONTROL,
     "control_contract_sha": CONTROL_CONTRACT_SHA,
     "source": {
@@ -225,6 +255,8 @@ seed_core = {
     "parent": {
         "source_sha": current_source,
         "release_epoch_id": prior_release_epoch.get("id"),
+        "control_contract_sha": prior_control_contract or None,
+        "sequence": prior_sequence,
     },
     "source_binding_mode": "external_epoch",
     "peer_contract_source_sha": baseline_source,
@@ -236,6 +268,8 @@ seed_core = {
         "peer_repositories_are_read_only_during_rollover": True,
         "old_evidence_runs_are_never_mutated": True,
         "one_staged_child_sha_per_epoch": True,
+        "monotonic_epoch_sequence": True,
+        "supersedes_unfinished_epoch_on_control_deviation": True,
     },
 }
 epoch_id = canonical_sha256(seed_core)
@@ -317,12 +351,18 @@ primary["certification_state"] = "NOT_EXECUTED"
 primary["pull_request"] = None
 projection["release_epoch"] = {
     "id": epoch_id,
+    "sequence": sequence,
     "immutable_path": seed_path,
     "control_contract_sha": CONTROL_CONTRACT_SHA,
+    "parent_epoch_id": prior_release_epoch.get("id"),
+    "parent_control_contract_sha": prior_control_contract or None,
+    "parent_sequence": prior_sequence,
     "source_binding_mode": "external_epoch",
     "peer_contract_source_sha": baseline_source,
     "new_deviation_requires_new_epoch": True,
     "old_evidence_runs_are_never_mutated": True,
+    "monotonic_epoch_sequence": True,
+    "supersedes_unfinished_epoch_on_control_deviation": True,
 }
 by_repo = {row["repository"]: row for row in projection["peers"]}
 for repo, role in PEERS:

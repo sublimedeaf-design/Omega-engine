@@ -69,6 +69,21 @@ def main():
         immutable_path=str(release_epoch.get("immutable_path") or "")
         contract_sha=str(release_epoch.get("control_contract_sha") or "")
         baseline=str(release_epoch.get("peer_contract_source_sha") or "")
+        sequence=release_epoch.get("sequence")
+        parent_sequence=release_epoch.get("parent_sequence")
+        parent_contract=release_epoch.get("parent_control_contract_sha")
+        if sequence is not None and (isinstance(sequence,bool) or not isinstance(sequence,int) or sequence < 1):
+            return fail("release_epoch_sequence")
+        if parent_sequence is not None and (isinstance(parent_sequence,bool) or not isinstance(parent_sequence,int) or parent_sequence < 0):
+            return fail("release_epoch_parent_sequence")
+        if sequence is not None and parent_sequence is not None and sequence != parent_sequence + 1:
+            return fail("release_epoch_sequence_not_monotonic")
+        if parent_contract is not None and not HEX40.fullmatch(str(parent_contract)):
+            return fail("release_epoch_parent_control_sha")
+        if release_epoch.get("monotonic_epoch_sequence") not in (None,True):
+            return fail("release_epoch_monotonic_policy")
+        if release_epoch.get("supersedes_unfinished_epoch_on_control_deviation") not in (None,True):
+            return fail("release_epoch_supersede_policy")
         if not HEX64.fullmatch(epoch_id):
             return fail("release_epoch_id")
         if release_epoch.get("source_binding_mode")!="external_epoch":
@@ -98,6 +113,7 @@ def main():
         "state":d.get("state"),
         "primary_sha":primary["source_sha"],
         "release_epoch_id":(release_epoch or {}).get("id"),
+        "release_epoch_sequence":(release_epoch or {}).get("sequence"),
         "peer_states":{x["repository"]:x["state"] for x in rows},
     },sort_keys=True))
     return 0
