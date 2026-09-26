@@ -125,6 +125,26 @@ jobs:
           github-token: ${{ github.token }}
           run-id: ${{ env.RECOVERY_RUN_ID }}
 
+      - name: Normalize exact recovery attestation artifact
+        if: ${{ steps.pin.outputs.ready == 'true' }}
+        env:
+          RECOVERY_ATTESTATION_DIR: ${{ runner.temp }}/recovery-attestation
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mapfile -t matches < <(find "$RECOVERY_ATTESTATION_DIR" -type f -name recovery-attestation.json -print)
+          [ "${#matches[@]}" -eq 1 ] || {
+            echo "OMEGA_RECOVERY_ATTESTATION_LAYOUT_AMBIGUOUS count=${#matches[@]}" >&2
+            printf '%s\n' "${matches[@]}" >&2 || true
+            exit 66
+          }
+          canonical="$RECOVERY_ATTESTATION_DIR/recovery-attestation.json"
+          if [ "${matches[0]}" != "$canonical" ]; then
+            cp -- "${matches[0]}" "$canonical"
+          fi
+          test -s "$canonical"
+          echo "OMEGA_RECOVERY_ATTESTATION_NORMALIZED source=${matches[0]}"
+
       - name: Build candidate SBOM/provenance root
         if: ${{ steps.pin.outputs.ready == 'true' }}
         id: root
