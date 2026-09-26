@@ -1,0 +1,133 @@
+name: OMEGA Release Orchestrator Arm
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "3,18,33,48 * * * *"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/omega-release-orchestrator-arm.yml"
+      - ".github/workflows/omega-release-federation-rollover.yml"
+      - ".github/workflows/omega-federation-v3-peer-bridge.yml"
+      - ".github/workflows/omega-release-federation-certifier.yml"
+      - ".github/workflows/omega-recovery-evidence-release-stager.yml"
+      - ".github/workflows/omega-canonical-android-signer.yml"
+      - ".github/workflows/omega-final-release-promoter.yml"
+      - ".github/workflows/omega-post-live-verification.yml"
+      - "scripts/rollover_release_federation.py"
+      - "scripts/verify_federation_epoch.py"
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: omega-release-orchestrator-arm
+  cancel-in-progress: false
+
+env:
+  PRIVATE_REPOSITORY: sublimedeaf-design/Omega-engines
+  ROLLOVER_WORKFLOW: omega-release-federation-rollover.yml
+
+jobs:
+  arm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Decide whether the exact release needs a new control epoch
+        id: decide
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          CONTROL_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          read -r marker candidate source_ref _ < bootstrap/omega/pr-validation-trigger.txt || true
+          if [ "${marker:-}" != validate-exact-pr ] || [[ ! "${candidate:-}" =~ ^[0-9a-f]{40}$ ]] || [[ ! "${source_ref:-}" =~ ^release/[A-Za-z0-9._/-]+$ ]]; then
+            echo "dispatch=false" >> "$GITHUB_OUTPUT"
+            echo "OMEGA_RELEASE_ORCHESTRATOR_NO_EXACT_TRIGGER"
+            exit 0
+          fi
+          case "$source_ref" in *..*|/*|-*) echo "OMEGA_RELEASE_ORCHESTRATOR_REF_UNSAFE:$source_ref" >&2; exit 64 ;; esac
+
+          private_tip="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/$source_ref" --jq .sha)"
+          [ "$private_tip" = "$candidate" ] || {
+            echo "dispatch=false" >> "$GITHUB_OUTPUT"
+            echo "OMEGA_RELEASE_ORCHESTRATOR_STALE_TRIGGER candidate=$candidate tip=$private_tip"
+            exit 0
+          }
+
+          control_main="$(GH_TOKEN="$CONTROL_TOKEN" gh api "/repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)"
+          epoch="$(GH_TOKEN="$CONTROL_TOKEN" gh api "/repos/$GITHUB_REPOSITORY/contents/federation/epochs/current.json?ref=main" --jq '.content' | python3 -c 'import base64,sys; print(base64.b64decode("".join(sys.stdin.read().split()),validate=True).decode(),end="")')"
+          decision="$(EPOCH="$epoch" CANDIDATE="$candidate" SOURCE_REF="$source_ref" CONTROL_MAIN="$control_main" python3 <<'PY'
+          import json,os,re
+          d=json.loads(os.environ["EPOCH"])
+          p=d.get("primary") or {}
+          rel=d.get("release_epoch") or {}
+          candidate=os.environ["CANDIDATE"]
+          source_ref=os.environ["SOURCE_REF"]
+          control=os.environ["CONTROL_MAIN"]
+          epoch_source=str(p.get("source_sha") or "")
+          epoch_ref=str(p.get("source_ref") or "")
+          contract=str(rel.get("control_contract_sha") or "")
+          state=str(d.get("state") or "")
+          certification=str(p.get("certification_state") or "")
+          if not re.fullmatch(r"[0-9a-f]{40}",control):
+              raise SystemExit("OMEGA_RELEASE_ORCHESTRATOR_CONTROL_SHA_INVALID")
+          if epoch_source!=candidate or epoch_ref!=source_ref:
+              print("DISPATCH:release-identity-changed")
+          elif contract==control:
+              print("NOOP:control-contract-current")
+          elif state=="PASS" and certification=="PASS":
+              print("NOOP:completed-epoch-immutable")
+          elif state=="NOT_EXECUTED" and certification=="NOT_EXECUTED":
+              print("DISPATCH:unfinished-control-deviation")
+          else:
+              print("BLOCKED:epoch-state-"+state.lower())
+          PY
+          )"
+          case "$decision" in
+            DISPATCH:*)
+              echo "dispatch=true" >> "$GITHUB_OUTPUT"
+              echo "reason=${decision#DISPATCH:}" >> "$GITHUB_OUTPUT"
+              ;;
+            NOOP:*)
+              echo "dispatch=false" >> "$GITHUB_OUTPUT"
+              echo "OMEGA_RELEASE_ORCHESTRATOR_NOOP reason=${decision#NOOP:}"
+              ;;
+            BLOCKED:*)
+              echo "dispatch=false" >> "$GITHUB_OUTPUT"
+              echo "OMEGA_RELEASE_ORCHESTRATOR_BLOCKED reason=${decision#BLOCKED:}"
+              ;;
+            *)
+              echo "OMEGA_RELEASE_ORCHESTRATOR_DECISION_INVALID:$decision" >&2
+              exit 65
+              ;;
+          esac
+
+      - name: Dispatch one rollover when no equivalent run is active
+        if: steps.decide.outputs.dispatch == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REASON: ${{ steps.decide.outputs.reason }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          active="$(
+            {
+              gh api "/repos/$GITHUB_REPOSITORY/actions/workflows/$ROLLOVER_WORKFLOW/runs?status=queued&per_page=20" --jq '.total_count'
+              gh api "/repos/$GITHUB_REPOSITORY/actions/workflows/$ROLLOVER_WORKFLOW/runs?status=in_progress&per_page=20" --jq '.total_count'
+            } | awk '{s+=$1} END{print s+0}'
+          )"
+          if [ "$active" -gt 0 ]; then
+            echo "OMEGA_RELEASE_ORCHESTRATOR_ROLLOVER_ALREADY_ACTIVE count=$active reason=$REASON"
+            exit 0
+          fi
+          gh workflow run "$ROLLOVER_WORKFLOW" -R "$GITHUB_REPOSITORY" --ref main
+          echo "OMEGA_RELEASE_ORCHESTRATOR_ROLLOVER_DISPATCHED reason=$REASON"
