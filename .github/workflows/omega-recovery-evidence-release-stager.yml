@@ -12,6 +12,7 @@ permissions:
 concurrency:
   group: omega-recovery-evidence-release-stager
   cancel-in-progress: false
+  queue: max
 
 env:
   PRIVATE_REPOSITORY: sublimedeaf-design/Omega-engines
