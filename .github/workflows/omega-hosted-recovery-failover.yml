@@ -205,6 +205,13 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
+          source_sha="$(git rev-parse HEAD)"
+          test "$source_sha" = "$OMEGA_SOURCE_SHA"
+          # The workflow executes in the public helper repo, so GitHub's default
+          # GITHUB_SHA identifies the helper commit. Child OMEGA processes must
+          # instead serialize the exact private execution source.
+          export OMEGA_GIT_COMMIT="$source_sha"
+          export GITHUB_SHA="$source_sha"
           timeout --signal=TERM --kill-after=30s 50m bash deploy/codespaces/acceptance-test.sh
           test -s "$OMEGA_STATE/evidence/acceptance-pre-rebuild.json"
       - name: Record source and VM identity
