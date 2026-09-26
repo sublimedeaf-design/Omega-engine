@@ -169,11 +169,14 @@ jobs:
       - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb
         with:
           gradle-version: "8.13"
+      - name: Materialize exact Gradle verification metadata
+        working-directory: srcdir
+        run: python3 scripts/materialize_gradle_verification.py
       - name: Compile lint and verify debug signature
         working-directory: srcdir/android
         shell: bash
         run: |
-          gradle --no-daemon --stacktrace lintDebug assembleDebug
+          gradle --no-daemon --dependency-verification strict --stacktrace lintDebug assembleDebug
           test -s app/build/outputs/apk/debug/app-debug.apk
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify app/build/outputs/apk/debug/app-debug.apk
       - name: Publish exact-SHA Android verifier status
