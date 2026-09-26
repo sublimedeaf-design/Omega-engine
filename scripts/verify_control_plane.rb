@@ -323,6 +323,10 @@ fail!("federation_peer_status_write_forbidden") if peer_bridge.include?("/status
 fail!("federation_peer_proof_artifact_missing") unless peer_bridge.include?("OMEGA-Federation-Peer-Proof-") && peer_bridge.include?("peer_repository_mutated")
 fail!("federation_peer_external_epoch_binding_missing") unless peer_bridge.include?("SOURCE_BINDING_MODE") && peer_bridge.include?("release_epoch_id")
 fail!("federation_peer_four_of_four_proof_missing") unless peer_bridge.include?("OMEGA_FEDERATION_4_OF_4_READ_ONLY_PROOF_PASS")
+fail!("federation_peer_schedule_forbidden") if peer_bridge.include?("schedule:")
+fail!("federation_peer_trigger_must_be_epoch_only") unless peer_bridge.include?("'federation/epochs/current.json'")
+fail!("federation_peer_self_trigger_forbidden") if peer_bridge.include?("'.github/workflows/omega-federation-v3-peer-bridge.yml'")
+fail!("federation_peer_verifier_trigger_forbidden") if peer_bridge.include?("'scripts/verify_federation_epoch.py'")
 
 fail!("federation_certifier_fresh_proof_missing") unless certifier.include?("OMEGA_RELEASE_CERTIFIER_FRESH_4_OF_4_PASS")
 fail!("federation_certifier_stale_status_dependency_forbidden") if certifier.include?("OMEGA_RELEASE_PEER_STATUS_NOT_PASS")
