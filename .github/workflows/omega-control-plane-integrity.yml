@@ -2,6 +2,11 @@ name: OMEGA Control Plane Integrity
 
 on:
   workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/**"
+      - "scripts/verify_control_plane.rb"
+      - "scripts/omega_gate_classifier.py"
   push:
     paths:
       - ".github/workflows/**"
