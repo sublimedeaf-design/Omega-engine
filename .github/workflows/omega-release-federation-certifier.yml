@@ -101,7 +101,12 @@ jobs:
           d=json.loads(os.environ["EPOCH_PAYLOAD"])
           expected={x["repository"]:(x["sha"],x["role"]) for x in d.get("peers") or []}
           source=str((d.get("primary") or {}).get("source_sha") or "")
-          epoch_id=str((d.get("release_epoch") or {}).get("id") or "")
+          rel=d.get("release_epoch") or {}
+          epoch_id=str(rel.get("id") or "")
+          control_contract=str(rel.get("control_contract_sha") or "")
+          sequence=rel.get("sequence")
+          if not control_contract or not isinstance(sequence,int) or isinstance(sequence,bool) or sequence < 1:
+              raise SystemExit("OMEGA_RELEASE_CERTIFIER_CONTROL_BINDING_INVALID")
           root=pathlib.Path(os.environ["RUNNER_TEMP"])/"release-peer-proofs"
           rows=[json.loads(p.read_text(encoding="utf-8")) for p in root.glob("*.json")]
           if len(rows)!=4:
@@ -117,11 +122,13 @@ jobs:
                   raise SystemExit("OMEGA_RELEASE_CERTIFIER_PROOF_IDENTITY_INVALID:"+repo)
               if row.get("source_sha")!=source or str(row.get("release_epoch_id") or "")!=epoch_id:
                   raise SystemExit("OMEGA_RELEASE_CERTIFIER_PROOF_EPOCH_MISMATCH:"+repo)
+              if row.get("control_contract_sha")!=control_contract or row.get("release_epoch_sequence")!=sequence:
+                  raise SystemExit("OMEGA_RELEASE_CERTIFIER_PROOF_CONTROL_BINDING_MISMATCH:"+repo)
               if row.get("peer_repository_mutated") is not False:
                   raise SystemExit("OMEGA_RELEASE_CERTIFIER_PEER_MUTATION_FLAG_INVALID:"+repo)
           if set(expected)!=seen:
               raise SystemExit("OMEGA_RELEASE_CERTIFIER_PROOF_SET_INCOMPLETE")
-          print("OMEGA_RELEASE_CERTIFIER_FRESH_4_OF_4_PASS",source,epoch_id)
+          print("OMEGA_RELEASE_CERTIFIER_FRESH_4_OF_4_PASS",source,epoch_id,control_contract,sequence)
           PY
 
       - name: Promote staged authority to PASS only after external 4-of-4 proof
