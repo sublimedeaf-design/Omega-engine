@@ -117,7 +117,24 @@ jobs:
         run: |
           set -Eeuo pipefail
           gh api "/repos/${GITHUB_REPOSITORY}/actions/runs/$RUN_ID/jobs?filter=latest&per_page=100" > "$RUNNER_TEMP/jobs.json"
-          gh run view "$RUN_ID" -R "$GITHUB_REPOSITORY" --log-failed > "$RUNNER_TEMP/failed.log" 2>&1 || true
+          gh api "/repos/${GITHUB_REPOSITORY}/actions/runs/$RUN_ID/logs" > "$RUNNER_TEMP/run-logs.zip" 2>/dev/null || true
+          if [ -s "$RUNNER_TEMP/run-logs.zip" ]; then
+            python3 - "$RUNNER_TEMP/run-logs.zip" "$RUNNER_TEMP/failed.log" <<'PY'
+          import pathlib,sys,zipfile
+          src=pathlib.Path(sys.argv[1]); dst=pathlib.Path(sys.argv[2])
+          try:
+              with zipfile.ZipFile(src) as zf:
+                  chunks=[]
+                  for name in sorted(zf.namelist()):
+                      if name.endswith(".txt"):
+                          chunks.append(zf.read(name).decode("utf-8","replace"))
+                  dst.write_text("\n".join(chunks),encoding="utf-8")
+          except (OSError,zipfile.BadZipFile):
+              dst.write_text("",encoding="utf-8")
+          PY
+          else
+            : > "$RUNNER_TEMP/failed.log"
+          fi
           gh api "/repos/$PRIVATE_REPOSITORY/commits/$SOURCE_SHA/status?per_page=100" > "$RUNNER_TEMP/status.json"
           encoded="$(gh api "/repos/$PRIVATE_REPOSITORY/contents/evidence/execution-envelope.json?ref=$SOURCE_SHA" --jq .content 2>/dev/null || true)"
           if [ -n "$encoded" ]; then

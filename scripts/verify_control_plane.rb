@@ -187,6 +187,8 @@ router = File.read(router_path, encoding: "UTF-8")
   fail!("gate_failure_router_workflow_missing:#{workflow_name}") unless router.include?(workflow_name)
 end
 fail!("gate_failure_router_classifier_missing") unless router.include?("scripts/omega_gate_classifier.py")
+fail!("gate_failure_router_must_use_run_log_archive") unless router.include?('/actions/runs/$RUN_ID/logs') && router.include?("zipfile.ZipFile")
+fail!("gate_failure_router_gh_run_view_forbidden") if router.include?('gh run view "$RUN_ID"')
 fail!("gate_failure_router_incident_missing") unless router.include?("incident_id")
 fail!("gate_failure_router_execution_identity_missing") unless router.include?("omega_execution_id") && router.include?("evidence_root") && router.include?("execution-envelope.json")
 fail!("gate_failure_router_retry_budget_missing") unless router.include?("run_attempt") && router.include?("max_attempts")
