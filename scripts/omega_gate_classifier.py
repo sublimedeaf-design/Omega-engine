@@ -163,7 +163,17 @@ def classify(payload: dict[str, Any]) -> dict[str, Any]:
         }
         return _decorate(payload, result)
 
-    if conclusion in {"failure", "cancelled", "skipped"} and _jobs_all_prestep(jobs):
+    if status == "completed" and conclusion == "skipped":
+        result = {
+            "gate": gate,
+            "state": "NOT_EXECUTED",
+            "failure_class": "NOT_EXECUTED",
+            "repair_scope": "orchestration",
+            "reprove_from": gate,
+        }
+        return _decorate(payload, result)
+
+    if conclusion in {"failure", "cancelled"} and _jobs_all_prestep(jobs):
         result = {
             "gate": gate,
             "state": "BLOCKED",
@@ -207,6 +217,7 @@ def classify(payload: dict[str, Any]) -> dict[str, Any]:
 def _self_test() -> None:
     cases = [
         ({"status": "completed", "conclusion": "failure", "jobs": [{"steps": []}], "gate": "ci"}, "INFRA_PRESTART"),
+        ({"status": "completed", "conclusion": "skipped", "jobs": [{"steps": []}], "gate": "evidence-root"}, "NOT_EXECUTED"),
         ({"status": "completed", "conclusion": "failure", "jobs": [{"steps": [{"name": "x"}]}], "log": "OMEGA_RELEASE_STAGE_EVIDENCE_IDENTITY_MISMATCH:latest-24h.json"}, "EXECUTION_IDENTITY"),
         ({"status": "completed", "conclusion": "success", "proof_present": False}, "SUCCESS_WITHOUT_PROOF"),
         ({"status": "completed", "conclusion": "success", "proof_present": True}, "NONE"),
