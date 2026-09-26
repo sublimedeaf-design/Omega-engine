@@ -1,1 +1,1 @@
-validate-exact-pr 61bbf69be586a3f0d42e45ada7b65c094cbbfbb8 hardening/canonical-evidence-envelope-20260926 federation-v3-jarv-removed
+validate-exact-pr 5f75916f493b969c2764ffe932b616a40bd02d33 hardening/canonical-evidence-envelope-20260926 calibration-ensemble-evidence-hardening
