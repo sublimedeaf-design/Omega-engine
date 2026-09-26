@@ -9,7 +9,7 @@ on:
         type: string
 permissions:
   contents: write
-  actions: read
+  actions: write
 
 concurrency:
   group: omega-recovery-evidence-release-stager
@@ -393,6 +393,13 @@ jobs:
           gh api --method PUT "/repos/${{ github.repository }}/contents/$recovery_path" \
             -f message="Recovery: prove exact staged final release SHA" \
             -f content="$recovery_encoded" -f sha="$recovery_current" -f branch=main >/dev/null
+
+          # GITHUB_TOKEN-authored content writes do not recursively trigger the
+          # push listeners below, so both exact gates must be dispatched explicitly.
+          gh workflow run omega-private-pr-hosted-bridge.yml \
+            -R "$GITHUB_REPOSITORY" --ref main
+          gh workflow run omega-hosted-recovery-failover.yml \
+            -R "$GITHUB_REPOSITORY" --ref main
 
           echo "OMEGA_FINAL_SHA_VALIDATION_DISPATCHED sha=$FINAL_SHA branch=$RELEASE_BRANCH"
           echo "OMEGA_FINAL_SHA_RECOVERY_DISPATCHED sha=$FINAL_SHA branch=$RELEASE_BRANCH"
