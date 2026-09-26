@@ -38,6 +38,22 @@ end
 files = Dir[WORKFLOWS.join("*.{yml,yaml}").to_s].sort
 fail!("no_workflows_found") if files.empty?
 
+# Any gh workflow dispatch must be repository-explicit. Some release/control jobs
+# intentionally run without a checkout, where gh cannot infer the repository.
+files.each do |file|
+  lines = File.readlines(file, encoding: "UTF-8")
+  lines.each_with_index do |line, index|
+    next unless line.include?("gh workflow run ")
+    command = line.dup
+    cursor = index
+    while command.rstrip.end_with?("\\") && cursor + 1 < lines.length
+      cursor += 1
+      command << lines[cursor]
+    end
+    fail!("#{file}:workflow_dispatch_repository_missing:line_#{index + 1}") unless command.match?(/(?:^|\s)-R(?:\s|=)/)
+  end
+end
+
 files.each do |file|
   begin
     tree = Psych.parse_file(file)
