@@ -31,7 +31,7 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          raw="$(gh api "/repos/$CONTROL_REPOSITORY/contents/federation/epochs/current.json?ref=$BRIDGE_HEAD_SHA" --jq '.content' | tr -d '\n' | base64 -d)"
+          raw="$(gh api "/repos/$CONTROL_REPOSITORY/contents/federation/epochs/current.json?ref=$BRIDGE_HEAD_SHA" --jq '.content' | python3 -c 'import base64,sys; print(base64.b64decode("".join(sys.stdin.read().split()),validate=True).decode(),end="")')"
           parsed="$(python3 - "$raw" <<'PY'
           import json,re,sys
           d=json.loads(sys.argv[1])
@@ -42,7 +42,8 @@ jobs:
           rollover=d.get("release_rollover") or {}
           if not re.fullmatch(r"[0-9a-f]{40}",source):
               raise SystemExit("OMEGA_RELEASE_CERTIFIER_SOURCE_INVALID")
-          if not ref.startswith("release/recovery-evidence-"):
+          safe=bool(re.fullmatch(r"release/[A-Za-z0-9._/-]+",ref)) and ".." not in ref and not ref.startswith("/") and not ref.startswith("-")
+          if not safe:
               print("false||||")
           else:
               print("|".join(("true",state,source,ref,str(rollover.get("stage") or ""))))
@@ -64,7 +65,7 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          epoch="$(gh api "/repos/$CONTROL_REPOSITORY/contents/federation/epochs/current.json?ref=$BRIDGE_HEAD_SHA" --jq '.content' | tr -d '\n' | base64 -d)"
+          epoch="$(gh api "/repos/$CONTROL_REPOSITORY/contents/federation/epochs/current.json?ref=$BRIDGE_HEAD_SHA" --jq '.content' | python3 -c 'import base64,sys; print(base64.b64decode("".join(sys.stdin.read().split()),validate=True).decode(),end="")')"
           EPOCH_PAYLOAD="$epoch" python3 <<'PY'
           import json,os,subprocess
           d=json.loads(os.environ["EPOCH_PAYLOAD"])
@@ -90,7 +91,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           meta="$(gh api "/repos/$CONTROL_REPOSITORY/contents/federation/epochs/current.json?ref=main")"
-          current="$(printf '%s' "$meta" | jq -r '.content' | tr -d '\n' | base64 -d)"
+          current="$(printf '%s' "$meta" | jq -r '.content' | python3 -c 'import base64,sys; print(base64.b64decode("".join(sys.stdin.read().split()),validate=True).decode(),end="")')"
           blob_sha="$(printf '%s' "$meta" | jq -r '.sha')"
           CURRENT="$current" SOURCE_SHA="$SOURCE_SHA" SOURCE_REF="$SOURCE_REF" BRIDGE_RUN_ID="$BRIDGE_RUN_ID" python3 <<'PY' > "$RUNNER_TEMP/epoch-pass.json"
           import json,os
@@ -133,7 +134,7 @@ jobs:
           path="bootstrap/omega/recovery-trigger.txt"
           desired="recover-exact $SOURCE_SHA $SOURCE_REF release-federation-second-proof"
           meta="$(gh api "/repos/$CONTROL_REPOSITORY/contents/$path?ref=main")"
-          current="$(printf '%s' "$meta" | jq -r '.content' | tr -d '\n' | base64 -d | tr -d '\r\n')"
+          current="$(printf '%s' "$meta" | jq -r '.content' | python3 -c 'import base64,sys; print(base64.b64decode("".join(sys.stdin.read().split()),validate=True).decode(),end="")' | tr -d '\r\n')"
           if [ "$current" = "$desired" ]; then
             echo "OMEGA_RELEASE_FINAL_RECOVERY_ALREADY_ARMED source=$SOURCE_SHA"
             exit 0

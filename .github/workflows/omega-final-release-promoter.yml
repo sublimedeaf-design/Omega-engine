@@ -41,11 +41,12 @@ jobs:
         run: |
           set -Eeuo pipefail
           read -r marker candidate source_ref _ < bootstrap/omega/pr-validation-trigger.txt || true
-          if [ "${marker:-}" != validate-exact-pr ] || [[ ! "${candidate:-}" =~ ^[0-9a-f]{40}$ ]] || [[ ! "${source_ref:-}" =~ ^release/recovery-evidence- ]]; then
+          if [ "${marker:-}" != validate-exact-pr ] || [[ ! "${candidate:-}" =~ ^[0-9a-f]{40}$ ]] || [[ ! "${source_ref:-}" =~ ^release/[A-Za-z0-9._/-]+$ ]]; then
             echo "ready=false" >> "$GITHUB_OUTPUT"
             echo "OMEGA_FINAL_RELEASE_NO_STAGED_CANDIDATE"
             exit 0
           fi
+          case "$source_ref" in *..*|/*|-*) echo "OMEGA_FINAL_RELEASE_REF_UNSAFE:$source_ref" >&2; exit 64 ;; esac
           tip="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/$source_ref" --jq .sha)"
           [ "$tip" = "$candidate" ] || { echo "OMEGA_FINAL_RELEASE_BRANCH_MOVED:$tip!=$candidate" >&2; exit 61; }
 
@@ -89,7 +90,7 @@ jobs:
             exit 0
           fi
 
-          authority="$(gh api "/repos/$CONTROL_REPOSITORY/contents/federation/epochs/current.json?ref=main" --jq '.content' | tr -d '\n' | base64 -d)"
+          authority="$(gh api "/repos/$CONTROL_REPOSITORY/contents/federation/epochs/current.json?ref=main" --jq '.content' | python3 -c 'import base64,sys; print(base64.b64decode("".join(sys.stdin.read().split()),validate=True).decode(),end="")')"
           AUTHORITY="$authority" CANDIDATE="$candidate" SOURCE_REF="$source_ref" python3 <<'PY'
           import json,os
           d=json.loads(os.environ["AUTHORITY"]); p=d.get("primary") or {}

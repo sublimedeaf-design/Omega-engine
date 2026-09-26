@@ -192,6 +192,10 @@ fail!("gate_failure_router_execution_identity_missing") unless router.include?("
 fail!("gate_failure_router_retry_budget_missing") unless router.include?("run_attempt") && router.include?("max_attempts")
 fail!("gate_failure_router_failed_only_retry_missing") unless router.include?('gh run rerun "$RUN_ID" -R "$GITHUB_REPOSITORY" --failed')
 fail!("gate_failure_router_fifo_missing") unless router.include?("cancel-in-progress: false") && router.include?("queue: max")
+%w[omega-release-federation-certifier.yml omega-final-release-promoter.yml omega-post-live-verification.yml].each do |name|
+  text = File.read(WORKFLOWS.join(name), encoding: "UTF-8")
+  fail!("validated_base64_decode_missing:#{name}") unless text.include?("base64.b64decode") && text.include?("validate=True")
+end
 
 
 release_fifo_workflows = %w[
@@ -244,7 +248,10 @@ fail!("postlive_exact_dispatch_inputs_missing") unless postlive.include?("final_
 fail!("promoter_postlive_dispatch_missing") unless promoter.include?("gh workflow run omega-post-live-verification.yml") && promoter.include?('promoter_run_id="$PROMOTER_RUN_ID"')
 fail!("promoter_actions_write_missing") unless promoter.include?("actions: write")
 fail!("production_provenance_application_id_missing") unless promoter.include?('"application_id":app_id.group(1)') && promoter.include?("OMEGA_FINAL_ANDROID_APPLICATION_ID_MISSING")
-fail!("single_promotion_release_ref_guard_missing") unless promoter.include?("release/recovery-evidence-")
+fail!("single_promotion_release_ref_guard_missing") unless promoter.include?("^release/[A-Za-z0-9._/-]+$") && promoter.include?("OMEGA_FINAL_RELEASE_REF_UNSAFE") && promoter.include?("OMEGA_FINAL_RELEASE_BRANCH_MOVED")
+fail!("postlive_release_ref_guard_missing") unless postlive.include?("^release/[A-Za-z0-9._/-]+$") && postlive.include?("OMEGA_POST_LIVE_REF_UNSAFE") && postlive.include?("OMEGA_POST_LIVE_RELEASE_BRANCH_MOVED")
+fail!("federation_rollover_release_ref_guard_missing") unless File.read(WORKFLOWS.join("omega-release-federation-rollover.yml"), encoding: "UTF-8").include?("^release/[A-Za-z0-9._/-]+$")
+fail!("federation_certifier_release_ref_guard_missing") unless File.read(WORKFLOWS.join("omega-release-federation-certifier.yml"), encoding: "UTF-8").include?('re.fullmatch(r"release/[A-Za-z0-9._/-]+",ref)')
 fail!("promoter_must_not_trigger_from_signer") if promoter.include?('workflows:\n      - "OMEGA Canonical Android Signer"')
 fail!("promoter_must_not_trigger_from_private_bridge") if promoter.include?('workflows:\n      - "OMEGA Private PR Hosted Bridge"')
 fail!("promoter_coldstart_trigger_missing") unless promoter.include?('- "OMEGA Android Runtime Cold Start"')
