@@ -5,15 +5,20 @@ on:
     inputs:
       source_sha:
         description: "Exact Omega-engines source SHA to build"
-        required: true
+        required: false
+        default: "e916529109d9abab278e7420062f3c423903b281"
         type: string
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/omega-android-hotfix-builder.yml"
 
 permissions:
   contents: read
   actions: write
 
 concurrency:
-  group: omega-android-hotfix-builder-${{ inputs.source_sha }}
+  group: omega-android-hotfix-builder-${{ inputs.source_sha || 'e916529109d9abab278e7420062f3c423903b281' }}
   cancel-in-progress: false
 
 env:
@@ -27,7 +32,7 @@ jobs:
       - name: Validate requested source SHA
         shell: bash
         env:
-          SOURCE_SHA: ${{ inputs.source_sha }}
+          SOURCE_SHA: ${{ inputs.source_sha || 'e916529109d9abab278e7420062f3c423903b281' }}
         run: |
           set -Eeuo pipefail
           [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "OMEGA_HOTFIX_SOURCE_SHA_INVALID"; exit 64; }
@@ -71,7 +76,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: sublimedeaf-design/Omega-engines
-          ref: ${{ inputs.source_sha }}
+          ref: ${{ inputs.source_sha || 'e916529109d9abab278e7420062f3c423903b281' }}
           token: ${{ env.OMEGA_PRIVATE_SOURCE_TOKEN }}
           path: omega
           fetch-depth: 1
@@ -80,7 +85,7 @@ jobs:
       - name: Verify exact source
         shell: bash
         env:
-          SOURCE_SHA: ${{ inputs.source_sha }}
+          SOURCE_SHA: ${{ inputs.source_sha || 'e916529109d9abab278e7420062f3c423903b281' }}
         run: |
           set -Eeuo pipefail
           test "$(git -C omega rev-parse HEAD)" = "$SOURCE_SHA"
@@ -105,8 +110,8 @@ jobs:
         id: build
         shell: bash
         env:
-          SOURCE_SHA: ${{ inputs.source_sha }}
-          OMEGA_SOURCE_SHA: ${{ inputs.source_sha }}
+          SOURCE_SHA: ${{ inputs.source_sha || 'e916529109d9abab278e7420062f3c423903b281' }}
+          OMEGA_SOURCE_SHA: ${{ inputs.source_sha || 'e916529109d9abab278e7420062f3c423903b281' }}
         run: |
           set -Eeuo pipefail
           cd omega
@@ -152,7 +157,7 @@ jobs:
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: OMEGA-Hotfix-Unsigned-${{ inputs.source_sha }}
+          name: OMEGA-Hotfix-Unsigned-${{ inputs.source_sha || 'e916529109d9abab278e7420062f3c423903b281' }}
           retention-days: 1
           if-no-files-found: error
           path: |
