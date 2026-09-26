@@ -499,6 +499,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           test "$(git rev-parse HEAD)" = "$FINAL_SHA"
+          python3 scripts/install_locked_ci_deps.py
           python3 scripts/materialize_gradle_verification.py
           python3 scripts/validate_supply_chain_locks.py --out reports/release-stage-supply-chain.json
           python3 scripts/generate_omega_sbom.py --out reports/omega-sbom.spdx.json
