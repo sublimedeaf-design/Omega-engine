@@ -1,1 +1,1 @@
-recover-exact 51fac1413e2177c7c94207a4c24dccd7657a6d3b release/final-51fac141-20260926 dynamic-evidence-v3-compatible-supersede
+recover-exact 51fac1413e2177c7c94207a4c24dccd7657a6d3b release/final-51fac141-20260926 manual-reprove-20260926T1548Z
