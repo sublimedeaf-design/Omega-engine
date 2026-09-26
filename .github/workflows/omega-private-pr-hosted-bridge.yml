@@ -127,13 +127,17 @@ jobs:
             echo "OMEGA_EXACT_STAGE_CONTROL_AUTHORITY_PASS source=$stage_source evidence_run=$stage_evidence execution=${stage_xid:0:12}"
           fi
 
-          if [ "$relation" != ahead ] || [ "$behind" != 0 ]; then
+          if [ "$relation" = identical ] && [ "$behind" = 0 ] && [ "$compare_base" = "$requested_sha" ]; then
+            echo "OMEGA_EXACT_TRIGGER_CURRENT_MAIN_PASS sha=$requested_sha"
+          elif [ "$relation" != ahead ] || [ "$behind" != 0 ]; then
             echo "OMEGA_EXACT_TRIGGER_NOT_CURRENT_BASE:status=$relation behind=$behind base=$compare_base head=$requested_sha" >&2
             exit 66
           fi
 
           android=false
-          if printf '%s' "$compare" | jq -r '.files[]?.filename' \
+          if gh api "/repos/$PRIVATE_REPOSITORY/contents/android?ref=$requested_sha" >/dev/null 2>&1; then
+            android=true
+          elif printf '%s' "$compare" | jq -r '.files[]?.filename' \
             | grep -Eq '^(android/|\.github/workflows/android-[^/]+\.yml$)'; then
             android=true
           fi
