@@ -1,10 +1,16 @@
 name: OMEGA Post Live Verification
 
 on:
-  workflow_run:
-    workflows: ["OMEGA Final Release Promoter"]
-    types: [completed]
   workflow_dispatch:
+    inputs:
+      final_sha:
+        description: "Exact production-final SHA certified by the promoter"
+        required: false
+        type: string
+      promoter_run_id:
+        description: "Exact successful Final Release Promoter run id"
+        required: false
+        type: string
   schedule:
     - cron: "19 * * * *"
 
@@ -22,7 +28,6 @@ env:
 
 jobs:
   verify:
-    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -34,11 +39,16 @@ jobs:
         id: live
         env:
           GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
-          PROMOTER_RUN_ID: ${{ github.event.workflow_run.id }}
+          PROMOTER_RUN_ID: ${{ inputs.promoter_run_id || '' }}
+          INPUT_FINAL_SHA: ${{ inputs.final_sha || '' }}
         shell: bash
         run: |
           set -Eeuo pipefail
           read -r marker candidate source_ref _ < bootstrap/omega/pr-validation-trigger.txt || true
+          if [ -n "${INPUT_FINAL_SHA:-}" ]; then
+            [[ "$INPUT_FINAL_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "OMEGA_POST_LIVE_INPUT_SHA_INVALID:$INPUT_FINAL_SHA" >&2; exit 64; }
+            [ "${candidate:-}" = "$INPUT_FINAL_SHA" ] || { echo "OMEGA_POST_LIVE_INPUT_SHA_MISMATCH:${candidate:-missing}!=$INPUT_FINAL_SHA" >&2; exit 64; }
+          fi
           if [ "${marker:-}" != validate-exact-pr ] || [[ ! "${candidate:-}" =~ ^[0-9a-f]{40}$ ]] || [[ ! "${source_ref:-}" =~ ^release/recovery-evidence- ]]; then
             echo "ready=false" >> "$GITHUB_OUTPUT"
             echo OMEGA_POST_LIVE_NOT_EXECUTED_NO_STAGED_RELEASE
