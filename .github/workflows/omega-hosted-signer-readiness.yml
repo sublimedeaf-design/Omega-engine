@@ -41,8 +41,8 @@ jobs:
             exit 0
           fi
           if [ -z "${OMEGA_ANDROID_KEYSTORE_B64:-}" ]; then
-            echo "OMEGA_HOSTED_SIGNER_ESCROW_NOT_CONFIGURED candidate=$candidate"
-            exit 0
+            echo "OMEGA_HOSTED_SIGNER_ESCROW_NOT_CONFIGURED candidate=$candidate" >&2
+            exit 40
           fi
           expected="$(gh api "/repos/$PRIVATE_REPOSITORY/contents/android/signing-cert.sha256?ref=$candidate" --jq '.content' | tr -d '\n' | base64 -d | tr -d '[:space:]' | tr -d ':' | tr 'A-F' 'a-f')"
           [[ "$expected" =~ ^[0-9a-f]{64}$ ]] || { echo OMEGA_HOSTED_SIGNER_EXPECTED_FINGERPRINT_INVALID >&2; exit 31; }
