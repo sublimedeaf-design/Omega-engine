@@ -1,6 +1,12 @@
 name: OMEGA Candidate Evidence Root
 
 on:
+  workflow_dispatch:
+    inputs:
+      recovery_run_id:
+        description: "Exact successful Hosted Recovery Failover run ID"
+        required: true
+        type: string
   workflow_run:
     workflows: ["OMEGA Hosted Recovery Failover"]
     types: [completed]
@@ -34,6 +40,40 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
+
+      - name: Verify exact recovery run identity and required artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          set +x
+          [[ "$RECOVERY_RUN_ID" =~ ^[0-9]+$ ]] || { echo "OMEGA_EVIDENCE_ROOT_RECOVERY_RUN_ID_INVALID" >&2; exit 64; }
+          read -r marker candidate source_ref _ < bootstrap/omega/recovery-trigger.txt
+          [ "$marker" = recover-exact ] || { echo "OMEGA_EVIDENCE_ROOT_TRIGGER_INVALID" >&2; exit 64; }
+          run_json="$(gh api "/repos/$GITHUB_REPOSITORY/actions/runs/$RECOVERY_RUN_ID")"
+          workflow_path="$(jq -r '.path // empty' <<<"$run_json")"
+          conclusion="$(jq -r '.conclusion // empty' <<<"$run_json")"
+          [ "$workflow_path" = ".github/workflows/omega-hosted-recovery-failover.yml" ] || {
+            echo "OMEGA_EVIDENCE_ROOT_RECOVERY_WORKFLOW_PATH_MISMATCH:$workflow_path" >&2
+            exit 65
+          }
+          [ "$conclusion" = success ] || {
+            echo "OMEGA_EVIDENCE_ROOT_RECOVERY_RUN_NOT_SUCCESS:$conclusion" >&2
+            exit 75
+          }
+          echo "OMEGA_EVIDENCE_ROOT_RECOVERY_RUN_VERIFIED run=$RECOVERY_RUN_ID candidate=$candidate"
+          artifacts="$(gh api "/repos/$GITHUB_REPOSITORY/actions/runs/$RECOVERY_RUN_ID/artifacts?per_page=100")"
+          attestation="omega-recovery-attestation-$candidate-$RECOVERY_RUN_ID"
+          package="omega-hosted-recovery-$candidate"
+          for required in "$attestation" "$package"; do
+            count="$(jq --arg n "$required" '[.artifacts[] | select(.name==$n and .expired==false)] | length' <<<"$artifacts")"
+            [ "$count" -eq 1 ] || {
+              echo "OMEGA_EVIDENCE_ROOT_RECOVERY_ARTIFACT_MISSING_OR_AMBIGUOUS:$required:$count" >&2
+              exit 75
+            }
+          done
+          echo "OMEGA_EVIDENCE_ROOT_RECOVERY_ARTIFACTS_VERIFIED run=$RECOVERY_RUN_ID"
 
       - name: Pin exact recovered candidate and require current recovery attestation
         id: pin
