@@ -2,7 +2,7 @@ name: OMEGA Release Federation Rollover
 
 on:
   workflow_run:
-    workflows: ["OMEGA Private PR Hosted Bridge"]
+    workflows: ["OMEGA Private PR Hosted Bridge", "OMEGA Recovery Evidence Release Stager"]
     types: [completed]
   workflow_dispatch:
 
