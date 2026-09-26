@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 concurrency:
   group: omega-release-federation-rollover
@@ -57,3 +58,55 @@ jobs:
           OMEGA_TARGET_SOURCE_SHA: ${{ steps.candidate.outputs.sha }}
           OMEGA_TARGET_SOURCE_REF: ${{ steps.candidate.outputs.source_ref }}
         run: python3 scripts/rollover_release_federation.py
+
+      - name: Explicitly dispatch read-only peer proof for the projected epoch
+        if: steps.candidate.outputs.found == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ steps.candidate.outputs.sha }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          raw="$(gh api "/repos/$GITHUB_REPOSITORY/contents/federation/epochs/current.json?ref=main" --jq '.content' | python3 -c 'import base64,sys; print(base64.b64decode("".join(sys.stdin.read().split()),validate=True).decode(),end="")')"
+          decision="$(EPOCH="$raw" SOURCE_SHA="$SOURCE_SHA" python3 <<'PY'
+          import json,os,re
+          d=json.loads(os.environ["EPOCH"])
+          p=d.get("primary") or {}
+          rel=d.get("release_epoch") or {}
+          epoch_id=str(rel.get("id") or "")
+          source=str(p.get("source_sha") or "")
+          state=str(d.get("state") or "")
+          stage=str((d.get("release_rollover") or {}).get("stage") or "")
+          if source!=os.environ["SOURCE_SHA"]:
+              raise SystemExit("OMEGA_RELEASE_FEDERATION_DISPATCH_SOURCE_MISMATCH")
+          if not re.fullmatch(r"[0-9a-f]{64}",epoch_id):
+              raise SystemExit("OMEGA_RELEASE_FEDERATION_DISPATCH_EPOCH_INVALID")
+          if state=="PASS":
+              print("ALREADY_PASS")
+          elif state=="NOT_EXECUTED" and stage in {
+              "IMMUTABLE_EPOCH_STAGED_PENDING_READ_ONLY_PEER_PROOF",
+              "PEER_PROOF_DISPATCHED",
+          }:
+              print("DISPATCH")
+          else:
+              raise SystemExit("OMEGA_RELEASE_FEDERATION_DISPATCH_STATE_INVALID:"+state+":"+stage)
+          PY
+          )"
+          if [ "$decision" = ALREADY_PASS ]; then
+            echo "OMEGA_RELEASE_FEDERATION_PROOF_ALREADY_PASS source=$SOURCE_SHA"
+            exit 0
+          fi
+
+          active="$(
+            {
+              gh api "/repos/$GITHUB_REPOSITORY/actions/workflows/omega-federation-v3-peer-bridge.yml/runs?status=queued&per_page=20" --jq '.total_count'
+              gh api "/repos/$GITHUB_REPOSITORY/actions/workflows/omega-federation-v3-peer-bridge.yml/runs?status=in_progress&per_page=20" --jq '.total_count'
+            } | awk '{s+=$1} END{print s+0}'
+          )"
+          if [ "$active" -gt 0 ]; then
+            echo "OMEGA_RELEASE_FEDERATION_PROOF_ALREADY_ACTIVE count=$active source=$SOURCE_SHA"
+            exit 0
+          fi
+
+          gh workflow run omega-federation-v3-peer-bridge.yml -R "$GITHUB_REPOSITORY" --ref main
+          echo "OMEGA_RELEASE_FEDERATION_PROOF_DISPATCHED source=$SOURCE_SHA"
