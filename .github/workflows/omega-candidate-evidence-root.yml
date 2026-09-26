@@ -4,6 +4,12 @@ on:
   workflow_run:
     workflows: ["OMEGA Hosted Recovery Failover"]
     types: [completed]
+  workflow_dispatch:
+    inputs:
+      recovery_run_id:
+        description: "Completed successful OMEGA Hosted Recovery Failover run to reconcile"
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -19,11 +25,11 @@ env:
 
 jobs:
   evidence:
-    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event != 'schedule' }}
+    if: ${{ (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event != 'schedule') || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      RECOVERY_RUN_ID: ${{ github.event.workflow_run.id }}
+      RECOVERY_RUN_ID: ${{ github.event_name == 'workflow_dispatch' && inputs.recovery_run_id || github.event.workflow_run.id }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -33,10 +39,25 @@ jobs:
         id: pin
         env:
           GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          CONTROL_GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -Eeuo pipefail
           set +x
+          [[ "$RECOVERY_RUN_ID" =~ ^[0-9]+$ ]] || { echo "OMEGA_EVIDENCE_ROOT_RECOVERY_RUN_ID_INVALID:$RECOVERY_RUN_ID" >&2; exit 64; }
+          run_json="$(GH_TOKEN="$CONTROL_GH_TOKEN" gh api "/repos/$GITHUB_REPOSITORY/actions/runs/$RECOVERY_RUN_ID")"
+          RUN_JSON="$run_json" python3 <<'PY'
+          import json,os
+          r=json.loads(os.environ["RUN_JSON"])
+          if r.get("name")!="OMEGA Hosted Recovery Failover":
+              raise SystemExit("OMEGA_EVIDENCE_ROOT_RECOVERY_WORKFLOW_MISMATCH")
+          if r.get("status")!="completed" or r.get("conclusion")!="success":
+              raise SystemExit("OMEGA_EVIDENCE_ROOT_RECOVERY_RUN_NOT_SUCCESS")
+          path=str(r.get("path") or "")
+          if path!=".github/workflows/omega-hosted-recovery-failover.yml":
+              raise SystemExit("OMEGA_EVIDENCE_ROOT_RECOVERY_WORKFLOW_PATH_MISMATCH:"+path)
+          print(f"OMEGA_EVIDENCE_ROOT_RECOVERY_RUN_VERIFIED id={r.get('id')} event={r.get('event')}")
+          PY
           read -r marker candidate source_ref _ < bootstrap/omega/recovery-trigger.txt
           [ "$marker" = recover-exact ] || { echo "OMEGA_EVIDENCE_ROOT_TRIGGER_INVALID" >&2; exit 64; }
           [[ "$candidate" =~ ^[0-9a-f]{40}$ ]] || { echo "OMEGA_EVIDENCE_ROOT_SHA_INVALID" >&2; exit 64; }
@@ -44,6 +65,22 @@ jobs:
           case "$source_ref" in *..*|/*|-*) echo "OMEGA_EVIDENCE_ROOT_REF_UNSAFE:$source_ref" >&2; exit 64 ;; esac
           ref_tip="$(gh api "/repos/$PRIVATE_REPOSITORY/commits?sha=$source_ref&per_page=1" --jq '.[0].sha // empty')"
           [ "$ref_tip" = "$candidate" ] || { echo "OMEGA_EVIDENCE_ROOT_TRIGGER_STALE:$candidate!=$ref_tip" >&2; exit 65; }
+
+          artifacts="$(GH_TOKEN="$CONTROL_GH_TOKEN" gh api "/repos/$GITHUB_REPOSITORY/actions/runs/$RECOVERY_RUN_ID/artifacts?per_page=100")"
+          ARTIFACT_PAYLOAD="$artifacts" SOURCE_SHA="$candidate" RECOVERY_RUN_ID="$RECOVERY_RUN_ID" python3 <<'PY'
+          import json,os
+          p=json.loads(os.environ["ARTIFACT_PAYLOAD"])
+          sha=os.environ["SOURCE_SHA"]; run=os.environ["RECOVERY_RUN_ID"]
+          required={
+              f"omega-hosted-recovery-{sha}",
+              f"omega-recovery-attestation-{sha}-{run}",
+          }
+          live={str(a.get("name") or "") for a in p.get("artifacts",[]) if not a.get("expired")}
+          missing=sorted(required-live)
+          if missing:
+              raise SystemExit("OMEGA_EVIDENCE_ROOT_RECOVERY_ARTIFACTS_MISSING:"+",".join(missing))
+          print("OMEGA_EVIDENCE_ROOT_RECOVERY_ARTIFACTS_VERIFIED:"+",".join(sorted(required)))
+          PY
 
           statuses="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/$candidate/status?per_page=100")"
           set +e
