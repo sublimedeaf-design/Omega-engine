@@ -168,7 +168,9 @@ jobs:
           ref: ${{ needs.discover.outputs.sha }}
           token: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
           persist-credentials: false
-          fetch-depth: 1
+          # Supply-chain ancestry is part of the external proof. A shallow
+          # checkout cannot prove dependency_graph_source_sha is an ancestor.
+          fetch-depth: 0
           path: omega
 
       - name: Build exact-source bounded bundle

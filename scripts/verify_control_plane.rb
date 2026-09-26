@@ -447,3 +447,13 @@ fail!("signer_slsa_dependency_verification_missing") unless signer.include?("OME
 
 puts "OMEGA_CONTROL_PLANE_INTEGRITY_GREEN workflows=#{files.length}"
 # support fastpath restack v2 exact-head trigger
+
+# External exact-SHA validation must carry enough Git history to prove the
+# dependency-lock ancestry relation. A depth-1 tarball makes merge-base
+# unverifiable and must never be accepted as a release-grade external proof.
+external_dispatch = File.read(WORKFLOWS.join("omega-external-validator-dispatch.yml"), encoding: "UTF-8")
+private_checkout_tail = external_dispatch.split('repository: ${{ env.PRIVATE_REPOSITORY }}', 2)[1].to_s.lines.first(12).join
+fail!("external_validator_private_full_history_missing") unless private_checkout_tail.include?("fetch-depth: 0")
+fail!("external_validator_exact_bundle_missing") unless external_dispatch.include?("tar -C omega -czf /tmp/omega-exact-source.tgz .")
+validator_app = File.read(ROOT.join("external_validator", "app.py"), encoding: "UTF-8")
+fail!("external_validator_shallow_history_guard_missing") unless validator_app.include?("SOURCE_HISTORY_SHALLOW") && validator_app.include?("--is-shallow-repository")
