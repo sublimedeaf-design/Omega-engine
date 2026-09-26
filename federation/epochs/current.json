@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "federation_version": 3,
+  "authority_repository": "sublimedeaf-design/Omega-engine",
+  "state": "NOT_EXECUTED",
+  "primary": {
+    "repository": "sublimedeaf-design/Omega-engines",
+    "source_sha": "aee643a6506f30ed1e43d4e79c92e45a79b09c4b",
+    "pull_request": 273,
+    "certification_state": "NOT_EXECUTED"
+  },
+  "peers": [
+    {
+      "repository": "sublimedeaf-design/Omega-recovery",
+      "sha": "2ff4bcfd7d17e7076b21c43220af69e5bdd17b81",
+      "role": "control_recovery",
+      "state": "NOT_EXECUTED",
+      "reason": "v3 contract rollout pending"
+    },
+    {
+      "repository": "sublimedeaf-design/Omega-agents",
+      "sha": "bb4a7fc18ae51b3546b1434c15d2b7ecd1cd1d37",
+      "role": "agent_execution",
+      "state": "NOT_EXECUTED",
+      "reason": "v3 contract rollout pending"
+    },
+    {
+      "repository": "sublimedeaf-design/Omega-validation",
+      "sha": "c84c4bb9743e26761c10000ddcd3517673918291",
+      "role": "independent_validation",
+      "state": "NOT_EXECUTED",
+      "reason": "v3 contract rollout pending"
+    },
+    {
+      "repository": "sublimedeaf-design/Omega-release",
+      "sha": "2a1c5586bc07eb16c602fcb26a87f9fd25d35a2c",
+      "role": "release_promotion",
+      "state": "NOT_EXECUTED",
+      "reason": "v3 contract rollout pending"
+    }
+  ],
+  "hf": {
+    "worker": {
+      "repo_id": "Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF",
+      "revision": "2ab9f8f42af02fc212effaef7c4850c885e965f4",
+      "sha256": "cc324af070c2ecbfd324a30884d2f951a7ff756aba85cb811a6ec436933bb046"
+    },
+    "qa": {
+      "repo_id": "Qwen/Qwen2.5-Coder-0.5B-Instruct-GGUF",
+      "revision": "bf1da6ca8f02b444067db175f02a14e74f49c5c0",
+      "sha256": "1d9614638d18024d0fbb36575a15f1302a3adf044df10345688ec4f6e1c4ff32"
+    }
+  },
+  "invariants": {
+    "one_external_federation_authority": true,
+    "peer_repositories_must_not_pin_each_others_commit_sha": true,
+    "source_sha_frozen_per_epoch": true,
+    "same_omega_execution_id_required_across": [
+      "agents",
+      "validation",
+      "recovery",
+      "release",
+      "apk"
+    ],
+    "pass_requires_all_peers_pass": true,
+    "skipped_or_missing_is_never_pass": true
+  }
+}
