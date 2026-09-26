@@ -378,5 +378,18 @@ fail!("federation_rollover_actions_write_missing") unless rollover_workflow.incl
 fail!("federation_rollover_explicit_peer_dispatch_missing") unless rollover_workflow.include?("gh workflow run omega-federation-v3-peer-bridge.yml") && rollover_workflow.include?("OMEGA_RELEASE_FEDERATION_PROOF_DISPATCHED")
 fail!("federation_rollover_duplicate_active_guard_missing") unless rollover_workflow.include?("status=queued") && rollover_workflow.include?("status=in_progress") && rollover_workflow.include?("OMEGA_RELEASE_FEDERATION_PROOF_ALREADY_ACTIVE")
 
+# External authority absence is a first-class blocked state, not a retryable
+# workflow failure. This keeps the release fail-closed without feeding the
+# generic failure router or creating hourly retry storms.
+signer_arm = File.read(WORKFLOWS.join("omega-signer-continuity-arm.yml"), encoding: "UTF-8")
+fail!("signer_authority_blocked_state_missing") unless signer_arm.include?("OMEGA_SIGNER_AUTHORITY_BLOCKED_STATE")
+fail!("signer_authority_status_missing") unless signer_arm.include?('context="omega/authority/private-actions"')
+fail!("signer_authority_blocked_must_not_exit_77") if signer_arm.match?(/OMEGA_SIGNER_AUTHORITY_BLOCKED_STATE[\s\S]{0,200}exit 77/)
+
+hosted_signer = File.read(WORKFLOWS.join("omega-hosted-signer-readiness.yml"), encoding: "UTF-8")
+fail!("signer_escrow_blocked_state_missing") unless hosted_signer.include?("OMEGA_HOSTED_SIGNER_ESCROW_BLOCKED_STATE")
+fail!("signer_escrow_status_missing") unless hosted_signer.include?('context="omega/signer/escrow"')
+fail!("signer_escrow_ready_status_missing") unless hosted_signer.include?('state=success') && hosted_signer.include?("OMEGA_HOSTED_SIGNER_ESCROW_READY")
+
 puts "OMEGA_CONTROL_PLANE_INTEGRITY_GREEN workflows=#{files.length}"
 # support fastpath restack v2 exact-head trigger
