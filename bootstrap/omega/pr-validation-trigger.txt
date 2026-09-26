@@ -1,1 +1,1 @@
-validate-exact-pr f59f9a116c635f7d30d6802e69f99a6fb35df785 hardening/canonical-evidence-envelope-20260926 hf-execution-provenance-v2
+validate-exact-pr 28b9595503f81b2a69dbe6bc9de22725809bb703 hardening/canonical-evidence-envelope-20260926 hf-offline-recovery-v3
