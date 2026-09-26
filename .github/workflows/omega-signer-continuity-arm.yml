@@ -18,81 +18,104 @@ concurrency:
 
 env:
   PRIVATE_REPOSITORY: sublimedeaf-design/Omega-engines
-  SIGNER_WORKFLOW: android-signing-keepalive.yml
+  SIGNER_BRIDGE_BRANCH: control/private-signer-bridge-v1
+  SIGNER_REQUEST_PATH: bootstrap/omega/private-signer-request.json
   MAX_AGE_MINUTES: "10080"
+  PENDING_RETRY_MINUTES: "15"
 
 jobs:
   arm:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Dispatch canonical private signer proof only when needed
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Arm private canonical signer proof through contents-only bridge
         env:
           GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          REQUEST_ID: ${{ github.run_id }}
         shell: bash
         run: |
           set -Eeuo pipefail
           set +x
 
-          sha="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/main" --jq '.sha')"
+          sha=""
+          if [ -s bootstrap/omega/recovery-trigger.txt ]; then
+            read -r marker candidate _ < bootstrap/omega/recovery-trigger.txt || true
+            if [ "${marker:-}" = recover-exact ] && [[ "${candidate:-}" =~ ^[0-9a-f]{40}$ ]]; then
+              sha="$candidate"
+            fi
+          fi
+          if [ -z "$sha" ]; then
+            sha="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/main" --jq '.sha')"
+          fi
           [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || {
-            echo "OMEGA_SIGNER_ARM_MAIN_SHA_INVALID" >&2
+            echo "OMEGA_SIGNER_ARM_TARGET_SHA_INVALID" >&2
             exit 64
           }
 
           statuses="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/$sha/status?per_page=100")"
-          if STATUS_PAYLOAD="$statuses" MAX_AGE_MINUTES="$MAX_AGE_MINUTES" python3 <<'PY'
+          decision="$(STATUS_PAYLOAD="$statuses" MAX_AGE_MINUTES="$MAX_AGE_MINUTES" PENDING_RETRY_MINUTES="$PENDING_RETRY_MINUTES" python3 <<'PY'
           import datetime,json,os
           payload=json.loads(os.environ["STATUS_PAYLOAD"])
           now=datetime.datetime.now(datetime.timezone.utc)
-          max_age=int(os.environ["MAX_AGE_MINUTES"])
-          rows=[r for r in payload.get("statuses",[]) if r.get("context")=="omega/signer/continuity"]
+          rows=[r for r in payload.get("statuses",[]) if r.get("context")=="omega/private-signer-readiness"]
           rows.sort(key=lambda r:str(r.get("updated_at") or r.get("created_at") or ""),reverse=True)
-          if not rows or rows[0].get("state")!="success":
-              raise SystemExit(1)
-          raw=str(rows[0].get("updated_at") or rows[0].get("created_at") or "")
+          if not rows:
+              print("REQUEST"); raise SystemExit
+          row=rows[0]; state=str(row.get("state") or "")
+          raw=str(row.get("updated_at") or row.get("created_at") or "")
           try:
               at=datetime.datetime.fromisoformat(raw.replace("Z","+00:00"))
+              age=(now-at).total_seconds()
           except ValueError:
-              raise SystemExit(1)
-          age=(now-at).total_seconds()
-          raise SystemExit(0 if -300 <= age <= max_age*60 else 1)
+              print("REQUEST"); raise SystemExit
+          if state=="success" and -300 <= age <= int(os.environ["MAX_AGE_MINUTES"])*60:
+              print("CURRENT")
+          elif state=="pending" and -300 <= age <= int(os.environ["PENDING_RETRY_MINUTES"])*60:
+              print("ACTIVE")
+          else:
+              print("REQUEST")
           PY
-          then
-            echo "OMEGA_SIGNER_ARM_CURRENT sha=$sha"
+          )"
+          if [ "$decision" = CURRENT ]; then
+            echo "OMEGA_SIGNER_ARM_CURRENT sha=$sha proof=private-signer-readiness"
+            exit 0
+          fi
+          if [ "$decision" = ACTIVE ]; then
+            echo "OMEGA_SIGNER_ARM_ACTIVE sha=$sha proof=private-signer-readiness"
             exit 0
           fi
 
-          actions_payload=""
-          actions_err="$(mktemp)"
-          if ! actions_payload="$(gh api "/repos/$PRIVATE_REPOSITORY/actions/workflows/$SIGNER_WORKFLOW/runs?branch=main&per_page=20" 2>"$actions_err")"; then
-            echo "OMEGA_SIGNER_ARM_PERMISSION_BLOCKED sha=$sha required=private-actions-read-write" >&2
-            sed -n '1,3p' "$actions_err" >&2 || true
-            rm -f "$actions_err"
-            gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$sha" \
-              -f state=error \
-              -f context="omega/signer/continuity" \
-              -f description="BLOCKED: private Actions read/write permission unavailable" >/dev/null 2>&1 || true
-            exit 77
-          fi
-          rm -f "$actions_err"
+          meta="$(gh api "/repos/$PRIVATE_REPOSITORY/contents/$SIGNER_REQUEST_PATH?ref=$SIGNER_BRIDGE_BRANCH")"
+          blob_sha="$(printf '%s' "$meta" | jq -r '.sha')"
+          [[ "$blob_sha" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "OMEGA_SIGNER_BRIDGE_BLOB_INVALID" >&2
+            exit 65
+          }
+          TARGET_SHA="$sha" REQUEST_ID="$REQUEST_ID" python3 <<'PY' > "$RUNNER_TEMP/signer-request.json"
+          import json,os
+          payload={
+              "schema_version":1,
+              "target_sha":os.environ["TARGET_SHA"],
+              "purpose":"private-canonical-signer-readiness",
+              "requested_by":"omega-control-plane",
+              "request_id":os.environ["REQUEST_ID"],
+          }
+          print(json.dumps(payload,indent=2,sort_keys=True))
+          PY
+          encoded="$(base64 -w0 "$RUNNER_TEMP/signer-request.json")"
 
-          active="$(printf '%s' "$actions_payload" | jq '[.workflow_runs[] | select(.status=="queued" or .status=="in_progress" or .status=="pending")] | length')"
-          if [ "$active" != 0 ]; then
-            echo "OMEGA_SIGNER_ARM_ACTIVE sha=$sha active=$active"
-            exit 0
-          fi
+          gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$sha" \
+            -f state=pending \
+            -f context="omega/private-signer-readiness" \
+            -f description="private canonical signer escrow verification requested" \
+            -f target_url="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" >/dev/null
 
-          dispatch_err="$(mktemp)"
-          if ! gh api --method POST             "/repos/$PRIVATE_REPOSITORY/actions/workflows/$SIGNER_WORKFLOW/dispatches"             -f ref=main >/dev/null 2>"$dispatch_err"; then
-            echo "OMEGA_SIGNER_ARM_PERMISSION_BLOCKED sha=$sha required=private-actions-read-write" >&2
-            sed -n '1,3p' "$dispatch_err" >&2 || true
-            rm -f "$dispatch_err"
-            gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$sha" \
-              -f state=error \
-              -f context="omega/signer/continuity" \
-              -f description="BLOCKED: private Actions dispatch permission unavailable" >/dev/null 2>&1 || true
-            exit 77
-          fi
-          rm -f "$dispatch_err"
-          echo "OMEGA_SIGNER_ARM_DISPATCHED sha=$sha workflow=$SIGNER_WORKFLOW"
+          gh api --method PUT "/repos/$PRIVATE_REPOSITORY/contents/$SIGNER_REQUEST_PATH" \
+            -f message="Control: request canonical signer readiness for ${sha:0:12}" \
+            -f content="$encoded" -f sha="$blob_sha" -f branch="$SIGNER_BRIDGE_BRANCH" >/dev/null
+
+          echo "OMEGA_SIGNER_ARM_REQUESTED sha=$sha branch=$SIGNER_BRIDGE_BRANCH request=$REQUEST_ID"
