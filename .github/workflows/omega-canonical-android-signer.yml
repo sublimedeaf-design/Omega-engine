@@ -2,7 +2,7 @@ name: OMEGA Canonical Android Signer
 
 on:
   workflow_run:
-    workflows: ["OMEGA Recovery Evidence Release Stager", "OMEGA Candidate Evidence Root"]
+    workflows: ["OMEGA Recovery Evidence Release Stager"]
     types: [completed]
   workflow_dispatch:
   schedule:
