@@ -179,7 +179,7 @@ jobs:
           }
           echo "OMEGA_FINAL_RELEASE_CAPABILITY_PASS:private_contents_write"
 
-      - name: Fast-forward private main to the already-proven exact SHA
+      - name: Promote private main to the already-proven exact SHA
         if: steps.gate.outputs.ready == 'true'
         env:
           GH_TOKEN: ${{ env.OMEGA_PRIVATE_RELEASE_TOKEN }}
@@ -192,20 +192,65 @@ jobs:
             echo "OMEGA_FINAL_MAIN_ALREADY_EXACT sha=$FINAL_SHA"
             exit 0
           fi
-          compare="$(gh api "/repos/$PRIVATE_REPOSITORY/compare/$main...$FINAL_SHA")"
-          relation="$(printf '%s' "$compare" | jq -r .status)"
-          behind="$(printf '%s' "$compare" | jq -r .behind_by)"
-          [ "$relation" = ahead ] && [ "$behind" = 0 ] || {
-            echo "OMEGA_FINAL_MAIN_NOT_FAST_FORWARDABLE status=$relation behind=$behind" >&2
-            exit 62
-          }
-          gh api --method PATCH "/repos/$PRIVATE_REPOSITORY/git/refs/heads/main" \
-            -f sha="$FINAL_SHA" -F force=false >/dev/null
+
+          # Normal case: candidate is ahead of main and can be fast-forwarded.
+          forward="$(gh api "/repos/$PRIVATE_REPOSITORY/compare/$main...$FINAL_SHA")"
+          forward_relation="$(printf '%s' "$forward" | jq -r .status)"
+          forward_behind="$(printf '%s' "$forward" | jq -r .behind_by)"
+          if [ "$forward_relation" = ahead ] && [ "$forward_behind" = 0 ]; then
+            gh api --method PATCH "/repos/$PRIVATE_REPOSITORY/git/refs/heads/main" \
+              -f sha="$FINAL_SHA" -F force=false >/dev/null
+            promotion_mode=fast_forward
+          else
+            # Control-plane trigger/repair commits are allowed to sit above a
+            # frozen release candidate, but product main must end at the exact
+            # certified SHA. Prove every descendant change is control-only,
+            # archive that head losslessly, then reset main atomically.
+            reverse="$(gh api "/repos/$PRIVATE_REPOSITORY/compare/$FINAL_SHA...$main")"
+            reverse_relation="$(printf '%s' "$reverse" | jq -r .status)"
+            reverse_behind="$(printf '%s' "$reverse" | jq -r .behind_by)"
+            [ "$reverse_relation" = ahead ] && [ "$reverse_behind" = 0 ] || {
+              echo "OMEGA_FINAL_MAIN_DIVERGED candidate=$FINAL_SHA main=$main status=$reverse_relation behind=$reverse_behind" >&2
+              exit 62
+            }
+            mapfile -t changed < <(printf '%s' "$reverse" | jq -r '.files[].filename' | sort -u)
+            allowed=(
+              ".github/workflows/android-signing-keepalive.yml"
+              "bootstrap/omega/private-release-stage-trigger.json"
+            )
+            for path in "${changed[@]}"; do
+              ok=false
+              for allow in "${allowed[@]}"; do
+                [ "$path" = "$allow" ] && ok=true && break
+              done
+              [ "$ok" = true ] || {
+                echo "OMEGA_FINAL_MAIN_DESCENDANT_NOT_CONTROL_ONLY:$path" >&2
+                exit 64
+              }
+            done
+            [ "${#changed[@]}" -gt 0 ] || {
+              echo "OMEGA_FINAL_MAIN_DESCENDANT_DIFF_EMPTY:$main" >&2
+              exit 65
+            }
+            archive="control/archive-pre-${FINAL_SHA:0:12}-${GITHUB_RUN_ID}"
+            gh api --method POST "/repos/$PRIVATE_REPOSITORY/git/refs" \
+              -f ref="refs/heads/$archive" -f sha="$main" >/dev/null
+            archived="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/$archive" --jq .sha)"
+            [ "$archived" = "$main" ] || {
+              echo "OMEGA_FINAL_MAIN_ARCHIVE_MISMATCH:$archived!=$main" >&2
+              exit 66
+            }
+            gh api --method PATCH "/repos/$PRIVATE_REPOSITORY/git/refs/heads/main" \
+              -f sha="$FINAL_SHA" -F force=true >/dev/null
+            promotion_mode=control_descendant_archived_reset
+            echo "OMEGA_FINAL_CONTROL_HEAD_ARCHIVED branch=$archive sha=$main"
+          fi
+
           after="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/main" --jq .sha)"
           [ "$after" = "$FINAL_SHA" ] || { echo "OMEGA_FINAL_MAIN_PROMOTION_MISMATCH:$after!=$FINAL_SHA" >&2; exit 63; }
           gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$FINAL_SHA" \
             -f state=success -f context="omega/main-promotion" \
-            -f description="exact proven release SHA fast-forwarded to main" \
+            -f description="exact proven release SHA promoted to main ($promotion_mode)" \
             -f target_url="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" >/dev/null
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
