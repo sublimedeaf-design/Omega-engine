@@ -1,1 +1,1 @@
-validate-exact-pr 52d4c01973dbbe4581d25c10a5127fa183d82d60 hardening/canonical-evidence-envelope-20260926 recovery-contract-normalized-v1
+validate-exact-pr 6560946cda03347289a76172b6a6a9b9b39bb1b2 hardening/canonical-evidence-envelope-20260926 deterministic-recovery-authority-v1
