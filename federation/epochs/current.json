@@ -2,47 +2,49 @@
   "schema_version": 1,
   "federation_version": 3,
   "authority_repository": "sublimedeaf-design/Omega-engine",
-  "state": "PASS",
-  "blockers": [],
+  "state": "NOT_EXECUTED",
+  "blockers": [
+    "external read-only exact-SHA peer proof pending"
+  ],
   "primary": {
     "repository": "sublimedeaf-design/Omega-engines",
-    "source_sha": "51fac1413e2177c7c94207a4c24dccd7657a6d3b",
-    "pull_request": 279,
-    "certification_state": "PASS",
-    "source_ref": "release/final-51fac141-20260926"
+    "source_sha": "8bb4f93855c3be15fd2cee707ff1424171eecdc9",
+    "pull_request": null,
+    "certification_state": "NOT_EXECUTED",
+    "source_ref": "release/final-8bb4f938-20260926"
   },
   "peers": [
     {
       "repository": "sublimedeaf-design/Omega-recovery",
       "sha": "9fc63d76bf0ac1c7ce6b7d137fee5bdd8f8f2d09",
       "role": "control_recovery",
-      "state": "PASS",
-      "contract_state": "PASS",
-      "reason": "external GitHub-hosted exact-SHA federation v3 peer contract validation PASS in Omega-engine run 36250855269"
+      "state": "NOT_EXECUTED",
+      "contract_state": "NOT_EXECUTED",
+      "reason": "external read-only exact-SHA federation proof pending; peer repository is not mutated for release rollover"
     },
     {
       "repository": "sublimedeaf-design/Omega-agents",
       "sha": "36f0da9b32c2314c3c60341dfd01a80fab2e9ec6",
       "role": "agent_execution",
-      "state": "PASS",
-      "contract_state": "PASS",
-      "reason": "external GitHub-hosted exact-SHA federation v3 peer contract validation PASS in Omega-engine run 36250855269"
+      "state": "NOT_EXECUTED",
+      "contract_state": "NOT_EXECUTED",
+      "reason": "external read-only exact-SHA federation proof pending; peer repository is not mutated for release rollover"
     },
     {
       "repository": "sublimedeaf-design/Omega-validation",
       "sha": "3875d71e9f6a260639f45f61dc0938d55be867a1",
       "role": "independent_validation",
-      "state": "PASS",
-      "contract_state": "PASS",
-      "reason": "external GitHub-hosted exact-SHA federation v3 peer contract validation PASS in Omega-engine run 36250855269"
+      "state": "NOT_EXECUTED",
+      "contract_state": "NOT_EXECUTED",
+      "reason": "external read-only exact-SHA federation proof pending; peer repository is not mutated for release rollover"
     },
     {
       "repository": "sublimedeaf-design/Omega-release",
       "sha": "bfee3d2ba922c05b4d5974105059355fd943d4fa",
       "role": "release_promotion",
-      "state": "PASS",
-      "contract_state": "PASS",
-      "reason": "external GitHub-hosted exact-SHA federation v3 peer contract validation PASS in Omega-engine run 36250855269"
+      "state": "NOT_EXECUTED",
+      "contract_state": "NOT_EXECUTED",
+      "reason": "external read-only exact-SHA federation proof pending; peer repository is not mutated for release rollover"
     }
   ],
   "hf": {
@@ -73,11 +75,18 @@
     "integral_optimization_policy": "omega-integral-optimization-v1"
   },
   "release_rollover": {
-    "source_ref": "release/final-51fac141-20260926",
-    "stage": "CERTIFIED_PASS",
-    "retry_reason": "repo_scoped_certifier_write_authority",
-    "first_peer_bridge_run_id": "36250855269",
-    "second_proof_dispatch_reason": "explicit_workflow_dispatch_hardening_verified",
-    "second_peer_bridge_run_id": "36258897538"
+    "source_ref": "release/final-8bb4f938-20260926",
+    "stage": "IMMUTABLE_EPOCH_STAGED_PENDING_READ_ONLY_PEER_PROOF",
+    "release_epoch_id": "f432c9eef070f78de7a506dd0394005132a98c4ae73dfca6feec8b571d369c07",
+    "immutable_path": "federation/epochs/releases/8bb4f93855c3be15fd2cee707ff1424171eecdc9-f432c9eef070f78d.json"
+  },
+  "release_epoch": {
+    "id": "f432c9eef070f78de7a506dd0394005132a98c4ae73dfca6feec8b571d369c07",
+    "immutable_path": "federation/epochs/releases/8bb4f93855c3be15fd2cee707ff1424171eecdc9-f432c9eef070f78d.json",
+    "control_contract_sha": "910f53948ca67383cfa027db236bdc7a624cd17f",
+    "source_binding_mode": "external_epoch",
+    "peer_contract_source_sha": "51fac1413e2177c7c94207a4c24dccd7657a6d3b",
+    "new_deviation_requires_new_epoch": true,
+    "old_evidence_runs_are_never_mutated": true
   }
 }
