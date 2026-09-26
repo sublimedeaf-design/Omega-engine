@@ -215,6 +215,32 @@ jobs:
               row=json.loads((ev/name).read_text(encoding="utf-8"))
               if row.get("git_commit")!=source or row.get("omega_execution_id")!=xid:
                   raise SystemExit("OMEGA_RELEASE_STAGE_EVIDENCE_IDENTITY_MISMATCH:"+name)
+
+          t24=json.loads((ev/"latest-24h.json").read_text(encoding="utf-8"))
+          coverage=json.loads((ev/"coverage-gaps.json").read_text(encoding="utf-8"))
+          fresh_observed=sum(
+              int(row.get("observed_fixture_count") or 0)
+              for row in (coverage.get("coverage_matrix") or [])
+              if row.get("history_fresh") is True
+          )
+          model_count=int(t24.get("model_predicted_count") or 0)
+          independent_rate=t24.get("independent_model_coverage_rate")
+          if fresh_observed>0 and model_count<=0:
+              raise SystemExit(
+                  f"OMEGA_RELEASE_INDEPENDENT_MODEL_COVERAGE_MISSING:"
+                  f"fresh_observed={fresh_observed}:model_predicted_count={model_count}"
+              )
+          if model_count>0:
+              try:
+                  rate=float(independent_rate)
+              except (TypeError,ValueError):
+                  raise SystemExit("OMEGA_RELEASE_INDEPENDENT_MODEL_COVERAGE_RATE_INVALID")
+              if not (0.0 < rate <= 1.0):
+                  raise SystemExit(
+                      f"OMEGA_RELEASE_INDEPENDENT_MODEL_COVERAGE_RATE_INVALID:{independent_rate}"
+                  )
+          elif fresh_observed==0:
+              print("OMEGA_RELEASE_NO_BET_VALID_NO_FRESH_HISTORY_FIXTURES")
           PY
 
       - name: Stage immutable recovery evidence and Android versionCode
