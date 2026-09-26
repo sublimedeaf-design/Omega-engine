@@ -121,7 +121,12 @@ jobs:
               -f state=error \
               -f context="omega/signer/continuity" \
               -f description="BLOCKED: private Actions read/write permission unavailable" >/dev/null 2>&1 || true
-            exit 77
+            gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$sha" \
+              -f state=error \
+              -f context="omega/authority/private-actions" \
+              -f description="BLOCKED: scoped private Actions authority unavailable" >/dev/null 2>&1 || true
+            echo "OMEGA_SIGNER_AUTHORITY_BLOCKED_STATE sha=$sha phase=actions-read"
+            exit 0
           fi
           rm -f "$actions_err"
 
@@ -140,7 +145,12 @@ jobs:
               -f state=error \
               -f context="omega/signer/continuity" \
               -f description="BLOCKED: private Actions dispatch permission unavailable" >/dev/null 2>&1 || true
-            exit 77
+            gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$sha" \
+              -f state=error \
+              -f context="omega/authority/private-actions" \
+              -f description="BLOCKED: scoped private Actions authority unavailable" >/dev/null 2>&1 || true
+            echo "OMEGA_SIGNER_AUTHORITY_BLOCKED_STATE sha=$sha phase=actions-dispatch"
+            exit 0
           fi
           rm -f "$dispatch_err"
           echo "OMEGA_SIGNER_ARM_DISPATCHED sha=$sha workflow=$SIGNER_WORKFLOW"
