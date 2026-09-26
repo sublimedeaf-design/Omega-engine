@@ -53,6 +53,22 @@ jobs:
           rm -f "$tmp"
           echo OMEGA_ONE_CLICK_RUNNER_AUTHORITY_PASS
 
+      - name: Stage exact unsigned release payload on bootstrap host
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          set +x
+          dir="$RUNNER_TEMP/omega-one-click-unsigned"
+          rm -rf "$dir"
+          mkdir -p "$dir"
+          gh run download 36265028971 \
+            -R "$CONTROL_REPOSITORY" \
+            -n "OMEGA-Unsigned-Release-$SOURCE_SHA" \
+            -D "$dir"
+          test -s "$dir/OMEGA-Engine-unsigned.apk"
+          [ "$(sha256sum "$dir/OMEGA-Engine-unsigned.apk" | awk '{print $1}')" = "a8bf00d166913433d6ae7802a32fe72027ff3669f2450817be41b20af74b0f65" ]
+          echo OMEGA_ONE_CLICK_UNSIGNED_HANDOFF_PASS
+
       - name: Start one-job private ephemeral runner
         shell: bash
         run: |
@@ -79,7 +95,8 @@ jobs:
           rm -f "$RUNNER_TEMP/omega-registration-token"
           (
             cd "$home"
-            env -u RUNNER_TRACKING_ID ./run.sh >"$RUNNER_TEMP/omega-ephemeral-runner.log" 2>&1
+            OMEGA_ONE_CLICK_UNSIGNED_DIR="$RUNNER_TEMP/omega-one-click-unsigned" \
+              env -u RUNNER_TRACKING_ID ./run.sh >"$RUNNER_TEMP/omega-ephemeral-runner.log" 2>&1
           ) &
           echo $! > "$RUNNER_TEMP/omega-ephemeral-runner.pid"
           sleep 5
@@ -155,6 +172,7 @@ jobs:
           )
           for _ in $(seq 1 180); do
             payload="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/$SOURCE_SHA/status?per_page=100")"
+            set +e
             result="$(STATUS_PAYLOAD="$payload" REQUIRED="$(IFS=,; echo "${required[*]}")" python3 <<'PY'
           import json,os
           p=json.loads(os.environ["STATUS_PAYLOAD"]); req=os.environ["REQUIRED"].split(","); latest={}
@@ -168,6 +186,7 @@ jobs:
           PY
             )"
             rc=$?
+            set -e
             echo "OMEGA_ONE_CLICK_LIVE_STATES $result"
             if [ "$rc" -eq 10 ]; then
               echo "OMEGA_ONE_CLICK_LIVE_PASS source=$SOURCE_SHA"
