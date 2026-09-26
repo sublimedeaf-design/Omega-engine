@@ -2,6 +2,11 @@ name: OMEGA Resilience Certifier
 
 on:
   workflow_dispatch:
+  workflow_run:
+    workflows:
+      - "OMEGA Hosted Recovery Failover"
+      - "OMEGA External Validator Dispatch"
+    types: [completed]
   schedule:
     - cron: "11,26,41,56 * * * *"
   push:
