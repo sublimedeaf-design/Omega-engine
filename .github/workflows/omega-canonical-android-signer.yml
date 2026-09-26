@@ -93,12 +93,60 @@ jobs:
               target=str((latest.get(ctx) or {}).get("target_url") or "")
               if not target.endswith("/actions/runs/"+os.environ["STAGER_RUN_ID"]):
                   raise SystemExit("OMEGA_SIGNER_HANDOFF_RUN_MISMATCH:"+ctx)
+          final_row=latest.get("omega/exact-final-validation") or {}
+          final_state=str(final_row.get("state") or "")
+          final_target=str(final_row.get("target_url") or "")
+          if final_state!="success":
+              print("WAIT" if final_state in ("","pending") else "BLOCK")
+              raise SystemExit(0)
+          if not final_target.startswith("https://github.com/sublimedeaf-design/Omega-engine/actions/runs/"):
+              raise SystemExit("OMEGA_SIGNER_FINAL_VALIDATION_PROVENANCE_INVALID")
           signed=(latest.get("omega/android-release-signed") or {}).get("state")=="success"
-          print("false" if signed else "true")
+          print("ALREADY" if signed else "SIGN")
           PY
-          need="$(cat "$RUNNER_TEMP/signer-gate.txt")"
-          echo "need_sign=$need" >> "$GITHUB_OUTPUT"
-          if [ "$need" = false ]; then echo "OMEGA_CANONICAL_SIGNER_ALREADY_PASS sha=$FINAL_SHA"; fi
+          decision="$(cat "$RUNNER_TEMP/signer-gate.txt")"
+          case "$decision" in
+            SIGN)
+              echo "need_sign=true" >> "$GITHUB_OUTPUT"
+              echo "validation_state=success" >> "$GITHUB_OUTPUT"
+              ;;
+            ALREADY)
+              echo "need_sign=false" >> "$GITHUB_OUTPUT"
+              echo "validation_state=success" >> "$GITHUB_OUTPUT"
+              echo "OMEGA_CANONICAL_SIGNER_ALREADY_PASS sha=$FINAL_SHA"
+              ;;
+            WAIT)
+              echo "need_sign=false" >> "$GITHUB_OUTPUT"
+              echo "validation_state=pending" >> "$GITHUB_OUTPUT"
+              echo "OMEGA_CANONICAL_SIGNER_WAIT_EXACT_FINAL_VALIDATION sha=$FINAL_SHA"
+              ;;
+            BLOCK)
+              echo "need_sign=false" >> "$GITHUB_OUTPUT"
+              echo "validation_state=failure" >> "$GITHUB_OUTPUT"
+              echo "OMEGA_CANONICAL_SIGNER_BLOCKED_EXACT_FINAL_VALIDATION sha=$FINAL_SHA"
+              ;;
+            *)
+              echo "OMEGA_CANONICAL_SIGNER_DECISION_INVALID:$decision" >&2
+              exit 65
+              ;;
+          esac
+
+      - name: Publish signing wait state for exact final validation
+        if: steps.handoff.outputs.ready == 'true' && steps.gate.outputs.validation_state != 'success'
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          FINAL_SHA: ${{ steps.handoff.outputs.final_sha }}
+          VALIDATION_STATE: ${{ steps.gate.outputs.validation_state }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          state=pending
+          [ "$VALIDATION_STATE" = failure ] && state=error
+          gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$FINAL_SHA" \
+            -f state="$state" \
+            -f context="omega/android-release-signing" \
+            -f description="waiting for exact final-SHA hosted validation ($VALIDATION_STATE)" \
+            -f target_url="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" >/dev/null
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         if: steps.gate.outputs.need_sign == 'true'

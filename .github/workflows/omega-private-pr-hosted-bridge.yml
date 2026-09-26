@@ -312,3 +312,35 @@ jobs:
           gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$OMEGA_SHA" \
             -f state="$state" -f context="omega/hosted-android" \
             -f description="public hosted exact-PR Android: $RESULT" >/dev/null
+
+
+  exact_final:
+    needs: [discover, governance, ci, android]
+    if: ${{ always() && needs.discover.outputs.found == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Publish terminal exact-final-SHA validation
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          OMEGA_SHA: ${{ needs.discover.outputs.sha }}
+          GOVERNANCE_RESULT: ${{ needs.governance.result }}
+          CI_RESULT: ${{ needs.ci.result }}
+          ANDROID_REQUIRED: ${{ needs.discover.outputs.android }}
+          ANDROID_RESULT: ${{ needs.android.result }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [[ "$OMEGA_SHA" =~ ^[0-9a-f]{40}$ ]]
+          state=failure
+          if [ "$GOVERNANCE_RESULT" = success ] && [ "$CI_RESULT" = success ]; then
+            if [ "$ANDROID_REQUIRED" != true ] || [ "$ANDROID_RESULT" = success ]; then
+              state=success
+            fi
+          fi
+          gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$OMEGA_SHA" \
+            -f state="$state" \
+            -f context="omega/exact-final-validation" \
+            -f description="exact final-SHA hosted validation: $state" \
+            -f target_url="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" >/dev/null
+          [ "$state" = success ] || exit 1
