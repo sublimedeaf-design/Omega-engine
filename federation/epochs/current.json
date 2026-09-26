@@ -3,6 +3,10 @@
   "federation_version": 3,
   "authority_repository": "sublimedeaf-design/Omega-engine",
   "state": "NOT_EXECUTED",
+  "blockers": [
+    "primary exact-SHA end-to-end certification pending",
+    "peer PRs not merged to main"
+  ],
   "primary": {
     "repository": "sublimedeaf-design/Omega-engines",
     "source_sha": "aee643a6506f30ed1e43d4e79c92e45a79b09c4b",
@@ -12,31 +16,35 @@
   "peers": [
     {
       "repository": "sublimedeaf-design/Omega-recovery",
-      "sha": "1f7922f956afb64ac871df66f89c2aa35709b0db",
+      "sha": "35496f359bc48b0027366a512dbf6d55a0b5d10c",
       "role": "control_recovery",
       "state": "NOT_EXECUTED",
-      "reason": "v3 exact peer SHA bound; public bridge evidence pending"
+      "contract_state": "NOT_EXECUTED",
+      "reason": "exact v3 peer SHA bound; external bridge validation pending"
     },
     {
       "repository": "sublimedeaf-design/Omega-agents",
-      "sha": "6dfdc01b8f9b56f8be8271fc765d5718dc7ee9a7",
+      "sha": "99c648d837b111ffbb4e1a5111cb9f5d74a6bd2c",
       "role": "agent_execution",
       "state": "NOT_EXECUTED",
-      "reason": "v3 exact peer SHA bound; public bridge evidence pending"
+      "contract_state": "NOT_EXECUTED",
+      "reason": "exact v3 peer SHA bound; external bridge validation pending"
     },
     {
       "repository": "sublimedeaf-design/Omega-validation",
-      "sha": "bf376e9493f022b00240cf799528fef9f426d959",
+      "sha": "d5dcc3e6f0ede9ce0a5f9d1ab9836db24400cd7d",
       "role": "independent_validation",
       "state": "NOT_EXECUTED",
-      "reason": "v3 exact peer SHA bound; public bridge evidence pending"
+      "contract_state": "NOT_EXECUTED",
+      "reason": "exact v3 peer SHA bound; external bridge validation pending"
     },
     {
       "repository": "sublimedeaf-design/Omega-release",
-      "sha": "4d8f9c027fdc35785bd2dc6a51f94880dea722a0",
+      "sha": "16311a0b4a774be28fb1431f604d387956376a31",
       "role": "release_promotion",
       "state": "NOT_EXECUTED",
-      "reason": "v3 exact peer SHA bound; public bridge evidence pending"
+      "contract_state": "NOT_EXECUTED",
+      "reason": "exact v3 peer SHA bound; external bridge validation pending"
     }
   ],
   "hf": {
