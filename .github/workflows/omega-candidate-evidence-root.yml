@@ -1,6 +1,9 @@
 name: OMEGA Candidate Evidence Root
 
 on:
+  push:
+    paths:
+      - "bootstrap/omega/evidence-root-trigger.txt"
   workflow_run:
     workflows: ["OMEGA Hosted Recovery Failover"]
     types: [completed]
@@ -25,7 +28,7 @@ env:
 
 jobs:
   evidence:
-    if: ${{ (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event != 'schedule') || github.event_name == 'workflow_dispatch' }}
+    if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event != 'schedule') || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -34,6 +37,23 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
+
+      - name: Resolve repository-native evidence-root replay trigger
+        if: ${{ github.event_name == 'push' }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          read -r marker run_id candidate < bootstrap/omega/evidence-root-trigger.txt
+          [ "$marker" = reconcile-recovery ] || { echo "OMEGA_EVIDENCE_ROOT_REPLAY_TRIGGER_INVALID" >&2; exit 64; }
+          [[ "$run_id" =~ ^[0-9]+$ ]] || { echo "OMEGA_EVIDENCE_ROOT_RECOVERY_RUN_ID_INVALID" >&2; exit 64; }
+          [[ "$candidate" =~ ^[0-9a-f]{40}$ ]] || { echo "OMEGA_EVIDENCE_ROOT_REPLAY_SHA_INVALID" >&2; exit 64; }
+          read -r recovery_marker recovery_candidate _ < bootstrap/omega/recovery-trigger.txt
+          [ "$recovery_marker" = recover-exact ] && [ "$candidate" = "$recovery_candidate" ] || {
+            echo "OMEGA_EVIDENCE_ROOT_REPLAY_CANDIDATE_MISMATCH:$candidate!=$recovery_candidate" >&2
+            exit 65
+          }
+          echo "RECOVERY_RUN_ID=$run_id" >> "$GITHUB_ENV"
+          echo "OMEGA_EVIDENCE_ROOT_REPLAY_RESOLVED run=$run_id candidate=$candidate"
 
       - name: Pin exact recovered candidate and require current recovery attestation
         id: pin
