@@ -13,6 +13,7 @@ permissions:
 concurrency:
   group: omega-android-runtime-coldstart
   cancel-in-progress: false
+  queue: max
 
 env:
   PRIVATE_REPOSITORY: sublimedeaf-design/Omega-engines
