@@ -1,10 +1,12 @@
 name: OMEGA Android Runtime Cold Start
 
 on:
-  workflow_run:
-    workflows: ["OMEGA Canonical Android Signer"]
-    types: [completed]
   workflow_dispatch:
+    inputs:
+      signer_run_id:
+        description: "Exact successful OMEGA Canonical Android Signer run id"
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -21,7 +23,6 @@ env:
 
 jobs:
   coldstart:
-    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -33,15 +34,11 @@ jobs:
         id: artifact
         env:
           GH_TOKEN: ${{ github.token }}
-          SIGNER_RUN_ID: ${{ github.event.workflow_run.id }}
+          SIGNER_RUN_ID: ${{ inputs.signer_run_id }}
         shell: bash
         run: |
           set -Eeuo pipefail
-          if [ "${{ github.event_name }}" != workflow_run ]; then
-            echo "ready=false" >> "$GITHUB_OUTPUT"
-            echo "OMEGA_ANDROID_COLDSTART_MANUAL_REQUIRES_SIGNER_RUN"
-            exit 0
-          fi
+          [[ "$SIGNER_RUN_ID" =~ ^[0-9]+$ ]] || { echo "OMEGA_ANDROID_COLDSTART_SIGNER_RUN_INVALID:$SIGNER_RUN_ID" >&2; exit 64; }
           json="$(gh api "/repos/$CONTROL_REPOSITORY/actions/runs/$SIGNER_RUN_ID/artifacts?per_page=100")"
           row="$(python3 - "$json" <<'PY'
           import json,re,sys
