@@ -80,6 +80,24 @@ jobs:
           echo "final_sha=$final" >> "$GITHUB_OUTPUT"
           echo "artifact_name=$artifact" >> "$GITHUB_OUTPUT"
 
+      - name: Require unsigned handoff to equal current promotion authority
+        if: steps.handoff.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          FINAL_SHA: ${{ steps.handoff.outputs.final_sha }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          read -r marker candidate source_ref _ < bootstrap/omega/pr-validation-trigger.txt || true
+          [ "${marker:-}" = validate-exact-pr ] || { echo "OMEGA_SIGNER_PROMOTION_TRIGGER_INVALID" >&2; exit 64; }
+          [[ "${candidate:-}" =~ ^[0-9a-f]{40}$ ]] || { echo "OMEGA_SIGNER_PROMOTION_SHA_INVALID" >&2; exit 64; }
+          [[ "${source_ref:-}" =~ ^release/[A-Za-z0-9._/-]+$ ]] || { echo "OMEGA_SIGNER_PROMOTION_REF_INVALID:${source_ref:-missing}" >&2; exit 64; }
+          case "$source_ref" in *..*|/*|-*) echo "OMEGA_SIGNER_PROMOTION_REF_UNSAFE:$source_ref" >&2; exit 64 ;; esac
+          [ "$FINAL_SHA" = "$candidate" ] || { echo "OMEGA_SIGNER_STALE_HANDOFF:$FINAL_SHA!=$candidate" >&2; exit 75; }
+          tip="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/$source_ref" --jq .sha)"
+          [ "$tip" = "$FINAL_SHA" ] || { echo "OMEGA_SIGNER_PROMOTION_REF_MOVED:$tip!=$FINAL_SHA" >&2; exit 75; }
+          echo "OMEGA_SIGNER_CURRENT_PROMOTION_PASS sha=$FINAL_SHA ref=$source_ref"
+
       - name: Verify private exact-SHA handoff status
         id: gate
         if: steps.handoff.outputs.ready == 'true'
