@@ -76,6 +76,7 @@
     "source_ref": "release/final-51fac141-20260926",
     "stage": "CERTIFIED_PASS_PENDING_SECOND_PROOF",
     "retry_reason": "repo_scoped_certifier_write_authority",
-    "first_peer_bridge_run_id": "36250855269"
+    "first_peer_bridge_run_id": "36250855269",
+    "second_proof_dispatch_reason": "explicit_workflow_dispatch_hardening_verified"
   }
 }
