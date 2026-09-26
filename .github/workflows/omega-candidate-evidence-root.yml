@@ -10,6 +10,9 @@ on:
         description: "Completed successful OMEGA Hosted Recovery Failover run to reconcile"
         required: true
         type: string
+  push:
+    paths:
+      - "bootstrap/omega/evidence-root-reconcile.txt"
 
 permissions:
   contents: read
@@ -25,7 +28,7 @@ env:
 
 jobs:
   evidence:
-    if: ${{ (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event != 'schedule') || github.event_name == 'workflow_dispatch' }}
+    if: ${{ (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event != 'schedule') || github.event_name == 'workflow_dispatch' || github.event_name == 'push' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -34,6 +37,24 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
+
+      - name: Resolve reconciliation recovery run
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          run_id="${RECOVERY_RUN_ID:-}"
+          if [ "$GITHUB_EVENT_NAME" = push ]; then
+            read -r marker run_id reconcile_sha _ < bootstrap/omega/evidence-root-reconcile.txt || true
+            [ "${marker:-}" = reconcile-recovery ] || { echo "OMEGA_EVIDENCE_ROOT_RECONCILE_TRIGGER_INVALID" >&2; exit 64; }
+            [[ "${run_id:-}" =~ ^[0-9]+$ ]] || { echo "OMEGA_EVIDENCE_ROOT_RECONCILE_RUN_ID_INVALID:${run_id:-}" >&2; exit 64; }
+            [[ "${reconcile_sha:-}" =~ ^[0-9a-f]{40}$ ]] || { echo "OMEGA_EVIDENCE_ROOT_RECONCILE_SHA_INVALID:${reconcile_sha:-}" >&2; exit 64; }
+            read -r recovery_marker recovery_sha _ < bootstrap/omega/recovery-trigger.txt || true
+            [ "${recovery_marker:-}" = recover-exact ] || { echo "OMEGA_EVIDENCE_ROOT_RECONCILE_RECOVERY_TRIGGER_INVALID" >&2; exit 64; }
+            [ "$reconcile_sha" = "$recovery_sha" ] || { echo "OMEGA_EVIDENCE_ROOT_RECONCILE_SHA_MISMATCH:$reconcile_sha!=$recovery_sha" >&2; exit 65; }
+          fi
+          [[ "${run_id:-}" =~ ^[0-9]+$ ]] || { echo "OMEGA_EVIDENCE_ROOT_RECOVERY_RUN_ID_INVALID:${run_id:-}" >&2; exit 64; }
+          echo "RECOVERY_RUN_ID=$run_id" >> "$GITHUB_ENV"
+          echo "OMEGA_EVIDENCE_ROOT_RECONCILE_SELECTED run=$run_id event=$GITHUB_EVENT_NAME"
 
       - name: Pin exact recovered candidate and require current recovery attestation
         id: pin
