@@ -12,6 +12,7 @@ permissions:
 concurrency:
   group: omega-release-federation-rollover
   cancel-in-progress: false
+  queue: max
 
 jobs:
   rollover:
