@@ -45,8 +45,9 @@ jobs:
           [ "$ref_tip" = "$candidate" ] || { echo "OMEGA_EVIDENCE_ROOT_TRIGGER_STALE:$candidate!=$ref_tip" >&2; exit 65; }
 
           statuses="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/$candidate/status?per_page=100")"
+          set +e
           STATUS_PAYLOAD="$statuses" RECOVERY_RUN_ID="$RECOVERY_RUN_ID" python3 <<'PY'
-          import json,os,sys
+          import json,os
           p=json.loads(os.environ["STATUS_PAYLOAD"])
           run=str(os.environ["RECOVERY_RUN_ID"])
           latest={}
@@ -66,17 +67,29 @@ jobs:
           ]
           bad=[x for x in required if (latest.get(x) or {}).get("state")!="success"]
           if bad:
-              raise SystemExit("OMEGA_EVIDENCE_ROOT_REQUIRED_STATUS_NOT_GREEN:"+",".join(bad))
+              print("OMEGA_EVIDENCE_ROOT_WAIT_STATUS:"+",".join(bad))
+              raise SystemExit(75)
           for ctx in ("omega/hosted-recovery","omega/recovery-attestation"):
               target=str((latest.get(ctx) or {}).get("target_url") or "")
               if not target.endswith("/actions/runs/"+run):
-                  raise SystemExit(f"OMEGA_EVIDENCE_ROOT_RECOVERY_RUN_MISMATCH:{ctx}:{target}")
+                  print(f"OMEGA_EVIDENCE_ROOT_WAIT_RUN_BINDING:{ctx}:{target}")
+                  raise SystemExit(75)
           PY
+          rc=$?
+          set -e
           echo "sha=$candidate" >> "$GITHUB_OUTPUT"
           echo "source_ref=$source_ref" >> "$GITHUB_OUTPUT"
+          if [ "$rc" -eq 75 ]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "OMEGA_EVIDENCE_ROOT_NOT_READY sha=$candidate recovery_run=$RECOVERY_RUN_ID"
+            exit 0
+          fi
+          [ "$rc" -eq 0 ] || exit "$rc"
+          echo "ready=true" >> "$GITHUB_OUTPUT"
           echo "OMEGA_EVIDENCE_ROOT_PIN sha=$candidate recovery_run=$RECOVERY_RUN_ID"
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        if: ${{ steps.pin.outputs.ready == 'true' }}
         with:
           repository: ${{ env.PRIVATE_REPOSITORY }}
           ref: ${{ steps.pin.outputs.sha }}
@@ -86,10 +99,12 @@ jobs:
           path: omega
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        if: ${{ steps.pin.outputs.ready == 'true' }}
         with:
           python-version: "3.13"
 
       - name: Recreate supply-chain and SBOM evidence from exact candidate
+        if: ${{ steps.pin.outputs.ready == 'true' }}
         working-directory: omega
         shell: bash
         run: |
@@ -102,6 +117,7 @@ jobs:
           .venv/bin/python scripts/generate_omega_sbom.py --out reports/omega-sbom.spdx.json
 
       - name: Download exact recovery completion attestation
+        if: ${{ steps.pin.outputs.ready == 'true' }}
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: omega-recovery-attestation-${{ steps.pin.outputs.sha }}-${{ env.RECOVERY_RUN_ID }}
@@ -110,6 +126,7 @@ jobs:
           run-id: ${{ env.RECOVERY_RUN_ID }}
 
       - name: Build candidate SBOM/provenance root
+        if: ${{ steps.pin.outputs.ready == 'true' }}
         id: root
         working-directory: omega
         env:
@@ -230,6 +247,7 @@ jobs:
           PY
 
       - name: Upload candidate evidence root bundle
+        if: ${{ steps.pin.outputs.ready == 'true' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: omega-candidate-evidence-root-${{ steps.pin.outputs.sha }}
@@ -244,7 +262,7 @@ jobs:
           if-no-files-found: error
 
       - name: Publish exact-SHA candidate evidence-root status
-        if: ${{ always() }}
+        if: ${{ always() && steps.pin.outputs.ready == 'true' }}
         env:
           GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
           SOURCE_SHA: ${{ steps.pin.outputs.sha }}
