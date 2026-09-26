@@ -4,47 +4,47 @@
   "authority_repository": "sublimedeaf-design/Omega-engine",
   "state": "NOT_EXECUTED",
   "blockers": [
-    "primary exact-SHA end-to-end certification pending",
-    "merged peer main contract revalidation pending"
+    "primary exact-SHA hosted certification pending",
+    "new optimization-contract peer SHAs require exact bridge validation"
   ],
   "primary": {
     "repository": "sublimedeaf-design/Omega-engines",
-    "source_sha": "aee643a6506f30ed1e43d4e79c92e45a79b09c4b",
+    "source_sha": "7fc496473a525b80c02c73c99e0574556df6835f",
     "pull_request": 273,
     "certification_state": "NOT_EXECUTED"
   },
   "peers": [
     {
       "repository": "sublimedeaf-design/Omega-recovery",
-      "sha": "c421dee8d3169ed24a665d2184ec3ec8fae6c4ad",
+      "sha": "fada88f3b1cfadf67725f7334e41224bb750030f",
       "role": "control_recovery",
       "state": "NOT_EXECUTED",
       "contract_state": "NOT_EXECUTED",
-      "reason": "merged main exact SHA bound; external bridge validation pending"
+      "reason": "integral optimization contract committed; exact bridge validation pending"
     },
     {
       "repository": "sublimedeaf-design/Omega-agents",
-      "sha": "3bf3b297aca0954726cab1a5511db8580d978f9d",
+      "sha": "3673f265fed480da349f46807dbbc97ecc3fc408",
       "role": "agent_execution",
       "state": "NOT_EXECUTED",
       "contract_state": "NOT_EXECUTED",
-      "reason": "merged main exact SHA bound; external bridge validation pending"
+      "reason": "integral optimization contract committed; exact bridge validation pending"
     },
     {
       "repository": "sublimedeaf-design/Omega-validation",
-      "sha": "6ea5732578997432a02adf406204aff469769545",
+      "sha": "9c34f03c9320dfc3fcd8ade5aa0fbc33ad11a9d1",
       "role": "independent_validation",
       "state": "NOT_EXECUTED",
       "contract_state": "NOT_EXECUTED",
-      "reason": "merged main exact SHA bound; external bridge validation pending"
+      "reason": "integral optimization contract committed; exact bridge validation pending"
     },
     {
       "repository": "sublimedeaf-design/Omega-release",
-      "sha": "96902d851723f8a8af05113095604338347a8587",
+      "sha": "92baa37d2a61964ded840fc968ec8ec55b6db70d",
       "role": "release_promotion",
       "state": "NOT_EXECUTED",
       "contract_state": "NOT_EXECUTED",
-      "reason": "merged main exact SHA bound; external bridge validation pending"
+      "reason": "integral optimization contract committed; exact bridge validation pending"
     }
   ],
   "hf": {
@@ -71,6 +71,7 @@
       "apk"
     ],
     "pass_requires_all_peers_pass": true,
-    "skipped_or_missing_is_never_pass": true
+    "skipped_or_missing_is_never_pass": true,
+    "integral_optimization_policy": "omega-integral-optimization-v1"
   }
 }
