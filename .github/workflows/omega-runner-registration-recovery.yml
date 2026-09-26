@@ -1,4 +1,5 @@
 name: OMEGA Runner Registration Capability Probe
+# Probe refresh 2026-09-26
 
 on:
   workflow_dispatch:
