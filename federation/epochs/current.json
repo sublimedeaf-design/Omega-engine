@@ -20,7 +20,7 @@
       "role": "control_recovery",
       "state": "NOT_EXECUTED",
       "contract_state": "NOT_EXECUTED",
-      "reason": "all source carriers and six agent slots synchronized; exact bridge validation pending"
+      "reason": "all source identity carriers synchronized; exact bridge validation pending"
     },
     {
       "repository": "sublimedeaf-design/Omega-agents",
@@ -28,7 +28,7 @@
       "role": "agent_execution",
       "state": "NOT_EXECUTED",
       "contract_state": "NOT_EXECUTED",
-      "reason": "all source carriers and six agent slots synchronized; exact bridge validation pending"
+      "reason": "all source identity carriers synchronized; exact bridge validation pending"
     },
     {
       "repository": "sublimedeaf-design/Omega-validation",
@@ -36,7 +36,7 @@
       "role": "independent_validation",
       "state": "NOT_EXECUTED",
       "contract_state": "NOT_EXECUTED",
-      "reason": "all source carriers and six agent slots synchronized; exact bridge validation pending"
+      "reason": "all source identity carriers synchronized; exact bridge validation pending"
     },
     {
       "repository": "sublimedeaf-design/Omega-release",
@@ -44,7 +44,7 @@
       "role": "release_promotion",
       "state": "NOT_EXECUTED",
       "contract_state": "NOT_EXECUTED",
-      "reason": "all source carriers and six agent slots synchronized; exact bridge validation pending"
+      "reason": "all source identity carriers synchronized; exact bridge validation pending"
     }
   ],
   "hf": {
