@@ -1,0 +1,112 @@
+name: OMEGA Federation v3 Peer Bridge
+on:
+  push:
+    branches: ['federation/v3-control-plane-20260926', main]
+    paths:
+      - 'federation/epochs/current.json'
+      - '.github/workflows/omega-federation-v3-peer-bridge.yml'
+      - 'scripts/verify_federation_epoch.py'
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - id: matrix
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          matrix="$(jq -c '{include:[.peers[] | {repo:.repository,sha:.sha,role:.role}]}' federation/epochs/current.json)"
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+  peer:
+    needs: prepare
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+      PEER_REPO: ${{ matrix.repo }}
+      PEER_SHA: ${{ matrix.sha }}
+      PEER_ROLE: ${{ matrix.role }}
+      STATUS_CONTEXT: omega/federation-v3-peer-contract
+    steps:
+      - name: Checkout control plane
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: control
+          persist-credentials: false
+      - name: Publish pending
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          gh api --method POST "/repos/$PEER_REPO/statuses/$PEER_SHA"             -f state=pending             -f context="$STATUS_CONTEXT"             -f description="OMEGA federation v3 external validation running"
+      - name: Checkout exact private peer
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: ${{ matrix.repo }}
+          ref: ${{ matrix.sha }}
+          token: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          path: peer
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.13'
+      - name: Verify exact v3 identity and local contract
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(git -C peer rev-parse HEAD)" = "$PEER_SHA"
+          python peer/scripts/validate_integration_contract.py
+          python peer/scripts/validate_mesh.py
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          epoch=json.loads(Path("control/federation/epochs/current.json").read_text())
+          contract=json.loads(Path("peer/OMEGA_INTEGRATION_CONTRACT.json").read_text())
+          repo=os.environ["PEER_REPO"]; sha=os.environ["PEER_SHA"]; role=os.environ["PEER_ROLE"]
+          row=next((x for x in epoch["peers"] if x["repository"]==repo),None)
+          assert row and row["sha"]==sha and row["role"]==role
+          assert contract["repository"]==repo and contract["role"]==role
+          assert contract["source"]["sha"]==epoch["primary"]["source_sha"]
+          assert contract["authority"]=={"repository":"sublimedeaf-design/Omega-engine","mode":"external_epoch_lock"}
+          for model_role in ("worker","qa"):
+              a=epoch["hf"][model_role]; b=contract["huggingface"][model_role]
+              assert a["repo_id"]==b["repo_id"]
+              assert a["revision"]==b["revision"]
+              assert a["sha256"]==b["sha256"]
+          assert contract["certification_state"]=="NOT_EXECUTED"
+          PY
+      - name: Publish exact peer result
+        if: always()
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          if [ "${{ job.status }}" = "success" ]; then
+            state=success
+            desc="OMEGA federation v3 peer contract PASS"
+          else
+            state=failure
+            desc="OMEGA federation v3 peer contract FAIL"
+          fi
+          gh api --method POST "/repos/$PEER_REPO/statuses/$PEER_SHA"             -f state="$state"             -f context="$STATUS_CONTEXT"             -f description="$desc"
+  certify:
+    needs: [prepare, peer]
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Verify epoch structure
+        run: python scripts/verify_federation_epoch.py federation/epochs/current.json
+      - name: Require every peer job green
+        shell: bash
+        run: |
+          test "${{ needs.peer.result }}" = "success"
