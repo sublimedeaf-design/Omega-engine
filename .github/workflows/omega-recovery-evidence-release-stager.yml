@@ -1,9 +1,12 @@
 name: OMEGA Recovery Evidence Release Stager
 
 on:
-  workflow_run:
-    workflows: ["OMEGA Candidate Evidence Root"]
-    types: [completed]
+  workflow_dispatch:
+    inputs:
+      evidence_run_id:
+        description: "Exact successful OMEGA Candidate Evidence Root run id"
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -19,7 +22,6 @@ env:
 
 jobs:
   stage:
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -28,7 +30,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PRIVATE_GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
-          EVIDENCE_RUN_ID: ${{ github.event.workflow_run.id }}
+          EVIDENCE_RUN_ID: ${{ inputs.evidence_run_id }}
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -75,14 +77,14 @@ jobs:
           name: ${{ steps.pin.outputs.artifact_name }}
           path: ${{ runner.temp }}/candidate-root
           github-token: ${{ github.token }}
-          run-id: ${{ github.event.workflow_run.id }}
+          run-id: ${{ inputs.evidence_run_id }}
 
       - name: Verify evidence root and resolve recovery run
         if: steps.pin.outputs.skip != 'true'
         id: root
         env:
           SOURCE_SHA: ${{ steps.pin.outputs.source_sha }}
-          EVIDENCE_RUN_ID: ${{ github.event.workflow_run.id }}
+          EVIDENCE_RUN_ID: ${{ inputs.evidence_run_id }}
           GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
         shell: bash
         run: |
@@ -261,7 +263,7 @@ jobs:
         env:
           SOURCE_SHA: ${{ steps.pin.outputs.source_sha }}
           OMEGA_EXECUTION_ID: ${{ steps.root.outputs.omega_execution_id }}
-          EVIDENCE_RUN_ID: ${{ github.event.workflow_run.id }}
+          EVIDENCE_RUN_ID: ${{ inputs.evidence_run_id }}
           RECOVERY_RUN_ID: ${{ steps.root.outputs.recovery_run_id }}
         shell: bash
         run: |
