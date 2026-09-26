@@ -1,0 +1,138 @@
+name: OMEGA Signer Identity Anchor
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "7 */6 * * *"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/omega-signer-identity-anchor.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: omega-signer-identity-anchor
+  cancel-in-progress: true
+
+env:
+  PRIVATE_REPOSITORY: sublimedeaf-design/Omega-engines
+  ANCHOR_RELEASE_TAG: omega-android-v3.5.4-live.10-code14
+  ANCHOR_SOURCE_SHA: 6f7511f477c0a96fb28206061c30a6c4a40414f0
+  ANCHOR_APK_SHA256: 32da40b75fe01a75e3b66001f084f6bf737c3d5e9ffb325829318319b17896f3
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Resolve exact canonical release identity
+        id: candidate
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          set +x
+          read -r marker candidate source_ref _ < bootstrap/omega/pr-validation-trigger.txt || true
+          [ "${marker:-}" = validate-exact-pr ] || { echo OMEGA_SIGNER_IDENTITY_TRIGGER_INVALID >&2; exit 64; }
+          [[ "${candidate:-}" =~ ^[0-9a-f]{40}$ ]] || { echo OMEGA_SIGNER_IDENTITY_SHA_INVALID >&2; exit 64; }
+          [[ "${source_ref:-}" =~ ^release/[A-Za-z0-9._/-]+$ ]] || { echo OMEGA_SIGNER_IDENTITY_REF_INVALID >&2; exit 64; }
+          tip="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/$source_ref" --jq .sha)"
+          [ "$tip" = "$candidate" ] || { echo "OMEGA_SIGNER_IDENTITY_PROMOTION_REF_MOVED:$tip!=$candidate" >&2; exit 75; }
+
+          expected="$(gh api "/repos/$PRIVATE_REPOSITORY/contents/android/signing-cert.sha256?ref=$candidate" --jq '.content' |
+            tr -d '\n' | base64 -d | tr -d '[:space:]' | tr -d ':' | tr 'A-F' 'a-f')"
+          [[ "$expected" =~ ^[0-9a-f]{64}$ ]] || { echo OMEGA_SIGNER_IDENTITY_EXPECTED_FINGERPRINT_INVALID >&2; exit 65; }
+
+          echo "sha=$candidate" >> "$GITHUB_OUTPUT"
+          echo "fingerprint=$expected" >> "$GITHUB_OUTPUT"
+          echo "OMEGA_SIGNER_IDENTITY_CANDIDATE sha=$candidate ref=$source_ref"
+
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Verify pinned historical signed APK identity
+        id: anchor
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          EXPECTED_FINGERPRINT: ${{ steps.candidate.outputs.fingerprint }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          set +x
+
+          release="$(gh api "/repos/$PRIVATE_REPOSITORY/releases/tags/$ANCHOR_RELEASE_TAG")"
+          target="$(jq -r '.target_commitish // ""' <<<"$release")"
+          [ "$target" = "$ANCHOR_SOURCE_SHA" ] || {
+            echo "OMEGA_SIGNER_ANCHOR_RELEASE_TARGET_MISMATCH:$target!=$ANCHOR_SOURCE_SHA" >&2
+            exit 66
+          }
+
+          resolved="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/$ANCHOR_RELEASE_TAG" --jq .sha)"
+          [ "$resolved" = "$ANCHOR_SOURCE_SHA" ] || {
+            echo "OMEGA_SIGNER_ANCHOR_TAG_MOVED:$resolved!=$ANCHOR_SOURCE_SHA" >&2
+            exit 67
+          }
+
+          asset_digest="$(jq -r '.assets[] | select(.name=="OMEGA-Engine.apk") | .digest // ""' <<<"$release")"
+          [ "$asset_digest" = "sha256:$ANCHOR_APK_SHA256" ] || {
+            echo "OMEGA_SIGNER_ANCHOR_METADATA_DIGEST_MISMATCH:$asset_digest" >&2
+            exit 68
+          }
+
+          dir="$RUNNER_TEMP/omega-signer-anchor"
+          rm -rf "$dir"
+          mkdir -p "$dir"
+          gh release download "$ANCHOR_RELEASE_TAG" -R "$PRIVATE_REPOSITORY" -p OMEGA-Engine.apk -D "$dir"
+          apk="$dir/OMEGA-Engine.apk"
+          test -s "$apk"
+          actual_sha="$(sha256sum "$apk" | awk '{print $1}')"
+          [ "$actual_sha" = "$ANCHOR_APK_SHA256" ] || {
+            echo "OMEGA_SIGNER_ANCHOR_APK_DIGEST_MISMATCH:$actual_sha!=$ANCHOR_APK_SHA256" >&2
+            exit 69
+          }
+
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "build-tools;36.0.0" >/dev/null
+          out="$("$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$apk")"
+          actual_fp="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' <<<"$out" |
+            head -1 | tr -d ':' | tr 'A-F' 'a-f')"
+          [ "$actual_fp" = "$EXPECTED_FINGERPRINT" ] || {
+            echo "OMEGA_SIGNER_ANCHOR_FINGERPRINT_MISMATCH:$actual_fp!=$EXPECTED_FINGERPRINT" >&2
+            exit 70
+          }
+
+          echo "fingerprint=$actual_fp" >> "$GITHUB_OUTPUT"
+          echo "OMEGA_SIGNER_IDENTITY_ANCHOR_PASS source=$ANCHOR_SOURCE_SHA apk_sha256=$actual_sha fingerprint=$actual_fp"
+
+      - name: Publish exact-SHA identity continuity
+        if: always() && steps.candidate.outputs.sha != ''
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          CANDIDATE: ${{ steps.candidate.outputs.sha }}
+          ANCHOR_OUTCOME: ${{ steps.anchor.outcome }}
+          FINGERPRINT: ${{ steps.candidate.outputs.fingerprint }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          state=error
+          desc="signer identity anchor verification failed"
+          if [ "$ANCHOR_OUTCOME" = success ]; then
+            state=success
+            desc="published signed APK matches canonical fingerprint ${FINGERPRINT:0:12}"
+          fi
+          for ctx in omega/signer/identity-continuity omega/signer/continuity; do
+            gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$CANDIDATE" \
+              -f state="$state" \
+              -f context="$ctx" \
+              -f description="$desc" \
+              -f target_url="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" >/dev/null
+          done
+          [ "$state" = success ] || exit 1
