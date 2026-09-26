@@ -1,1 +1,1 @@
-validate-exact-pr e061d81ff067c5c1137b77d25f6a9ab61cb36cdd hardening/canonical-execution-envelope-20260926
+validate-exact-pr 7bf96eacf1875cc0940b91f01accb537061adc4d hardening/canonical-execution-envelope-20260926
