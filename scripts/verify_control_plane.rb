@@ -450,3 +450,18 @@ fail!("signer_slsa_dependency_verification_missing") unless signer.include?("OME
 
 puts "OMEGA_CONTROL_PLANE_INTEGRITY_GREEN workflows=#{files.length}"
 # support fastpath restack v2 exact-head trigger
+
+# The hosted federation fallback must consume the same certifying peer set as
+# the exact-source federation executor. Legacy witness repositories (Jarv) are
+# explicitly outside the certifying set and must never be reintroduced here.
+federation_fallback = File.read(WORKFLOWS.join("omega-hosted-federation-fallback.yml"), encoding: "UTF-8")
+fail!("federation_fallback_legacy_jarv_peer") if federation_fallback.include?('"Jarv"')
+fail!("federation_fallback_config_peer_derivation_missing") unless federation_fallback.scan('expected={str(item["repository"]) for item in cfg.get("peers",[]) if item.get("repository")}').length == 3
+fail!("federation_fallback_peer_config_guard_missing") unless federation_fallback.scan("OMEGA_HOSTED_FEDERATION_PEER_CONFIG_INVALID").length == 3
+
+# Hosted federation fallback must bind the executor to the exact checked-out
+# private source SHA. repository-mesh schema v2 intentionally carries no
+# validated_federation_source_pin; external epochs are the source authority.
+fail!("federation_fallback_legacy_mesh_source_pin") if federation_fallback.include?('validated_federation_source_pin')
+fail!("federation_fallback_exact_source_binding_missing") unless federation_fallback.include?('source_pin="$SOURCE_SHA"') && federation_fallback.include?('report.get("source_pin")!=source')
+fail!("federation_fallback_verifier_config_reload_missing") unless federation_fallback.scan('cfg=json.loads').length >= 3

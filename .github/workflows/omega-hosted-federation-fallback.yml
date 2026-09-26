@@ -109,7 +109,9 @@ jobs:
                       rows[repo]=r.status
               except urllib.error.HTTPError as e:
                   rows[repo]=e.code
-          expected={"Omega-release","Omega-validation","Omega-agents","Omega-recovery","Jarv"}
+          expected={str(item["repository"]) for item in cfg.get("peers",[]) if item.get("repository")}
+          if not expected or len(expected)!=len(cfg.get("peers",[])):
+              raise SystemExit("OMEGA_HOSTED_FEDERATION_PEER_CONFIG_INVALID")
           if set(rows)!=expected or any(rows[x]!=200 for x in expected):
               raise SystemExit("OMEGA_HOSTED_FEDERATION_PEER_HTTP_FAILED:"+json.dumps(rows,sort_keys=True))
           Path("/tmp/federation-access.json").write_text(json.dumps({
@@ -134,14 +136,17 @@ jobs:
         run: |
           set -Eeuo pipefail
           mkdir -p "$OMEGA_STATE/evidence"
-          source_pin="$(python3 -c 'import json; print(json.load(open(".omega/repository-mesh.json"))["validated_federation_source_pin"])')"
+          source_pin="$SOURCE_SHA"
           python3 scripts/federation_executor.py             --source-pin "$source_pin"             --report "$OMEGA_STATE/evidence/federation-executor.json"
           python3 - <<'PY'
           import json,os
           from pathlib import Path
+          cfg=json.loads(Path(".omega/federation-execution.json").read_text())
           p=Path(os.environ["OMEGA_STATE"])/"evidence/federation-executor.json"
           d=json.loads(p.read_text())
-          expected={"Omega-release","Omega-validation","Omega-agents","Omega-recovery","Jarv"}
+          expected={str(item["repository"]) for item in cfg.get("peers",[]) if item.get("repository")}
+          if not expected or len(expected)!=len(cfg.get("peers",[])):
+              raise SystemExit("OMEGA_HOSTED_FEDERATION_PEER_CONFIG_INVALID")
           rows=d.get("peers") or []
           ok=(
               d.get("ok") is True and
@@ -178,10 +183,12 @@ jobs:
           head=subprocess.check_output(["git","rev-parse","HEAD"],text=True).strip()
           if head!=source:
               raise SystemExit("HOSTED_FEDERATION_MAIN_SHA_MISMATCH")
-          mesh=json.loads((root/".omega/repository-mesh.json").read_text())
+          cfg=json.loads((root/".omega/federation-execution.json").read_text())
           report=json.loads((Path(os.environ["OMEGA_STATE"])/"evidence/federation-executor.json").read_text())
-          expected={"Omega-release","Omega-validation","Omega-agents","Omega-recovery","Jarv"}
-          if report.get("source_pin")!=mesh.get("validated_federation_source_pin"):
+          expected={str(item["repository"]) for item in cfg.get("peers",[]) if item.get("repository")}
+          if not expected or len(expected)!=len(cfg.get("peers",[])):
+              raise SystemExit("OMEGA_HOSTED_FEDERATION_PEER_CONFIG_INVALID")
+          if report.get("source_pin")!=source:
               raise SystemExit("HOSTED_FEDERATION_SOURCE_PIN_MISMATCH")
           rows=report.get("peers") or []
           if report.get("ok") is not True or {r.get("repository") for r in rows}!=expected:
