@@ -1,0 +1,195 @@
+name: OMEGA One-Click Signer Rescue
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: omega-one-click-signer-rescue
+  cancel-in-progress: false
+
+env:
+  PRIVATE_REPOSITORY: sublimedeaf-design/Omega-engines
+  CONTROL_REPOSITORY: sublimedeaf-design/Omega-engine
+  SOURCE_SHA: 8bb4f93855c3be15fd2cee707ff1424171eecdc9
+  EXPECTED_FINGERPRINT: 0738b245ec8a557edc0600a6961d7bb2586cc22f886ed5273560ce6ab2db447f
+  RUNNER_VERSION: "2.337.0"
+  RUNNER_SHA256: 70920811a4f8ad4328818682bca5c6469c1c942fab52448868071d0063816613
+
+jobs:
+  rescue:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    env:
+      GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+    steps:
+      - name: Require exact private runner authority
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          set +x
+          [ -n "${GH_TOKEN:-}" ] || { echo OMEGA_ONE_CLICK_BOOTSTRAP_TOKEN_MISSING >&2; exit 78; }
+          tmp="$(mktemp)"
+          code="$(curl -sS -o "$tmp" -w '%{http_code}' -X POST \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            "https://api.github.com/repos/$PRIVATE_REPOSITORY/actions/runners/registration-token" || true)"
+          if [ "$code" != 201 ]; then
+            rm -f "$tmp"
+            echo "OMEGA_ONE_CLICK_RUNNER_AUTHORITY_BLOCKED http=$code" >&2
+            exit 78
+          fi
+          python3 - "$tmp" "$RUNNER_TEMP/omega-registration-token" <<'PY'
+          import json,os,sys
+          token=json.load(open(sys.argv[1],encoding="utf-8")).get("token") or ""
+          if not token:
+              raise SystemExit("OMEGA_ONE_CLICK_REGISTRATION_TOKEN_EMPTY")
+          open(sys.argv[2],"w",encoding="utf-8").write(token)
+          os.chmod(sys.argv[2],0o600)
+          PY
+          rm -f "$tmp"
+          echo OMEGA_ONE_CLICK_RUNNER_AUTHORITY_PASS
+
+      - name: Start one-job private ephemeral runner
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          set +x
+          archive="actions-runner-linux-x64-$RUNNER_VERSION.tar.gz"
+          url="https://github.com/actions/runner/releases/download/v$RUNNER_VERSION/$archive"
+          curl --fail --location --proto '=https' --tlsv1.2 --retry 3 \
+            -o "$RUNNER_TEMP/$archive" "$url"
+          printf '%s  %s\n' "$RUNNER_SHA256" "$RUNNER_TEMP/$archive" | sha256sum -c -
+          home="$RUNNER_TEMP/omega-signer-rescue-runner"
+          mkdir -p "$home"
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$home"
+          token="$(cat "$RUNNER_TEMP/omega-registration-token")"
+          (
+            cd "$home"
+            ./config.sh --url "https://github.com/$PRIVATE_REPOSITORY" \
+              --token "$token" \
+              --name "omega-one-click-signer-${GITHUB_RUN_ID}" \
+              --labels "omega-signer-rescue" \
+              --work "_work" \
+              --ephemeral --unattended
+          )
+          rm -f "$RUNNER_TEMP/omega-registration-token"
+          (
+            cd "$home"
+            env -u RUNNER_TRACKING_ID ./run.sh >"$RUNNER_TEMP/omega-ephemeral-runner.log" 2>&1
+          ) &
+          echo $! > "$RUNNER_TEMP/omega-ephemeral-runner.pid"
+          sleep 5
+
+      - name: Dispatch existing private cache rescue
+        id: private_rescue
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          set +x
+          before="$(gh api "/repos/$PRIVATE_REPOSITORY/actions/workflows/android-signing-keepalive.yml/runs?event=workflow_dispatch&per_page=1" --jq '.workflow_runs[0].id // 0')"
+          gh workflow run android-signing-keepalive.yml -R "$PRIVATE_REPOSITORY" --ref main -f mode=rescue
+          run_id=""
+          for _ in $(seq 1 30); do
+            current="$(gh api "/repos/$PRIVATE_REPOSITORY/actions/workflows/android-signing-keepalive.yml/runs?event=workflow_dispatch&per_page=1" --jq '.workflow_runs[0].id // 0')"
+            if [ -n "$current" ] && [ "$current" != 0 ] && [ "$current" != "$before" ]; then
+              run_id="$current"
+              break
+            fi
+            sleep 2
+          done
+          [ -n "$run_id" ] || { echo OMEGA_ONE_CLICK_PRIVATE_RESCUE_RUN_NOT_FOUND >&2; exit 75; }
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+          echo "OMEGA_ONE_CLICK_PRIVATE_RESCUE_DISPATCHED run=$run_id"
+          set +e
+          gh run watch "$run_id" -R "$PRIVATE_REPOSITORY" --exit-status
+          rc=$?
+          set -e
+          if [ "$rc" -ne 0 ]; then
+            tail -n 120 "$RUNNER_TEMP/omega-ephemeral-runner.log" 2>/dev/null || true
+            exit "$rc"
+          fi
+
+      - name: Verify recovered identity and escrow it outside cache
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          set +x
+          key="$HOME/.android/debug.keystore"
+          test -s "$key"
+          actual="$(keytool -list -v -keystore "$key" -storepass android -alias androiddebugkey 2>/dev/null \
+            | sed -n 's/.*SHA256: //p' | head -1 | tr -d ':' | tr 'A-F' 'a-f')"
+          [ "$actual" = "$EXPECTED_FINGERPRINT" ] || { echo OMEGA_ONE_CLICK_RECOVERED_FINGERPRINT_MISMATCH >&2; exit 35; }
+
+          status="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/$SOURCE_SHA/status?per_page=100")"
+          STATUS_PAYLOAD="$status" python3 <<'PY'
+          import json,os
+          p=json.loads(os.environ["STATUS_PAYLOAD"]); latest={}
+          for r in p.get("statuses",[]):
+              c=str(r.get("context") or ""); t=str(r.get("updated_at") or r.get("created_at") or "")
+              if c and (c not in latest or t > str(latest[c].get("_t") or "")): latest[c]={**r,"_t":t}
+          if (latest.get("omega/signer/cache-rescue") or {}).get("state")!="success":
+              raise SystemExit("OMEGA_ONE_CLICK_CACHE_RESCUE_PROOF_MISSING")
+          PY
+
+          base64 -w0 "$key" | gh secret set OMEGA_ANDROID_KEYSTORE_B64 -R "$PRIVATE_REPOSITORY"
+          base64 -w0 "$key" | gh secret set OMEGA_ANDROID_KEYSTORE_B64 -R "$CONTROL_REPOSITORY"
+          shred -u "$key" 2>/dev/null || rm -f "$key"
+          echo "OMEGA_ONE_CLICK_ESCROW_PASS fingerprint=$actual private_key_logged=false"
+
+      - name: Re-run canonical signer and close the live chain
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          set +x
+          gh workflow run omega-canonical-android-signer.yml -R "$CONTROL_REPOSITORY" --ref main
+          required=(
+            omega/android-release-signed
+            omega/android-runtime-coldstart
+            omega/release-live
+            omega/post-live-smoke
+            omega/live-certified
+          )
+          for _ in $(seq 1 180); do
+            payload="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/$SOURCE_SHA/status?per_page=100")"
+            result="$(STATUS_PAYLOAD="$payload" REQUIRED="$(IFS=,; echo "${required[*]}")" python3 <<'PY'
+          import json,os
+          p=json.loads(os.environ["STATUS_PAYLOAD"]); req=os.environ["REQUIRED"].split(","); latest={}
+          for r in p.get("statuses",[]):
+              c=str(r.get("context") or ""); t=str(r.get("updated_at") or r.get("created_at") or "")
+              if c and (c not in latest or t > str(latest[c].get("_t") or "")): latest[c]={**r,"_t":t}
+          states={c:str((latest.get(c) or {}).get("state") or "missing") for c in req}
+          print(" ".join(f"{c}={states[c]}" for c in req))
+          if all(states[c]=="success" for c in req): raise SystemExit(10)
+          if any(states[c] in ("failure","error") for c in req): raise SystemExit(20)
+          PY
+            )"
+            rc=$?
+            echo "OMEGA_ONE_CLICK_LIVE_STATES $result"
+            if [ "$rc" -eq 10 ]; then
+              echo "OMEGA_ONE_CLICK_LIVE_PASS source=$SOURCE_SHA"
+              exit 0
+            fi
+            if [ "$rc" -eq 20 ]; then
+              echo "OMEGA_ONE_CLICK_LIVE_BLOCKED $result" >&2
+              exit 1
+            fi
+            sleep 10
+          done
+          echo OMEGA_ONE_CLICK_LIVE_TIMEOUT >&2
+          exit 75
+
+      - name: Cleanup ephemeral runner process
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          if [ -f "$RUNNER_TEMP/omega-ephemeral-runner.pid" ]; then
+            pid="$(cat "$RUNNER_TEMP/omega-ephemeral-runner.pid")"
+            kill "$pid" 2>/dev/null || true
+          fi
+          rm -f "$RUNNER_TEMP/omega-registration-token"
+          rm -rf "$RUNNER_TEMP/omega-signer-rescue-runner"
