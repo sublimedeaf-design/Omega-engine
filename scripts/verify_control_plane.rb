@@ -191,7 +191,7 @@ end
 fail!("gate_failure_router_classifier_missing") unless router.include?("scripts/omega_gate_classifier.py")
 fail!("gate_failure_router_incident_missing") unless router.include?("incident_id")
 fail!("gate_failure_router_execution_identity_missing") unless router.include?("omega_execution_id") && router.include?("evidence_root") && router.include?("execution-envelope.json")
-fail!("gate_failure_router_missing_envelope_guard_missing") unless router.include?(".content // empty")
+fail!("gate_failure_router_missing_envelope_guard_missing") unless router.include?("envelope-api.json") && router.include?('payload.get("content")') && router.include?('write_text("{}\\n",encoding="utf-8")') && router.include?("base64.b64decode") && router.include?("validate=True")
 fail!("gate_failure_router_retry_budget_missing") unless router.include?("run_attempt") && router.include?("max_attempts")
 fail!("gate_failure_router_failed_only_retry_missing") unless router.include?('gh run rerun "$RUN_ID" -R "$GITHUB_REPOSITORY" --failed')
 fail!("gate_failure_router_fifo_missing") unless router.include?("cancel-in-progress: false") && router.include?("queue: max")
