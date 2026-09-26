@@ -116,7 +116,8 @@ jobs:
           ref: ${{ needs.discover.outputs.sha }}
           token: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
           persist-credentials: false
-          fetch-depth: 1
+          # Full Git ancestry is required by supply-chain release-readiness tests.
+          fetch-depth: 0
           path: srcdir
       - name: Run lane
         working-directory: srcdir
@@ -156,7 +157,8 @@ jobs:
           ref: ${{ needs.discover.outputs.sha }}
           token: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
           persist-credentials: false
-          fetch-depth: 1
+          # Full Git ancestry is required by supply-chain release-readiness tests.
+          fetch-depth: 0
           path: srcdir
       - name: Verify exact source
         working-directory: srcdir
@@ -213,7 +215,8 @@ jobs:
           ref: ${{ needs.discover.outputs.sha }}
           token: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
           persist-credentials: false
-          fetch-depth: 1
+          # Full Git ancestry is required by supply-chain release-readiness tests.
+          fetch-depth: 0
           path: srcdir
       - name: Validate governance
         working-directory: srcdir
