@@ -42,7 +42,29 @@ jobs:
         run: |
           set -Eeuo pipefail
           set +x
-          sha="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/main" --jq '.sha')"
+          epoch="$(gh api "/repos/$GITHUB_REPOSITORY/contents/federation/epochs/current.json?ref=main" --jq '.content' | tr -d '\n' | base64 -d)"
+          sha="$(EPOCH_PAYLOAD="$epoch" python3 <<'PY'
+          import json,os,re
+          p=json.loads(os.environ["EPOCH_PAYLOAD"])
+          primary=p.get("primary") or {}
+          rollover=p.get("release_rollover") or {}
+          source=str(primary.get("source_sha") or "")
+          source_ref=str(primary.get("source_ref") or "")
+          certified=(
+              p.get("state")=="PASS"
+              and primary.get("certification_state")=="PASS"
+              and rollover.get("stage") in {"CERTIFIED_PASS","LIVE_CERTIFIED"}
+              and re.fullmatch(r"[0-9a-f]{40}",source)
+              and source_ref.startswith("release/")
+          )
+          print(source if certified else "")
+          PY
+          )"
+          target_mode=certified_release
+          if ! [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+            sha="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/main" --jq '.sha')"
+            target_mode=private_main
+          fi
           [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
           policy="$(gh api "/repos/$PRIVATE_REPOSITORY/contents/.omega/external-validation.json?ref=$sha" --jq '.content' | tr -d '\n' | base64 -d)"
           max_age_minutes="$(printf '%s' "$policy" | jq -r '.max_status_age_minutes // 180')"
@@ -103,13 +125,13 @@ jobs:
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
           echo "ready=$ready" >> "$GITHUB_OUTPUT"
           echo "need_run=$need_run" >> "$GITHUB_OUTPUT"
-          echo "OMEGA_EXTERNAL_PIN sha=$sha hosted_core_green=$ready need_run=$need_run"
+          echo "OMEGA_EXTERNAL_PIN sha=$sha target_mode=$target_mode hosted_core_green=$ready need_run=$need_run"
           if [ "$ready" = true ] && [ "$need_run" = true ]; then
             target="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
             gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$sha" \
               -f state=success \
               -f context="omega/control-plane/source-pin" \
-              -f description="direct validator pinned current exact main SHA" \
+              -f description="direct validator pinned canonical exact source SHA" \
               -f target_url="$target" >/dev/null
           fi
 

@@ -1,4 +1,5 @@
 const PRIVATE_REPO="sublimedeaf-design/Omega-engines";
+const CONTROL_REPO="sublimedeaf-design/Omega-engine";
 const SHA=/^[0-9a-f]{40}$/;
 
 function headers(token){return {
@@ -36,6 +37,32 @@ async function policy(token,sha){
   const raw=String(row.content||"").replace(/\n/g,"");
   return JSON.parse(atob(raw));
 }
+async function certificationTarget(token){
+  let epoch=null;
+  try{
+    const row=await gh(token,`/repos/${CONTROL_REPO}/contents/federation/epochs/current.json?ref=main`);
+    const raw=Buffer.from(String(row.content||"").replace(/\n/g,""),"base64").toString("utf8");
+    epoch=JSON.parse(raw);
+  }catch(error){
+    if(!String(error).includes("GITHUB_HTTP_404:")) throw error;
+  }
+  if(epoch){
+    const primary=epoch.primary||{};
+    const rollover=epoch.release_rollover||{};
+    const sha=String(primary.source_sha||"");
+    const ref=String(primary.source_ref||"");
+    const release=(
+      epoch.state==="PASS" &&
+      primary.certification_state==="PASS" &&
+      ["CERTIFIED_PASS","LIVE_CERTIFIED"].includes(String(rollover.stage||"")) &&
+      SHA.test(sha) &&
+      ref.startsWith("release/")
+    );
+    if(release) return {sha,release:true,ref};
+  }
+  const main=await gh(token,`/repos/${PRIVATE_REPO}/commits/main`);
+  return {sha:String(main.sha||""),release:false,ref:"main"};
+}
 function externalQuorum(map,p,now){
   const configured=Array.isArray(p.external_quorum_suites) ? p.external_quorum_suites : null;
   const suites=configured && configured.length ? [...configured] : [...p.required_suites,p.android_suite];
@@ -69,9 +96,9 @@ async function post(token,sha,state,description,targetUrl){
 }
 export async function certify({token,targetUrl="",now=Date.now()}={}){
   if(!token) throw new Error("OMEGA_GITHUB_TOKEN_MISSING");
-  const main=await gh(token,`/repos/${PRIVATE_REPO}/commits/main`);
-  const sha=String(main.sha||"");
-  if(!SHA.test(sha)) throw new Error("MAIN_SHA_INVALID");
+  const target=await certificationTarget(token);
+  const sha=target.sha;
+  if(!SHA.test(sha)) throw new Error("CERTIFICATION_TARGET_SHA_INVALID");
   const rows=(await gh(token,`/repos/${PRIVATE_REPO}/commits/${sha}/status?per_page=100`)).statuses||[];
   const map=latest(rows);
   const p=await policy(token,sha);
@@ -101,7 +128,9 @@ export async function certify({token,targetUrl="",now=Date.now()}={}){
       ? green(map,"omega/control-plane/direct-dispatch",now,180)
       : green(map,"omega/control-plane/ref-sync",now,180),
     clean_recovery:green(map,"omega/hosted-recovery",now,1440),
-    federation:federation.every(x=>green(map,x,now,1440)),
+    federation:target.release
+      ? green(map,"omega/federation-v3-release",now,1440)
+      : federation.every(x=>green(map,x,now,1440)),
     signer_continuity:green(map,"omega/signer/continuity",now,10080),
   };
   const missing=Object.entries(layers).filter(([,v])=>!v).map(([k])=>k);
@@ -109,5 +138,5 @@ export async function certify({token,targetUrl="",now=Date.now()}={}){
   const state=ok?"success":"pending";
   const description=ok?"resilience certified: all independent proof layers green":`resilience pending: ${missing.slice(0,4).join(",")}`;
   await post(token,sha,state,description,targetUrl);
-  return {ok,sha,state,layers,missing,external:ext,refs:{light,android}};
+  return {ok,sha,state,layers,missing,external:ext,refs:{light,android},target:{release:target.release,ref:target.ref}};
 }
