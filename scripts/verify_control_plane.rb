@@ -276,6 +276,8 @@ fail!("candidate_root_recovery_package_contract_missing") unless candidate_root.
 fail!("candidate_root_reconciliation_dispatch_missing") unless candidate_root.include?("workflow_dispatch:") && candidate_root.include?("recovery_run_id:") && candidate_root.include?("github.event_name == 'workflow_dispatch'")
 fail!("candidate_root_reconciliation_run_verification_missing") unless candidate_root.include?("OMEGA_EVIDENCE_ROOT_RECOVERY_RUN_VERIFIED") && candidate_root.include?("OMEGA_EVIDENCE_ROOT_RECOVERY_WORKFLOW_PATH_MISMATCH") && candidate_root.include?("OMEGA_EVIDENCE_ROOT_RECOVERY_RUN_NOT_SUCCESS")
 fail!("candidate_root_reconciliation_artifact_binding_missing") unless candidate_root.include?("OMEGA_EVIDENCE_ROOT_RECOVERY_ARTIFACTS_VERIFIED") && candidate_root.include?("omega-recovery-attestation-") && candidate_root.include?("omega-hosted-recovery-")
+fail!("candidate_root_zero_click_reconcile_missing") unless candidate_root.include?('bootstrap/omega/evidence-root-reconcile.txt') && candidate_root.include?("OMEGA_EVIDENCE_ROOT_RECONCILE_SELECTED") && candidate_root.include?("OMEGA_EVIDENCE_ROOT_RECONCILE_SHA_MISMATCH")
+fail!("candidate_root_zero_click_reconcile_must_bind_recovery_trigger") unless candidate_root.include?("bootstrap/omega/recovery-trigger.txt") && candidate_root.include?("reconcile-recovery")
 fail!("candidate_root_actions_write_missing") unless candidate_root.include?("actions: write")
 stager_text = File.read(WORKFLOWS.join("omega-recovery-evidence-release-stager.yml"), encoding: "UTF-8")
 fail!("release_stager_must_not_use_workflow_run") if stager_text.include?("workflow_run:")
