@@ -15,35 +15,35 @@
   "peers": [
     {
       "repository": "sublimedeaf-design/Omega-recovery",
-      "sha": "6d160c35980e4ef709b77a5434aaab70dea6f2f9",
+      "sha": "9e7233985c52841dc9eca64952e20299a89455cd",
       "role": "control_recovery",
       "state": "NOT_EXECUTED",
       "contract_state": "NOT_EXECUTED",
-      "reason": "pending external GitHub-hosted exact-SHA federation v3 peer bridge validation"
+      "reason": "pending external GitHub-hosted exact-SHA federation v3 peer bridge validation after complete source-pin propagation"
     },
     {
       "repository": "sublimedeaf-design/Omega-agents",
-      "sha": "3ca86e03076a6573b276d354713a778da05959ea",
+      "sha": "2d9dbc3b01fd49c1b1e49892d32c96c6058de6f8",
       "role": "agent_execution",
       "state": "NOT_EXECUTED",
       "contract_state": "NOT_EXECUTED",
-      "reason": "pending external GitHub-hosted exact-SHA federation v3 peer bridge validation"
+      "reason": "pending external GitHub-hosted exact-SHA federation v3 peer bridge validation after complete source-pin propagation"
     },
     {
       "repository": "sublimedeaf-design/Omega-validation",
-      "sha": "af0fd9981db3920c2a0e195bf425cf10f7097584",
+      "sha": "49d79883a07a385c591b1cd0fa87c809073159c7",
       "role": "independent_validation",
       "state": "NOT_EXECUTED",
       "contract_state": "NOT_EXECUTED",
-      "reason": "pending external GitHub-hosted exact-SHA federation v3 peer bridge validation"
+      "reason": "pending external GitHub-hosted exact-SHA federation v3 peer bridge validation after complete source-pin propagation"
     },
     {
       "repository": "sublimedeaf-design/Omega-release",
-      "sha": "4c3317ad664637a36e6c67ea4001b623720edaa5",
+      "sha": "229cbac0ad3a7ad47114e36ac20fbf142972ad8e",
       "role": "release_promotion",
       "state": "NOT_EXECUTED",
       "contract_state": "NOT_EXECUTED",
-      "reason": "pending external GitHub-hosted exact-SHA federation v3 peer bridge validation"
+      "reason": "pending external GitHub-hosted exact-SHA federation v3 peer bridge validation after complete source-pin propagation"
     }
   ],
   "hf": {
