@@ -4,12 +4,11 @@
   "authority_repository": "sublimedeaf-design/Omega-engine",
   "state": "NOT_EXECUTED",
   "blockers": [
-    "primary exact-SHA hosted certification pending",
-    "new optimization-contract peer SHAs require exact bridge validation"
+    "candidate primary exact-SHA hosted certification pending"
   ],
   "primary": {
     "repository": "sublimedeaf-design/Omega-engines",
-    "source_sha": "7fc496473a525b80c02c73c99e0574556df6835f",
+    "source_sha": "aee643a6506f30ed1e43d4e79c92e45a79b09c4b",
     "pull_request": 273,
     "certification_state": "NOT_EXECUTED"
   },
@@ -20,7 +19,7 @@
       "role": "control_recovery",
       "state": "NOT_EXECUTED",
       "contract_state": "NOT_EXECUTED",
-      "reason": "integral optimization contract committed; exact bridge validation pending"
+      "reason": "integral optimization contract present; certifying source epoch remains frozen until candidate promotion"
     },
     {
       "repository": "sublimedeaf-design/Omega-agents",
@@ -28,7 +27,7 @@
       "role": "agent_execution",
       "state": "NOT_EXECUTED",
       "contract_state": "NOT_EXECUTED",
-      "reason": "integral optimization contract committed; exact bridge validation pending"
+      "reason": "integral optimization contract present; certifying source epoch remains frozen until candidate promotion"
     },
     {
       "repository": "sublimedeaf-design/Omega-validation",
@@ -36,7 +35,7 @@
       "role": "independent_validation",
       "state": "NOT_EXECUTED",
       "contract_state": "NOT_EXECUTED",
-      "reason": "integral optimization contract committed; exact bridge validation pending"
+      "reason": "integral optimization contract present; certifying source epoch remains frozen until candidate promotion"
     },
     {
       "repository": "sublimedeaf-design/Omega-release",
@@ -44,7 +43,7 @@
       "role": "release_promotion",
       "state": "NOT_EXECUTED",
       "contract_state": "NOT_EXECUTED",
-      "reason": "integral optimization contract committed; exact bridge validation pending"
+      "reason": "integral optimization contract present; certifying source epoch remains frozen until candidate promotion"
     }
   ],
   "hf": {
