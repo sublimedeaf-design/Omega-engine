@@ -1,1 +1,1 @@
-validate-exact-pr 870a97bea59d0363ca5d6a92ebf723b0d3d91140 hardening/canonical-evidence-envelope-20260926 final-integral-freeze-v6
+validate-exact-pr a81a562fcb12503fa40497da687cb5ea29b8d430 hardening/canonical-evidence-envelope-20260926 final-integral-freeze-v7
