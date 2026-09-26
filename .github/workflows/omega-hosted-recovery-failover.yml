@@ -242,6 +242,108 @@ jobs:
           }
           (state/"hosted-pre-recovery.json").write_text(json.dumps(payload,indent=2)+"\n",encoding="utf-8")
           PY
+      - name: Materialize complete bound evidence set for release handoff
+        if: ${{ success() }}
+        working-directory: omega
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          import hashlib,json,os,pathlib,shutil
+
+          source=pathlib.Path("evidence").resolve()
+          destination=(pathlib.Path(os.environ["OMEGA_STATE"])/"evidence").resolve()
+          destination.mkdir(parents=True,exist_ok=True)
+
+          required={
+              "execution-envelope.json",
+              "execution-runtime.json",
+              "federation-epoch.json",
+              "federation-epoch.authority.json",
+              "t24-binding.json",
+              "t60-binding.json",
+              "qa-binding.json",
+              "settlement-binding.json",
+              "latest-24h.json",
+              "latest-t60.json",
+              "latest-settlement.json",
+              "coverage-gaps.json",
+              "intelligence-refresh-t24.json",
+              "intelligence-refresh-t60.json",
+              "acceptance-agents.json",
+              "latest-agent-promotion.json",
+              "repo-audit-after-agents.json",
+              "forecast-ledger.jsonl",
+              "shadow-ledger.jsonl",
+              "prematch-intelligence.jsonl",
+          }
+          bindings=("t24-binding.json","t60-binding.json","qa-binding.json","settlement-binding.json")
+
+          def digest(path):
+              h=hashlib.sha256()
+              with path.open("rb") as fh:
+                  for chunk in iter(lambda:fh.read(1<<20),b""):
+                      h.update(chunk)
+              return h.hexdigest()
+
+          for binding_name in bindings:
+              binding_path=source/binding_name
+              if not binding_path.is_file():
+                  raise SystemExit("OMEGA_RECOVERY_BOUND_BINDING_MISSING:"+binding_name)
+              binding=json.loads(binding_path.read_text(encoding="utf-8"))
+              if binding.get("binding_state")!="PASS":
+                  raise SystemExit("OMEGA_RECOVERY_BOUND_BINDING_NOT_PASS:"+binding_name)
+              for row in binding.get("artifacts",[]):
+                  raw=str(row.get("path") or "")
+                  logical=pathlib.PurePosixPath(raw)
+                  if logical.is_absolute() or ".." in logical.parts or not logical.parts:
+                      raise SystemExit("OMEGA_RECOVERY_BOUND_PATH_UNSAFE:"+raw)
+                  required.add(str(logical))
+                  artifact=source/pathlib.Path(*logical.parts)
+                  if not artifact.is_file():
+                      raise SystemExit("OMEGA_RECOVERY_BOUND_ARTIFACT_MISSING:"+raw)
+                  expected=str(row.get("sha256") or "").lower()
+                  actual=digest(artifact)
+                  if actual!=expected:
+                      raise SystemExit("OMEGA_RECOVERY_BOUND_ARTIFACT_HASH_MISMATCH:"+raw)
+
+          manifest=[]
+          for raw in sorted(required):
+              logical=pathlib.PurePosixPath(raw)
+              if logical.is_absolute() or ".." in logical.parts or not logical.parts:
+                  raise SystemExit("OMEGA_RECOVERY_EVIDENCE_PATH_UNSAFE:"+raw)
+              src=source/pathlib.Path(*logical.parts)
+              if not src.is_file():
+                  raise SystemExit("OMEGA_RECOVERY_RELEASE_EVIDENCE_MISSING:"+raw)
+              if src.is_symlink():
+                  raise SystemExit("OMEGA_RECOVERY_RELEASE_EVIDENCE_SYMLINK:"+raw)
+              dst=destination/pathlib.Path(*logical.parts)
+              dst.parent.mkdir(parents=True,exist_ok=True)
+              shutil.copy2(src,dst)
+              manifest.append({
+                  "path":raw,
+                  "sha256":digest(dst),
+                  "bytes":dst.stat().st_size,
+              })
+
+          manifest_path=destination/"recovery-package-manifest.json"
+          manifest_path.write_text(
+              json.dumps(
+                  {"schema_version":1,"source_sha":os.environ["OMEGA_SOURCE_SHA"],"artifacts":manifest},
+                  indent=2,sort_keys=True,allow_nan=False,
+              )+"\n",
+              encoding="utf-8",
+          )
+          print(f"OMEGA_RECOVERY_RELEASE_EVIDENCE_READY artifacts={len(manifest)}")
+          PY
+          python3 scripts/evidence_identity.py verify \
+            --envelope "$OMEGA_STATE/evidence/execution-envelope.json" \
+            --binding "$OMEGA_STATE/evidence/t24-binding.json" \
+            --binding "$OMEGA_STATE/evidence/t60-binding.json" \
+            --binding "$OMEGA_STATE/evidence/qa-binding.json" \
+            --json-file "$OMEGA_STATE/evidence/latest-24h.json" \
+            --json-file "$OMEGA_STATE/evidence/latest-t60.json"
+
       - name: Package recovery state with hard integrity manifest
         id: package
         if: ${{ success() }}
@@ -250,6 +352,7 @@ jobs:
           set -Eeuo pipefail
           test -s "$RUNNER_TEMP/omega-state/evidence/acceptance-pre-rebuild.json"
           test -s "$RUNNER_TEMP/omega-state/evidence/hosted-pre-recovery.json"
+          test -s "$RUNNER_TEMP/omega-state/evidence/recovery-package-manifest.json"
           test -s "$RUNNER_TEMP/omega-state/logs/codespaces-acceptance.pass"
           tar -C "$RUNNER_TEMP/omega-state" -czf "$RUNNER_TEMP/omega-recovery-state.tgz" \
             evidence logs
