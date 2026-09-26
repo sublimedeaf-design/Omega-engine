@@ -80,7 +80,7 @@ end
 fail!("recovery_must_not_continue_on_error") if recovery.include?("continue-on-error: true")
 
 pr_bridge = File.read(WORKFLOWS.join("omega-private-pr-hosted-bridge.yml"), encoding: "UTF-8")
-fail!("pr_bridge_stale_ref_reconcile_missing") unless pr_bridge.include?("OMEGA_EXACT_TRIGGER_ADVANCED")
+fail!("pr_bridge_stale_ref_rejection_missing") unless pr_bridge.include?("OMEGA_EXACT_TRIGGER_STALE")
 fail!("pr_bridge_stale_ref_base_guard_missing") unless pr_bridge.include?("OMEGA_EXACT_TRIGGER_NOT_CURRENT_BASE")
 
 puts "OMEGA_CONTROL_PLANE_INTEGRITY_GREEN workflows=#{files.length}"
