@@ -56,7 +56,9 @@ jobs:
           p=json.loads(os.environ["STATUS_PAYLOAD"]); latest={}
           for row in p.get("statuses",[]):
               ctx=str(row.get("context") or "")
-              if ctx and ctx not in latest: latest[ctx]=row
+              stamp=str(row.get("updated_at") or row.get("created_at") or "")
+              if ctx and (ctx not in latest or stamp > str(latest[ctx].get("_omega_stamp") or "")):
+                  latest[ctx]={**row,"_omega_stamp":stamp}
           required=(
               "omega/hosted-ci/python311","omega/hosted-ci/python313","omega/hosted-ci/python314",
               "omega/hosted-ci/storage","omega/hosted-governance","omega/hosted-android",

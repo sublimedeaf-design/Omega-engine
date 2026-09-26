@@ -261,6 +261,18 @@ fail!("release_stager_exact_evidence_input_missing") unless stager_text.include?
 %w[acceptance-agents.json latest-agent-promotion.json repo-audit-after-agents.json].each do |artifact|
   fail!("release_stager_qa_bound_artifact_missing:#{artifact}") unless stager_text.include?(artifact)
 end
+status_order_files = [
+  "omega-candidate-evidence-root.yml",
+  "omega-recovery-evidence-release-stager.yml",
+  "omega-canonical-android-signer.yml",
+  "omega-final-release-promoter.yml",
+  "omega-post-live-verification.yml",
+]
+status_order_files.each do |name|
+  text = File.read(WORKFLOWS.join(name), encoding: "UTF-8")
+  fail!("latest_status_timestamp_resolution_missing:#{name}") unless text.include?("_omega_stamp") && text.include?("updated_at") && text.include?("created_at")
+end
+
 fail!("release_stager_fallback_trigger_forbidden") if stager_text.include?("bootstrap/omega/release-stager-trigger.txt") || stager_text.include?("OMEGA_RELEASE_STAGER_STALE_TRIGGER")
 fail!("release_stager_explicit_handoff_marker_missing") unless stager_text.include?("OMEGA_RELEASE_STAGER_EXPLICIT_HANDOFF") && stager_text.include?('EVIDENCE_RUN_ID: ${{ inputs.evidence_run_id }}')
 fail!("release_stager_actions_write_missing") unless stager_text.include?("actions: write")
