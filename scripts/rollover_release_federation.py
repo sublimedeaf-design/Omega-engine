@@ -102,10 +102,14 @@ latest={}
 for row in status.get("statuses",[]):
     ctx=str(row.get("context") or "")
     if ctx and ctx not in latest: latest[ctx]=row
+# Federation must be established before clean recovery can certify the exact
+# candidate. Release artifacts are produced only after recovery/evidence staging,
+# so requiring them here would create an impossible dependency cycle.
+# The staged/final release SHA is federated again after its own exact validation.
 required={
     "omega/hosted-ci/python311","omega/hosted-ci/python313","omega/hosted-ci/python314",
     "omega/hosted-ci/storage","omega/hosted-governance","omega/hosted-android",
-    "omega/release-evidence-staged","omega/android-release-unsigned",
+    "omega/exact-final-validation",
 }
 bad=sorted(x for x in required if (latest.get(x) or {}).get("state")!="success")
 if bad: raise SystemExit("OMEGA_RELEASE_FEDERATION_PREREQUISITE_NOT_PASS:"+",".join(bad))
