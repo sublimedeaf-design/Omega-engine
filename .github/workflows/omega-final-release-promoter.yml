@@ -169,8 +169,10 @@ jobs:
           mapfile -t att_matches < <(find "$RUNNER_TEMP/final-root" -type f -name recovery-attestation.json -print)
           [ "${#root_matches[@]}" -eq 1 ] || { echo "OMEGA_FINAL_ROOT_LAYOUT_AMBIGUOUS count=${#root_matches[@]}" >&2; exit 69; }
           [ "${#att_matches[@]}" -eq 1 ] || { echo "OMEGA_FINAL_ATTESTATION_LAYOUT_AMBIGUOUS count=${#att_matches[@]}" >&2; exit 69; }
-          cp -- "${root_matches[0]}" "$RUNNER_TEMP/final-root/candidate-evidence-root.json"
-          cp -- "${att_matches[0]}" "$RUNNER_TEMP/final-root/recovery-attestation.json"
+          canonical_root="$RUNNER_TEMP/final-root/candidate-evidence-root.json"
+          canonical_att="$RUNNER_TEMP/final-root/recovery-attestation.json"
+          [ "${root_matches[0]}" = "$canonical_root" ] || cp -- "${root_matches[0]}" "$canonical_root"
+          [ "${att_matches[0]}" = "$canonical_att" ] || cp -- "${att_matches[0]}" "$canonical_att"
           test -s "$RUNNER_TEMP/final-root/candidate-evidence-root.json"
           test -s "$RUNNER_TEMP/final-root/recovery-attestation.json"
 
