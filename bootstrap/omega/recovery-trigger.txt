@@ -1,1 +1,1 @@
-recover-exact 924c52d811c81d539d1b41a1c5ec5ccaf99dfbde hardening/canonical-evidence-envelope-20260926 hf-integral-final-v6
+recover-exact 6c453afdeea09a08ff515ddb19f8d5f1473e520d hardening/canonical-evidence-envelope-20260926 hf-runtime-enforced-v7
