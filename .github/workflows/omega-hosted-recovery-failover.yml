@@ -101,6 +101,26 @@ jobs:
               mode=exact_candidate
             fi
           fi
+          if [ "$mode" = main ]; then
+            protocol_ok=true
+            for required in scripts/install_locked_ci_deps.py scripts/materialize_gradle_verification.py scripts/validate_supply_chain_locks.py deploy/hosted/recovery-contract.json; do
+              encoded_path="$(python3 - "$required" <<'PY'
+import sys,urllib.parse
+print(urllib.parse.quote(sys.argv[1],safe="/"))
+PY
+)"
+              if ! gh api "/repos/$PRIVATE_REPOSITORY/contents/$encoded_path?ref=$sha" >/dev/null 2>&1; then
+                protocol_ok=false
+                echo "OMEGA_HOSTED_RECOVERY_MAIN_PROTOCOL_MISSING:$required sha=$sha"
+              fi
+            done
+            if [ "$protocol_ok" != true ]; then
+              echo "sha=$sha" >> "$GITHUB_OUTPUT"
+              echo "need_run=false" >> "$GITHUB_OUTPUT"
+              echo "OMEGA_HOSTED_RECOVERY_MAIN_PROTOCOL_NOT_EXECUTED sha=$sha"
+              exit 0
+            fi
+          fi
           payload="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/$sha/status")"
           need_run=true
           # Exact-candidate probes always rerun: a success emitted by an older
