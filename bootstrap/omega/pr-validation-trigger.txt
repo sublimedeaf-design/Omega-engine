@@ -1,1 +1,1 @@
-validate-exact-pr 4c7e4b28cc363321235e03383970de7cc33efea3 hardening/canonical-evidence-envelope-20260926 federation-v3-active-mesh
+validate-exact-pr 61bbf69be586a3f0d42e45ada7b65c094cbbfbb8 hardening/canonical-evidence-envelope-20260926 federation-v3-jarv-removed
