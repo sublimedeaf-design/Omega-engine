@@ -7,12 +7,13 @@ on:
         description: Hosted shadow/data cycle to run
         required: true
         type: choice
-        options: [daily, t24, t60]
+        options: [daily, t24, t60, settlement]
         default: t24
   schedule:
     - cron: "17 2 * * *"
     - cron: "7 * * * *"
     - cron: "3,18,33,48 * * * *"
+    - cron: "43 * * * *"
   push:
     paths:
       - ".github/workflows/omega-hosted-runtime-fallback.yml"
@@ -58,10 +59,11 @@ jobs:
               "17 2 * * *") mode=daily ;;
               "7 * * * *") mode=t24 ;;
               "3,18,33,48 * * * *") mode=t60 ;;
+              "43 * * * *") mode=settlement ;;
               *) echo "OMEGA_HOSTED_RUNTIME_UNKNOWN_SCHEDULE:$EVENT_SCHEDULE" >&2; exit 64 ;;
             esac
           fi
-          case "$mode" in daily|t24|t60) ;; *) exit 64 ;; esac
+          case "$mode" in daily|t24|t60|settlement) ;; *) exit 64 ;; esac
 
           set +x
           sha="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/main" --jq '.sha')"
@@ -188,6 +190,11 @@ jobs:
               restore_mode t24
               restore_mode t60
               ;;
+            settlement)
+              restore_mode t24
+              restore_mode t60
+              restore_mode settlement
+              ;;
           esac
 
       - name: Run canonical hosted fallback cycle
@@ -217,7 +224,44 @@ jobs:
           export OMEGA_GIT_REF=main
           export OMEGA_ENV_FILE=/dev/null
           export OMEGA_ALLOW_PUBLIC_PROVIDER_FALLBACK=1
-          timeout --signal=TERM --kill-after=30s 16m bash deploy/vm/omega-cycle.sh "$OMEGA_MODE"
+          run_cycle() {
+            local mode="$1"
+            echo "OMEGA_HOSTED_CHAIN_START mode=$mode sha=$OMEGA_SHA"
+            timeout --signal=TERM --kill-after=30s 16m bash deploy/vm/omega-cycle.sh "$mode"
+            echo "OMEGA_HOSTED_CHAIN_PASS mode=$mode sha=$OMEGA_SHA"
+          }
+
+          # Enforce exact-SHA dependency ordering instead of allowing a T60 or
+          # settlement shadow run to start without its same-source predecessor.
+          case "$OMEGA_MODE" in
+            daily)
+              run_cycle daily
+              ;;
+            t24)
+              run_cycle t24
+              ;;
+            t60)
+              if [ ! -s "$OMEGA_STATE/evidence/latest-24h.json" ] || [ ! -s "$OMEGA_STATE/evidence/forecast-ledger.jsonl" ]; then
+                echo "OMEGA_HOSTED_CHAIN_BOOTSTRAP t24_for_t60 sha=$OMEGA_SHA"
+                run_cycle t24
+              fi
+              run_cycle t60
+              ;;
+            settlement)
+              if [ ! -s "$OMEGA_STATE/evidence/latest-24h.json" ] || [ ! -s "$OMEGA_STATE/evidence/forecast-ledger.jsonl" ]; then
+                echo "OMEGA_HOSTED_CHAIN_BOOTSTRAP t24_for_settlement sha=$OMEGA_SHA"
+                run_cycle t24
+              fi
+              if [ ! -s "$OMEGA_STATE/evidence/latest-t60.json" ]; then
+                echo "OMEGA_HOSTED_CHAIN_BOOTSTRAP t60_for_settlement sha=$OMEGA_SHA"
+                run_cycle t60
+              fi
+              run_cycle settlement
+              ;;
+            *)
+              exit 64
+              ;;
+          esac
           auth_header=""
           unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
 
@@ -243,6 +287,9 @@ jobs:
               ;;
             t60)
               files=(evidence/latest-t60.json evidence/shadow-ledger.jsonl evidence/prematch-intelligence.jsonl evidence/prematch-intelligence-refresh-t60.json)
+              ;;
+            settlement)
+              files=(evidence/latest-settlement.json evidence/shadow-ledger.jsonl)
               ;;
             *) exit 64 ;;
           esac
