@@ -4,8 +4,8 @@
   "authority_repository": "sublimedeaf-design/Omega-engine",
   "state": "NOT_EXECUTED",
   "blockers": [
-    "recovery exact-SHA certification pending",
-    "federation peer exact-SHA validation pending"
+    "peer exact-SHA revalidation pending",
+    "recovery exact-SHA certification pending"
   ],
   "primary": {
     "repository": "sublimedeaf-design/Omega-engines",
@@ -16,35 +16,35 @@
   "peers": [
     {
       "repository": "sublimedeaf-design/Omega-recovery",
-      "sha": "fada88f3b1cfadf67725f7334e41224bb750030f",
+      "sha": "fd3680765d8d3237b279ed09a68aa1264e33f81c",
       "role": "control_recovery",
       "state": "NOT_EXECUTED",
       "contract_state": "NOT_EXECUTED",
-      "reason": "integral optimization contract present; certifying source epoch remains frozen until candidate promotion"
+      "reason": "frozen primary source binding updated; exact bridge revalidation pending"
     },
     {
       "repository": "sublimedeaf-design/Omega-agents",
-      "sha": "3673f265fed480da349f46807dbbc97ecc3fc408",
+      "sha": "a8d38c2d58eaf331e1249ac6b2ba233edc412dc0",
       "role": "agent_execution",
       "state": "NOT_EXECUTED",
       "contract_state": "NOT_EXECUTED",
-      "reason": "integral optimization contract present; certifying source epoch remains frozen until candidate promotion"
+      "reason": "frozen primary source binding updated; exact bridge revalidation pending"
     },
     {
       "repository": "sublimedeaf-design/Omega-validation",
-      "sha": "9c34f03c9320dfc3fcd8ade5aa0fbc33ad11a9d1",
+      "sha": "005cfbdbd0a9f2226d7b6abeb73a787465f8490f",
       "role": "independent_validation",
       "state": "NOT_EXECUTED",
       "contract_state": "NOT_EXECUTED",
-      "reason": "integral optimization contract present; certifying source epoch remains frozen until candidate promotion"
+      "reason": "frozen primary source binding updated; exact bridge revalidation pending"
     },
     {
       "repository": "sublimedeaf-design/Omega-release",
-      "sha": "92baa37d2a61964ded840fc968ec8ec55b6db70d",
+      "sha": "98b11b115ed128a24d03b475300f917b4c059b50",
       "role": "release_promotion",
       "state": "NOT_EXECUTED",
       "contract_state": "NOT_EXECUTED",
-      "reason": "integral optimization contract present; certifying source epoch remains frozen until candidate promotion"
+      "reason": "frozen primary source binding updated; exact bridge revalidation pending"
     }
   ],
   "hf": {
