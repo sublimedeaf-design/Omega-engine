@@ -171,8 +171,7 @@ jobs:
           cd omega
           test "$(git rev-parse HEAD)" = "$OMEGA_SOURCE_SHA"
           python -m venv .venv
-          .venv/bin/python -m pip --retries 5 --timeout 60 install --upgrade pip
-          .venv/bin/python -m pip --retries 5 --timeout 60 install -c requirements-ci.lock -e '.[dev,data]'
+          .venv/bin/python scripts/install_locked_ci_deps.py
           {
             echo "OMEGA_STATE=$RUNNER_TEMP/omega-state"
             echo "OMEGA_AUTO_REBUILD=0"
@@ -300,8 +299,7 @@ jobs:
           cd omega
           test "$(git rev-parse HEAD)" = "$OMEGA_SOURCE_SHA"
           python -m venv .venv
-          .venv/bin/python -m pip --retries 5 --timeout 60 install --upgrade pip
-          .venv/bin/python -m pip --retries 5 --timeout 60 install -c requirements-ci.lock -e '.[dev,data]'
+          .venv/bin/python scripts/install_locked_ci_deps.py
           echo "OMEGA_STATE=$RUNNER_TEMP/omega-state" >> "$GITHUB_ENV"
           echo "OMEGA_LOCAL_BRAIN_CONTEXT=4096" >> "$GITHUB_ENV"
           echo "OMEGA_LOCAL_BRAIN_THREADS=4" >> "$GITHUB_ENV"
