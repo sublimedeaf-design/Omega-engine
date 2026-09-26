@@ -266,9 +266,110 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      - name: Import fingerprint-bound cache-rescue handoff when available
+        id: rescue_sign
+        if: steps.gate.outputs.need_sign == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          FINAL_SHA: ${{ steps.handoff.outputs.final_sha }}
+          EXPECTED_FINGERPRINT: ${{ steps.artifact.outputs.expected_fingerprint }}
+          UNSIGNED_SHA256: ${{ steps.artifact.outputs.unsigned_sha256 }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          set +x
+          prefix="omega-signer-rescue-${FINAL_SHA}-"
+          releases="$(gh api "/repos/$PRIVATE_REPOSITORY/releases?per_page=100")"
+          tag="$(python3 - "$releases" "$prefix" <<'PY'
+          import json,sys
+          rows=json.loads(sys.argv[1]); prefix=sys.argv[2]
+          matches=[
+              r for r in rows
+              if not r.get("draft")
+              and str(r.get("tag_name") or "").startswith(prefix)
+          ]
+          matches.sort(key=lambda r:str(r.get("created_at") or ""), reverse=True)
+          if matches:
+              print(matches[0]["tag_name"])
+          PY
+          )"
+          if [ -z "$tag" ]; then
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "OMEGA_CACHE_RESCUE_HANDOFF_NOT_FOUND sha=$FINAL_SHA"
+            exit 0
+          fi
+
+          release="$(gh api "/repos/$PRIVATE_REPOSITORY/releases/tags/$tag")"
+          target="$(printf '%s' "$release" | jq -r .target_commitish)"
+          [ "$target" = "$FINAL_SHA" ] || {
+            echo "OMEGA_CACHE_RESCUE_TARGET_MISMATCH:$target!=$FINAL_SHA" >&2
+            exit 42
+          }
+
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "build-tools;36.0.0" >/dev/null
+          dir="$RUNNER_TEMP/cache-rescue-signed"
+          rm -rf "$dir"
+          mkdir -p "$dir" dist
+          gh release download "$tag" -R "$PRIVATE_REPOSITORY" \
+            -p "OMEGA-Engine.apk" \
+            -p "OMEGA-Engine.apk.sha256" \
+            -p "OMEGA-Engine.signed.provenance.json" \
+            -D "$dir"
+
+          test -s "$dir/OMEGA-Engine.apk"
+          test -s "$dir/OMEGA-Engine.apk.sha256"
+          test -s "$dir/OMEGA-Engine.signed.provenance.json"
+          actual_sha="$(sha256sum "$dir/OMEGA-Engine.apk" | awk '{print $1}')"
+          recorded_sha="$(awk '{print $1}' "$dir/OMEGA-Engine.apk.sha256")"
+          [ "$actual_sha" = "$recorded_sha" ] || {
+            echo OMEGA_CACHE_RESCUE_SIGNED_SHA_MISMATCH >&2
+            exit 43
+          }
+
+          python3 - "$dir/OMEGA-Engine.signed.provenance.json" "$FINAL_SHA" "$UNSIGNED_SHA256" "$actual_sha" "$EXPECTED_FINGERPRINT" <<'PY'
+          import json,re,sys
+          p=json.load(open(sys.argv[1],encoding="utf-8"))
+          final,unsigned,signed,fp=sys.argv[2:]
+          if p.get("classification")!="CANONICAL_SIGNED_RELEASE_CANDIDATE":
+              raise SystemExit("OMEGA_CACHE_RESCUE_CLASSIFICATION_INVALID")
+          if p.get("production_final") is not False:
+              raise SystemExit("OMEGA_CACHE_RESCUE_PRODUCTION_FLAG_INVALID")
+          if p.get("source_commit")!=final:
+              raise SystemExit("OMEGA_CACHE_RESCUE_SOURCE_SHA_MISMATCH")
+          if p.get("unsigned_apk_sha256")!=unsigned:
+              raise SystemExit("OMEGA_CACHE_RESCUE_UNSIGNED_SHA_MISMATCH")
+          if (p.get("signed_apk_sha256") or p.get("apk_sha256"))!=signed:
+              raise SystemExit("OMEGA_CACHE_RESCUE_SIGNED_SHA_PROVENANCE_MISMATCH")
+          if p.get("apk_sha256")!=signed:
+              raise SystemExit("OMEGA_CACHE_RESCUE_APK_SHA_PROVENANCE_MISMATCH")
+          if str(p.get("signer_certificate_sha256") or "").replace(":","").lower()!=fp:
+              raise SystemExit("OMEGA_CACHE_RESCUE_FINGERPRINT_PROVENANCE_MISMATCH")
+          if p.get("signer_continuity")!="PASS":
+              raise SystemExit("OMEGA_CACHE_RESCUE_CONTINUITY_NOT_PASS")
+          if p.get("signer_recovery_source")!="legacy_actions_cache_fingerprint_verified":
+              raise SystemExit("OMEGA_CACHE_RESCUE_SOURCE_INVALID")
+          if p.get("private_key_exported") is not False:
+              raise SystemExit("OMEGA_CACHE_RESCUE_PRIVATE_KEY_EXPORT_INVALID")
+          PY
+
+          out="$("$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$dir/OMEGA-Engine.apk")"
+          actual_fp="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' <<<"$out" | head -1 | tr -d ':' | tr 'A-F' 'a-f')"
+          [ "$actual_fp" = "$EXPECTED_FINGERPRINT" ] || {
+            echo OMEGA_CACHE_RESCUE_APK_CERT_MISMATCH >&2
+            exit 44
+          }
+          "$ANDROID_HOME/build-tools/36.0.0/zipalign" -c -P 16 -v 4 "$dir/OMEGA-Engine.apk" >/dev/null
+
+          cp "$dir/OMEGA-Engine.apk" dist/OMEGA-Engine.apk
+          cp "$dir/OMEGA-Engine.apk.sha256" dist/OMEGA-Engine.apk.sha256
+          cp "$dir/OMEGA-Engine.signed.provenance.json" dist/OMEGA-Engine.signed.provenance.json
+          echo "available=true" >> "$GITHUB_OUTPUT"
+          echo "apk_sha256=$actual_sha" >> "$GITHUB_OUTPUT"
+          echo "OMEGA_CACHE_RESCUE_HANDOFF_PASS sha=$FINAL_SHA tag=$tag signed_sha256=$actual_sha"
+
       - name: Sign on hosted runner from fingerprint-bound escrow when available
         id: hosted_sign
-        if: steps.gate.outputs.need_sign == 'true'
+        if: steps.gate.outputs.need_sign == 'true' && steps.rescue_sign.outputs.available != 'true'
         env:
           OMEGA_ANDROID_KEYSTORE_B64: ${{ secrets.OMEGA_ANDROID_KEYSTORE_B64 }}
           UNSIGNED_APK: ${{ steps.artifact.outputs.unsigned_apk }}
@@ -318,7 +419,7 @@ jobs:
 
       - name: Discover canonical private signer runtime
         id: wake
-        if: steps.gate.outputs.need_sign == 'true' && steps.hosted_sign.outputs.available != 'true'
+        if: steps.gate.outputs.need_sign == 'true' && steps.rescue_sign.outputs.available != 'true' && steps.hosted_sign.outputs.available != 'true'
         env:
           OMEGA_BOOTSTRAP_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
           OMEGA_CODESPACE_LIFECYCLE_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
@@ -327,7 +428,7 @@ jobs:
         run: python3 bootstrap/omega/codespace_wake.py
 
       - name: Mark signing blocked while canonical runtime is quota-gated
-        if: steps.gate.outputs.need_sign == 'true' && steps.hosted_sign.outputs.available != 'true' && steps.wake.outputs.runtime_available != 'true'
+        if: steps.gate.outputs.need_sign == 'true' && steps.rescue_sign.outputs.available != 'true' && steps.hosted_sign.outputs.available != 'true' && steps.wake.outputs.runtime_available != 'true'
         env:
           GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
           FINAL_SHA: ${{ steps.handoff.outputs.final_sha }}
@@ -338,7 +439,7 @@ jobs:
           echo "OMEGA_CANONICAL_SIGNER_BLOCKED_AUTORETRY sha=$FINAL_SHA"
 
       - name: Transfer immutable unsigned payload to canonical signer runtime
-        if: steps.gate.outputs.need_sign == 'true' && steps.hosted_sign.outputs.available != 'true' && steps.wake.outputs.runtime_available == 'true'
+        if: steps.gate.outputs.need_sign == 'true' && steps.rescue_sign.outputs.available != 'true' && steps.hosted_sign.outputs.available != 'true' && steps.wake.outputs.runtime_available == 'true'
         env:
           GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
           OMEGA_CODESPACE_NAME: ${{ steps.wake.outputs.codespace_name }}
@@ -359,7 +460,7 @@ jobs:
           } | timeout 60s gh codespace ssh -c "$OMEGA_CODESPACE_NAME" -- bash -s
 
       - name: Sign only with the established canonical Android identity
-        if: steps.gate.outputs.need_sign == 'true' && steps.hosted_sign.outputs.available != 'true' && steps.wake.outputs.runtime_available == 'true'
+        if: steps.gate.outputs.need_sign == 'true' && steps.rescue_sign.outputs.available != 'true' && steps.hosted_sign.outputs.available != 'true' && steps.wake.outputs.runtime_available == 'true'
         env:
           GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
           OMEGA_CODESPACE_NAME: ${{ steps.wake.outputs.codespace_name }}
@@ -405,7 +506,7 @@ jobs:
 
       - name: Retrieve signed payload without exporting private key
         id: signed
-        if: steps.gate.outputs.need_sign == 'true' && steps.hosted_sign.outputs.available != 'true' && steps.wake.outputs.runtime_available == 'true'
+        if: steps.gate.outputs.need_sign == 'true' && steps.rescue_sign.outputs.available != 'true' && steps.hosted_sign.outputs.available != 'true' && steps.wake.outputs.runtime_available == 'true'
         env:
           GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
           OMEGA_CODESPACE_NAME: ${{ steps.wake.outputs.codespace_name }}
@@ -423,7 +524,7 @@ jobs:
           timeout 30s gh codespace ssh -c "$OMEGA_CODESPACE_NAME" -- bash -c 'rm -f /tmp/omega-release-unsigned.apk /tmp/omega-release-signed.apk /tmp/omega-signer-verify.txt' || true
 
       - name: Independently verify signed APK and provenance
-        if: steps.gate.outputs.need_sign == 'true' && (steps.hosted_sign.outputs.available == 'true' || steps.wake.outputs.runtime_available == 'true')
+        if: steps.gate.outputs.need_sign == 'true' && (steps.rescue_sign.outputs.available == 'true' || steps.hosted_sign.outputs.available == 'true' || steps.wake.outputs.runtime_available == 'true')
         env:
           FINAL_SHA: ${{ steps.handoff.outputs.final_sha }}
           EXPECTED_FINGERPRINT: ${{ steps.artifact.outputs.expected_fingerprint }}
@@ -461,7 +562,7 @@ jobs:
           PY
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-        if: steps.gate.outputs.need_sign == 'true' && (steps.hosted_sign.outputs.available == 'true' || steps.wake.outputs.runtime_available == 'true')
+        if: steps.gate.outputs.need_sign == 'true' && (steps.rescue_sign.outputs.available == 'true' || steps.hosted_sign.outputs.available == 'true' || steps.wake.outputs.runtime_available == 'true')
         with:
           name: OMEGA-Signed-Release-${{ steps.handoff.outputs.final_sha }}
           retention-days: 7
@@ -472,7 +573,7 @@ jobs:
             dist/OMEGA-Engine.signed.provenance.json
 
       - name: Publish canonical signer and signed-APK proof
-        if: steps.gate.outputs.need_sign == 'true' && (steps.hosted_sign.outputs.available == 'true' || steps.wake.outputs.runtime_available == 'true')
+        if: steps.gate.outputs.need_sign == 'true' && (steps.rescue_sign.outputs.available == 'true' || steps.hosted_sign.outputs.available == 'true' || steps.wake.outputs.runtime_available == 'true')
         env:
           GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
           FINAL_SHA: ${{ steps.handoff.outputs.final_sha }}
@@ -484,7 +585,7 @@ jobs:
           done
 
       - name: Dispatch exact signer run to cold-start without workflow_run depth chaining
-        if: steps.gate.outputs.need_sign == 'true' && (steps.hosted_sign.outputs.available == 'true' || steps.wake.outputs.runtime_available == 'true')
+        if: steps.gate.outputs.need_sign == 'true' && (steps.rescue_sign.outputs.available == 'true' || steps.hosted_sign.outputs.available == 'true' || steps.wake.outputs.runtime_available == 'true')
         env:
           GH_TOKEN: ${{ github.token }}
           SIGNER_RUN_ID: ${{ github.run_id }}
