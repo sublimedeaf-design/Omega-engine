@@ -1,1 +1,1 @@
-validate-exact-pr 6560946cda03347289a76172b6a6a9b9b39bb1b2 hardening/canonical-evidence-envelope-20260926 deterministic-recovery-authority-v1
+validate-exact-pr 6560946cda03347289a76172b6a6a9b9b39bb1b2 hardening/canonical-evidence-envelope-20260926 deterministic-recovery-authority-v2
