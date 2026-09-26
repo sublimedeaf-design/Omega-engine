@@ -118,9 +118,9 @@ jobs:
             sed -n '1,3p' "$actions_err" >&2 || true
             rm -f "$actions_err"
             gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$sha" \
-              -f state=error \
-              -f context="omega/signer/continuity" \
-              -f description="BLOCKED: private Actions read/write permission unavailable" >/dev/null 2>&1 || true
+              -f state=pending \
+              -f context="omega/signer/key-availability" \
+              -f description="BLOCKED: private Actions authority unavailable; signer identity remains separately attested" >/dev/null 2>&1 || true
             gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$sha" \
               -f state=error \
               -f context="omega/authority/private-actions" \
@@ -142,9 +142,9 @@ jobs:
             sed -n '1,3p' "$dispatch_err" >&2 || true
             rm -f "$dispatch_err"
             gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$sha" \
-              -f state=error \
-              -f context="omega/signer/continuity" \
-              -f description="BLOCKED: private Actions dispatch permission unavailable" >/dev/null 2>&1 || true
+              -f state=pending \
+              -f context="omega/signer/key-availability" \
+              -f description="BLOCKED: private Actions dispatch unavailable; signer identity remains separately attested" >/dev/null 2>&1 || true
             gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$sha" \
               -f state=error \
               -f context="omega/authority/private-actions" \

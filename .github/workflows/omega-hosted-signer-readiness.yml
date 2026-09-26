@@ -40,13 +40,19 @@ jobs:
             echo OMEGA_HOSTED_SIGNER_READINESS_NOT_EXECUTED_NO_CANDIDATE
             exit 0
           fi
+          publish() {
+            local state="$1" ctx="$2" desc="$3"
+            gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$candidate" \
+              -f state="$state" \
+              -f context="$ctx" \
+              -f description="$desc" \
+              -f target_url="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" >/dev/null 2>&1 || true
+          }
           if [ -z "${OMEGA_ANDROID_KEYSTORE_B64:-}" ]; then
             echo "OMEGA_HOSTED_SIGNER_ESCROW_NOT_CONFIGURED candidate=$candidate" >&2
-            gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$candidate" \
-              -f state=error \
-              -f context="omega/signer/escrow" \
-              -f description="BLOCKED: hosted canonical signer escrow not configured" >/dev/null 2>&1 || true
-            echo "OMEGA_HOSTED_SIGNER_ESCROW_BLOCKED_STATE candidate=$candidate"
+            publish pending "omega/signer/key-availability" "BLOCKED: canonical private key not currently available to hosted signer"
+            publish error "omega/signer/escrow" "BLOCKED: hosted canonical signer escrow not configured"
+            echo "OMEGA_HOSTED_SIGNER_KEY_AVAILABILITY_BLOCKED candidate=$candidate"
             exit 0
           fi
           expected="$(gh api "/repos/$PRIVATE_REPOSITORY/contents/android/signing-cert.sha256?ref=$candidate" --jq '.content' | tr -d '\n' | base64 -d | tr -d '[:space:]' | tr -d ':' | tr 'A-F' 'a-f')"
@@ -55,12 +61,17 @@ jobs:
           cleanup(){ rm -f "$key"; }
           trap cleanup EXIT
           umask 077
-          printf '%s' "$OMEGA_ANDROID_KEYSTORE_B64" | base64 -d > "$key" || { echo OMEGA_HOSTED_SIGNER_ESCROW_DECODE_FAILED >&2; exit 32; }
+          if ! printf '%s' "$OMEGA_ANDROID_KEYSTORE_B64" | base64 -d > "$key"; then
+            publish error "omega/signer/key-availability" "FAILED: canonical signer escrow decode failed"
+            echo OMEGA_HOSTED_SIGNER_ESCROW_DECODE_FAILED >&2
+            exit 32
+          fi
           actual="$(keytool -list -v -keystore "$key" -storepass android -alias androiddebugkey 2>/dev/null | sed -n 's/.*SHA256: //p' | head -1 | tr -d ':' | tr 'A-F' 'a-f')"
-          [ "$actual" = "$expected" ] || { echo OMEGA_HOSTED_SIGNER_ESCROW_FINGERPRINT_MISMATCH >&2; exit 33; }
-          gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$candidate" \
-            -f state=success \
-            -f context="omega/signer/escrow" \
-            -f description="hosted canonical signer escrow fingerprint verified" \
-            -f target_url="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" >/dev/null 2>&1 || true
+          if [ "$actual" != "$expected" ]; then
+            publish error "omega/signer/key-availability" "FAILED: escrow key does not match canonical signer fingerprint"
+            echo OMEGA_HOSTED_SIGNER_ESCROW_FINGERPRINT_MISMATCH >&2
+            exit 33
+          fi
+          publish success "omega/signer/key-availability" "canonical private key available and fingerprint verified"
+          publish success "omega/signer/escrow" "hosted canonical signer escrow fingerprint verified"
           echo "OMEGA_HOSTED_SIGNER_ESCROW_READY candidate=$candidate"
