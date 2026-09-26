@@ -55,6 +55,58 @@ files.each do |file|
   end
 end
 
+# GitHub limits workflow_run chaining to three levels. Build the workflow_run
+# dependency graph from parsed YAML so this platform limit cannot regress.
+workflow_names = {}
+workflow_run_deps = Hash.new { |h, k| h[k] = [] }
+files.each do |file|
+  doc = Psych.safe_load_file(file, aliases: true)
+  next unless doc.is_a?(Hash)
+  name = doc["name"].to_s.strip
+  fail!("#{file}:workflow_name_missing") if name.empty?
+  fail!("duplicate_workflow_name:#{name}") if workflow_names.key?(name)
+  workflow_names[name] = file
+
+  on_value = doc["on"] || doc[true]
+  next unless on_value.is_a?(Hash)
+  wr = on_value["workflow_run"]
+  next unless wr.is_a?(Hash)
+  deps = wr["workflows"]
+  deps = [deps] if deps.is_a?(String)
+  next if deps.nil?
+  fail!("#{file}:workflow_run_workflows_invalid") unless deps.is_a?(Array)
+  deps.each do |dep|
+    dep_name = dep.to_s.strip
+    fail!("#{file}:workflow_run_dependency_empty") if dep_name.empty?
+    workflow_run_deps[name] << dep_name
+  end
+end
+
+workflow_run_deps.each do |child, deps|
+  deps.each do |parent|
+    fail!("workflow_run_unknown_parent:#{child}:#{parent}") unless workflow_names.key?(parent)
+  end
+end
+
+children = Hash.new { |h, k| h[k] = [] }
+workflow_run_deps.each do |child, parents|
+  parents.each { |parent| children[parent] << child }
+end
+
+visit = lambda do |name, path|
+  if path.include?(name)
+    cycle = (path[path.index(name)..] + [name]).join(" -> ")
+    fail!("workflow_run_cycle:#{cycle}")
+  end
+  next_path = path + [name]
+  if next_path.length - 1 > 3
+    fail!("workflow_run_depth_exceeded:#{next_path.join(' -> ')}")
+  end
+  children[name].sort.each { |child| visit.call(child, next_path) }
+end
+
+workflow_names.keys.sort.each { |name| visit.call(name, []) }
+
 recovery_path = WORKFLOWS.join("omega-hosted-recovery-failover.yml")
 recovery = File.read(recovery_path, encoding: "UTF-8")
 {
