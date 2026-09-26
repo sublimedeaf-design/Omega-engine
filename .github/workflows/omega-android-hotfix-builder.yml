@@ -1,0 +1,161 @@
+name: OMEGA Android Hotfix Builder
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: "Exact Omega-engines source SHA to build"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: omega-android-hotfix-builder-${{ inputs.source_sha }}
+  cancel-in-progress: false
+
+env:
+  PRIVATE_REPOSITORY: sublimedeaf-design/Omega-engines
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Validate requested source SHA
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -Eeuo pipefail
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "OMEGA_HOTFIX_SOURCE_SHA_INVALID"; exit 64; }
+
+      - name: Detect scoped private source authority
+        id: app_config
+        env:
+          APP_CLIENT_ID: ${{ vars.OMEGA_RELEASE_APP_CLIENT_ID }}
+          APP_PRIVATE_KEY: ${{ secrets.OMEGA_RELEASE_APP_PRIVATE_KEY }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          configured=false
+          if [ -n "${APP_CLIENT_ID:-}" ] && [ -n "${APP_PRIVATE_KEY:-}" ]; then configured=true; fi
+          echo "configured=$configured" >> "$GITHUB_OUTPUT"
+
+      - name: Mint scoped private source token
+        id: app
+        if: steps.app_config.outputs.configured == 'true'
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          client-id: ${{ vars.OMEGA_RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.OMEGA_RELEASE_APP_PRIVATE_KEY }}
+          owner: sublimedeaf-design
+          repositories: Omega-engines
+          permission-contents: read
+
+      - name: Select private source authority
+        shell: bash
+        env:
+          APP_TOKEN: ${{ steps.app.outputs.token }}
+          LEGACY_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+        run: |
+          set -Eeuo pipefail
+          token="${APP_TOKEN:-}"
+          [ -n "$token" ] || token="${LEGACY_TOKEN:-}"
+          [ -n "$token" ] || { echo "OMEGA_HOTFIX_PRIVATE_SOURCE_AUTH_MISSING"; exit 77; }
+          echo "::add-mask::$token"
+          echo "OMEGA_PRIVATE_SOURCE_TOKEN=$token" >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: sublimedeaf-design/Omega-engines
+          ref: ${{ inputs.source_sha }}
+          token: ${{ env.OMEGA_PRIVATE_SOURCE_TOKEN }}
+          path: omega
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify exact source
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -Eeuo pipefail
+          test "$(git -C omega rev-parse HEAD)" = "$SOURCE_SHA"
+
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install Android SDK 36
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "platforms;android-36" "build-tools;36.0.0" >/dev/null
+
+      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb
+        with:
+          gradle-version: "8.13"
+
+      - name: Build exact unsigned hotfix APK
+        id: build
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          OMEGA_SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -Eeuo pipefail
+          cd omega
+          python3 scripts/materialize_gradle_verification.py
+          mkdir -p android/app/src/main/assets/evidence
+          for name in latest-24h.json latest-t60.json coverage-gaps.json; do
+            [ ! -s "evidence/$name" ] || cp "evidence/$name" "android/app/src/main/assets/evidence/$name"
+          done
+          sed -i '/signingConfig = signingConfigs.getByName("omegaPersonal")/d' android/app/build.gradle.kts
+          (cd android && gradle --no-daemon --dependency-verification strict --stacktrace lintRelease assembleRelease)
+          apk="$(find android/app/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' -print -quit)"
+          test -s "$apk" || { echo "OMEGA_HOTFIX_UNSIGNED_APK_MISSING"; exit 71; }
+          if "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify "$apk" >/dev/null 2>&1; then
+            echo "OMEGA_HOTFIX_UNSIGNED_APK_UNEXPECTEDLY_SIGNED" >&2
+            exit 72
+          fi
+          mkdir -p dist
+          "$ANDROID_HOME/build-tools/36.0.0/zipalign" -f -P 16 4 "$apk" dist/OMEGA-Engine-unsigned.apk
+          "$ANDROID_HOME/build-tools/36.0.0/zipalign" -c -P 16 -v 4 dist/OMEGA-Engine-unsigned.apk >/dev/null
+          sha256sum dist/OMEGA-Engine-unsigned.apk > dist/OMEGA-Engine-unsigned.apk.sha256
+          python3 - <<'PY'
+          import hashlib,json,os,pathlib,re
+          root=pathlib.Path(".")
+          apk=root/"dist/OMEGA-Engine-unsigned.apk"
+          digest=hashlib.sha256(apk.read_bytes()).hexdigest()
+          gradle=(root/"android/app/build.gradle.kts").read_text()
+          vc=re.search(r'versionCode\s*=\s*(\d+)',gradle)
+          vn=re.search(r'versionName\s*=\s*"([^"]+)"',gradle)
+          if not vc or not vn: raise SystemExit("OMEGA_HOTFIX_VERSION_METADATA_MISSING")
+          p={
+            "schema_version":1,
+            "classification":"ANDROID_STARTUP_HOTFIX_UNSIGNED",
+            "production_final":False,
+            "source_commit":os.environ["SOURCE_SHA"],
+            "version_code":int(vc.group(1)),
+            "version_name":vn.group(1),
+            "unsigned_apk_sha256":digest,
+            "expected_signer_certificate_sha256":(root/"android/signing-cert.sha256").read_text().strip().lower()
+          }
+          (root/"dist/OMEGA-Engine.hotfix.provenance.json").write_text(json.dumps(p,indent=2,sort_keys=True)+"\n")
+          PY
+          echo "OMEGA_HOTFIX_BUILD_PASS source=$SOURCE_SHA sha256=$(awk '{print $1}' dist/OMEGA-Engine-unsigned.apk.sha256)"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: OMEGA-Hotfix-Unsigned-${{ inputs.source_sha }}
+          retention-days: 1
+          if-no-files-found: error
+          path: |
+            omega/dist/OMEGA-Engine-unsigned.apk
+            omega/dist/OMEGA-Engine-unsigned.apk.sha256
+            omega/dist/OMEGA-Engine.hotfix.provenance.json
