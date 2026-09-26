@@ -10,7 +10,7 @@ on:
 
 permissions:
   contents: read
-  actions: read
+  actions: write
 
 concurrency:
   group: omega-canonical-android-signer
@@ -428,3 +428,17 @@ jobs:
           for ctx in omega/signer/continuity omega/android-release-signed; do
             gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$FINAL_SHA"               -f state=success -f context="$ctx"               -f description="canonical Android signer continuity verified on immutable release payload"               -f target_url="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" >/dev/null
           done
+
+      - name: Dispatch exact signer run to cold-start without workflow_run depth chaining
+        if: steps.gate.outputs.need_sign == 'true' && (steps.hosted_sign.outputs.available == 'true' || steps.wake.outputs.runtime_available == 'true')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SIGNER_RUN_ID: ${{ github.run_id }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          gh workflow run omega-android-runtime-coldstart.yml \
+            -R "$GITHUB_REPOSITORY" \
+            --ref main \
+            -f signer_run_id="$SIGNER_RUN_ID"
+          echo "OMEGA_ANDROID_COLDSTART_DISPATCHED signer_run=$SIGNER_RUN_ID"
