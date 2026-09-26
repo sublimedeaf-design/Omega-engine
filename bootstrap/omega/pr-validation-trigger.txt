@@ -1,1 +1,1 @@
-validate-exact-pr 5b3d68b700c0e0fb7c9455febb36196e641f8fea hardening/canonical-evidence-envelope-20260926 federation-v3-external-authority
+validate-exact-pr 6e958a6ab4ffc39f2846d4b55f579f6e6a0acbe2 hardening/canonical-evidence-envelope-20260926 federation-v3-external-authority-v2
