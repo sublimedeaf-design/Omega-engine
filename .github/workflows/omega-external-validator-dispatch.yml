@@ -168,7 +168,9 @@ jobs:
           ref: ${{ needs.discover.outputs.sha }}
           token: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
           persist-credentials: false
-          fetch-depth: 1
+          # Supply-chain verification executes git merge-base against the pinned
+          # Gradle dependency source. Keep complete history in the bounded bundle.
+          fetch-depth: 0
           path: omega
 
       - name: Build exact-source bounded bundle
