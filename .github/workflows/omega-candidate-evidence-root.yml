@@ -145,6 +145,105 @@ jobs:
           test -s "$canonical"
           echo "OMEGA_RECOVERY_ATTESTATION_NORMALIZED source=${matches[0]}"
 
+      - name: Download exact recovery package
+        if: ${{ steps.pin.outputs.ready == 'true' }}
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: omega-hosted-recovery-${{ steps.pin.outputs.sha }}
+          path: ${{ runner.temp }}/recovery-package
+          github-token: ${{ github.token }}
+          run-id: ${{ env.RECOVERY_RUN_ID }}
+
+      - name: Verify recovery package completeness and content addresses
+        if: ${{ steps.pin.outputs.ready == 'true' }}
+        env:
+          SOURCE_SHA: ${{ steps.pin.outputs.sha }}
+          RECOVERY_ATTESTATION_DIR: ${{ runner.temp }}/recovery-attestation
+          RECOVERY_PACKAGE_DIR: ${{ runner.temp }}/recovery-package
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          import hashlib,json,os,pathlib,tarfile
+
+          source=os.environ["SOURCE_SHA"]
+          att_path=pathlib.Path(os.environ["RECOVERY_ATTESTATION_DIR"])/"recovery-attestation.json"
+          package_dir=pathlib.Path(os.environ["RECOVERY_PACKAGE_DIR"])
+          archive=package_dir/"omega-recovery-state.tgz"
+          checksum=package_dir/"omega-recovery-state.tgz.sha256"
+          for p in (att_path,archive,checksum):
+              if not p.is_file():
+                  raise SystemExit("OMEGA_EVIDENCE_ROOT_RECOVERY_PACKAGE_FILE_MISSING:"+str(p))
+
+          def sha256_file(path):
+              h=hashlib.sha256()
+              with pathlib.Path(path).open("rb") as fh:
+                  for chunk in iter(lambda:fh.read(1<<20),b""):
+                      h.update(chunk)
+              return h.hexdigest()
+
+          att=json.loads(att_path.read_text(encoding="utf-8"))
+          pred=att.get("predicate") or {}
+          expected=str(pred.get("recovery_package_sha256") or "").lower()
+          actual=sha256_file(archive)
+          recorded=checksum.read_text(encoding="utf-8").strip().split()[0].lower()
+          if not expected or actual!=expected or recorded!=expected:
+              raise SystemExit("OMEGA_EVIDENCE_ROOT_RECOVERY_PACKAGE_DIGEST_MISMATCH")
+
+          extract=package_dir/"verified"
+          extract.mkdir(parents=True,exist_ok=True)
+          with tarfile.open(archive,"r:gz") as tf:
+              members=tf.getmembers()
+              if not members:
+                  raise SystemExit("OMEGA_EVIDENCE_ROOT_RECOVERY_ARCHIVE_EMPTY")
+              for member in members:
+                  logical=pathlib.PurePosixPath(member.name)
+                  if logical.is_absolute() or ".." in logical.parts or not logical.parts:
+                      raise SystemExit("OMEGA_EVIDENCE_ROOT_RECOVERY_PATH_UNSAFE:"+member.name)
+                  if logical.parts[0] not in {"evidence","logs"}:
+                      raise SystemExit("OMEGA_EVIDENCE_ROOT_RECOVERY_SCOPE_INVALID:"+member.name)
+                  if member.issym() or member.islnk() or member.isdev():
+                      raise SystemExit("OMEGA_EVIDENCE_ROOT_RECOVERY_SPECIAL_FILE:"+member.name)
+              tf.extractall(extract,members=members,filter="data")
+
+          manifest_path=extract/"evidence/recovery-package-manifest.json"
+          if not manifest_path.is_file():
+              raise SystemExit("OMEGA_EVIDENCE_ROOT_RECOVERY_MANIFEST_MISSING")
+          manifest=json.loads(manifest_path.read_text(encoding="utf-8"))
+          if manifest.get("schema_version")!=1 or manifest.get("source_sha")!=source:
+              raise SystemExit("OMEGA_EVIDENCE_ROOT_RECOVERY_MANIFEST_IDENTITY_MISMATCH")
+          artifacts=manifest.get("artifacts") or []
+          if not artifacts:
+              raise SystemExit("OMEGA_EVIDENCE_ROOT_RECOVERY_MANIFEST_EMPTY")
+          seen=set()
+          for row in artifacts:
+              raw=str(row.get("path") or "")
+              logical=pathlib.PurePosixPath(raw)
+              if logical.is_absolute() or ".." in logical.parts or not logical.parts or raw in seen:
+                  raise SystemExit("OMEGA_EVIDENCE_ROOT_RECOVERY_MANIFEST_PATH_INVALID:"+raw)
+              seen.add(raw)
+              target=extract/"evidence"/pathlib.Path(*logical.parts)
+              if not target.is_file() or target.is_symlink():
+                  raise SystemExit("OMEGA_EVIDENCE_ROOT_RECOVERY_MANIFEST_ARTIFACT_MISSING:"+raw)
+              expected_artifact=str(row.get("sha256") or "").lower()
+              if sha256_file(target)!=expected_artifact:
+                  raise SystemExit("OMEGA_EVIDENCE_ROOT_RECOVERY_MANIFEST_HASH_MISMATCH:"+raw)
+
+          required={
+              "execution-envelope.json","execution-runtime.json",
+              "federation-epoch.json","federation-epoch.authority.json",
+              "t24-binding.json","t60-binding.json","qa-binding.json","settlement-binding.json",
+              "latest-24h.json","latest-t60.json","latest-settlement.json",
+              "coverage-gaps.json","acceptance-agents.json",
+              "latest-agent-promotion.json","repo-audit-after-agents.json",
+              "forecast-ledger.jsonl","shadow-ledger.jsonl","prematch-intelligence.jsonl",
+          }
+          missing=sorted(required-seen)
+          if missing:
+              raise SystemExit("OMEGA_EVIDENCE_ROOT_RECOVERY_MANIFEST_REQUIRED_MISSING:"+",".join(missing))
+          print(f"OMEGA_EVIDENCE_ROOT_RECOVERY_PACKAGE_PASS artifacts={len(artifacts)} sha256={actual}")
+          PY
+
       - name: Build candidate SBOM/provenance root
         if: ${{ steps.pin.outputs.ready == 'true' }}
         id: root
