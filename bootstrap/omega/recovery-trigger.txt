@@ -1,1 +1,1 @@
-recover-exact a81a562fcb12503fa40497da687cb5ea29b8d430 hardening/canonical-evidence-envelope-20260926 final-integral-recovery-freeze-v1
+recover-exact 52d4c01973dbbe4581d25c10a5127fa183d82d60 hardening/canonical-evidence-envelope-20260926 normalized-contract-attestation-v1
