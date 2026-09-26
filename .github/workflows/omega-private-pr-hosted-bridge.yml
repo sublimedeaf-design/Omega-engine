@@ -222,6 +222,11 @@ jobs:
           }}
           json.dump(event,open("/tmp/omega-pr-event.json","w"))
           PY
+      - name: Preflight Python syntax once before matrix
+        working-directory: omega
+        shell: bash
+        run: python -m compileall -q src scripts tests
+
       - name: Validate exact governance
         working-directory: omega
         shell: bash
