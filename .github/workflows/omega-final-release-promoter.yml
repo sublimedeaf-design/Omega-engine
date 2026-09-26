@@ -33,10 +33,43 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Mint scoped private release authority
+        id: release_app
+        if: ${{ vars.OMEGA_RELEASE_APP_CLIENT_ID != '' && secrets.OMEGA_RELEASE_APP_PRIVATE_KEY != '' }}
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          client-id: ${{ vars.OMEGA_RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.OMEGA_RELEASE_APP_PRIVATE_KEY }}
+          owner: sublimedeaf-design
+          repositories: Omega-engines
+          permission-contents: write
+          permission-statuses: write
+
+      - name: Select private release authority
+        env:
+          APP_TOKEN: ${{ steps.release_app.outputs.token }}
+          LEGACY_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          if [ -n "${APP_TOKEN:-}" ]; then
+            token="$APP_TOKEN"
+            source=github-app
+          else
+            token="${LEGACY_TOKEN:-}"
+            source=legacy-bootstrap
+          fi
+          [ -n "$token" ] || { echo "OMEGA_RELEASE_AUTHORITY_MISSING" >&2; exit 77; }
+          echo "::add-mask::$token"
+          echo "OMEGA_PRIVATE_RELEASE_TOKEN=$token" >> "$GITHUB_ENV"
+          echo "OMEGA_RELEASE_AUTH_SOURCE=$source" >> "$GITHUB_ENV"
+          echo "OMEGA_RELEASE_AUTHORITY_SELECTED source=$source"
+
       - name: Resolve final release SHA and require the full exact-SHA gate set
         id: gate
         env:
-          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          GH_TOKEN: ${{ env.OMEGA_PRIVATE_RELEASE_TOKEN }}
+          CONTROL_GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -92,7 +125,7 @@ jobs:
             exit 0
           fi
 
-          authority="$(gh api "/repos/$CONTROL_REPOSITORY/contents/federation/epochs/current.json?ref=main" --jq '.content' | python3 -c 'import base64,sys; print(base64.b64decode("".join(sys.stdin.read().split()),validate=True).decode(),end="")')"
+          authority="$(GH_TOKEN="$CONTROL_GH_TOKEN" gh api "/repos/$CONTROL_REPOSITORY/contents/federation/epochs/current.json?ref=main" --jq '.content' | python3 -c 'import base64,sys; print(base64.b64decode("".join(sys.stdin.read().split()),validate=True).decode(),end="")')"
           AUTHORITY="$authority" CANDIDATE="$candidate" SOURCE_REF="$source_ref" python3 <<'PY'
           import json,os
           d=json.loads(os.environ["AUTHORITY"]); p=d.get("primary") or {}
@@ -115,7 +148,7 @@ jobs:
       - name: Fast-forward private main to the already-proven exact SHA
         if: steps.gate.outputs.ready == 'true'
         env:
-          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          GH_TOKEN: ${{ env.OMEGA_PRIVATE_RELEASE_TOKEN }}
           FINAL_SHA: ${{ steps.gate.outputs.sha }}
         shell: bash
         run: |
@@ -146,7 +179,7 @@ jobs:
         with:
           repository: ${{ env.PRIVATE_REPOSITORY }}
           ref: ${{ steps.gate.outputs.sha }}
-          token: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          token: ${{ env.OMEGA_PRIVATE_RELEASE_TOKEN }}
           persist-credentials: false
           fetch-depth: 0
           path: omega
@@ -154,7 +187,7 @@ jobs:
       - name: Download canonical signed APK and final candidate evidence root
         if: steps.gate.outputs.ready == 'true'
         env:
-          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
           FINAL_SHA: ${{ steps.gate.outputs.sha }}
           SIGNER_RUN_ID: ${{ steps.gate.outputs.signer_run_id }}
           EVIDENCE_RUN_ID: ${{ steps.gate.outputs.evidence_run_id }}
@@ -347,7 +380,7 @@ jobs:
         if: steps.gate.outputs.ready == 'true'
         working-directory: omega
         env:
-          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          GH_TOKEN: ${{ env.OMEGA_PRIVATE_RELEASE_TOKEN }}
           FINAL_SHA: ${{ steps.gate.outputs.sha }}
         shell: bash
         run: |
@@ -383,7 +416,7 @@ jobs:
         if: steps.gate.outputs.ready == 'true'
         working-directory: omega
         env:
-          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          GH_TOKEN: ${{ env.OMEGA_PRIVATE_RELEASE_TOKEN }}
           FINAL_SHA: ${{ steps.gate.outputs.sha }}
           TAG: ${{ steps.release.outputs.tag }}
           RELEASE_URL: ${{ steps.release.outputs.url }}
