@@ -5,7 +5,6 @@ on:
     branches: ['federation/v3-control-plane-20260926', main]
     paths:
       - 'federation/epochs/current.json'
-      - 'federation/epochs/releases/**'
       - '.github/workflows/omega-federation-v3-peer-bridge.yml'
       - 'scripts/verify_federation_epoch.py'
   schedule:
