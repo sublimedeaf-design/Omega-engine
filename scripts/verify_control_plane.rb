@@ -105,6 +105,7 @@ fail!("gate_classifier_self_test_missing") unless integrity_workflow.include?("o
 
 %w[
   incident_id
+  diagnostic_sha256
   retryable
   max_attempts
   next_action
