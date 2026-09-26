@@ -4,6 +4,7 @@ on:
   workflow_run:
     workflows:
       - "OMEGA Canonical Android Signer"
+      - "OMEGA Android Runtime Cold Start"
       - "OMEGA Private PR Hosted Bridge"
     types: [completed]
   workflow_dispatch:
@@ -61,6 +62,7 @@ jobs:
               "omega/release-evidence-staged","omega/android-release-unsigned",
               "omega/federation-v3-release","omega/hosted-recovery","omega/recovery-attestation",
               "omega/candidate-evidence-root","omega/signer/continuity","omega/android-release-signed",
+              "omega/android-runtime-coldstart",
           )
           bad=[x for x in required if (latest.get(x) or {}).get("state")!="success"]
           if bad:
