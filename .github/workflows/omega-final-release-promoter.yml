@@ -13,6 +13,7 @@ on:
 
 permissions:
   contents: read
+  actions: write
   id-token: write
 
 concurrency:
@@ -272,8 +273,11 @@ jobs:
               raise SystemExit("OMEGA_FINAL_CHECKOUT_SHA_MISMATCH")
           import re
           gradle=pathlib.Path("android/app/build.gradle.kts").read_text(encoding="utf-8")
-          vm=re.search(r'versionName\s*=\s*"([^"]+)"',gradle); vc=re.search(r'versionCode\s*=\s*(\d+)',gradle)
+          vm=re.search(r'versionName\s*=\s*"([^"]+)"',gradle)
+          vc=re.search(r'versionCode\s*=\s*(\d+)',gradle)
+          app_id=re.search(r'applicationId\s*=\s*"([A-Za-z0-9_.]+)"',gradle)
           if not vm or not vc: raise SystemExit("OMEGA_FINAL_ANDROID_VERSION_MISSING")
+          if not app_id: raise SystemExit("OMEGA_FINAL_ANDROID_APPLICATION_ID_MISSING")
           if int(vc.group(1))!=int(stage.get("target_version_code") or -1):
               raise SystemExit("OMEGA_FINAL_ANDROID_VERSION_CODE_MISMATCH")
           evidence_names=("latest-24h.json","latest-t60.json","coverage-gaps.json","release-stage.json",
@@ -287,6 +291,7 @@ jobs:
               "production_final":True,
               "source_commit":final,
               "code_source_sha":stage.get("code_source_sha"),
+              "application_id":app_id.group(1),
               "android_version":vm.group(1),
               "android_version_code":int(vc.group(1)),
               "apk_sha256":os.environ["OMEGA_APK_SHA"],
@@ -310,6 +315,7 @@ jobs:
           pathlib.Path("dist/OMEGA-Engine.sbom.spdx.json").write_bytes(sbom.read_bytes())
           pathlib.Path("dist/OMEGA-Engine.final-recovery-root.json").write_bytes(pathlib.Path(sys.argv[1]).read_bytes())
           pathlib.Path("dist/OMEGA-Engine.apk.sha256").write_text(os.environ["OMEGA_APK_SHA"]+"  OMEGA-Engine.apk\n",encoding="utf-8")
+          print(app_id.group(1))
           print(vm.group(1))
           print(vc.group(1))
           PY
@@ -394,3 +400,19 @@ jobs:
             -f description="production-final Android release published and verified" \
             -f target_url="$RELEASE_URL" >/dev/null
           echo "OMEGA_RELEASE_LIVE_PASS sha=$FINAL_SHA tag=$TAG url=$RELEASE_URL"
+
+      - name: Dispatch post-live verification for this exact promoter run
+        if: steps.gate.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FINAL_SHA: ${{ steps.gate.outputs.sha }}
+          PROMOTER_RUN_ID: ${{ github.run_id }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          gh workflow run omega-post-live-verification.yml \
+            -R "$GITHUB_REPOSITORY" \
+            --ref main \
+            -f final_sha="$FINAL_SHA" \
+            -f promoter_run_id="$PROMOTER_RUN_ID"
+          echo "OMEGA_POST_LIVE_DISPATCHED sha=$FINAL_SHA promoter_run=$PROMOTER_RUN_ID"

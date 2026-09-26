@@ -49,9 +49,8 @@ jobs:
           PY
           )"
           if [ -z "$row" ]; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "OMEGA_RELEASE_STAGE_NOT_EXECUTED_NO_EVIDENCE_ARTIFACT run=$EVIDENCE_RUN_ID"
-            exit 0
+            echo "OMEGA_RELEASE_STAGE_NOT_EXECUTED_NO_EVIDENCE_ARTIFACT run=$EVIDENCE_RUN_ID" >&2
+            exit 75
           fi
           IFS='|' read -r source artifact artifact_id <<<"$row"
           [[ "$source" =~ ^[0-9a-f]{40}$ ]]

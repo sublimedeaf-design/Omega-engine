@@ -62,8 +62,6 @@ recovery = File.read(recovery_path, encoding: "UTF-8")
   "stale_ref_tip_base_guard" => "OMEGA_RECOVERY_TRIGGER_NOT_CURRENT_BASE",
   "serialized_recovery_no_livelock" => "cancel-in-progress: false",
   "bounded_recovery_queue" => "queue: max",
-  "worker_model_pin" => "cc324af070c2ecbfd324a30884d2f951a7ff756aba85cb811a6ec436933bb046",
-  "qa_model_pin" => "1d9614638d18024d0fbb36575a15f1302a3adf044df10345688ec4f6e1c4ff32",
   "artifact_checksum_verify" => "sha256sum -c",
   "out_of_band_artifact_digest" => "recovery_package_sha256",
   "artifact_hash_mismatch_fails" => "OMEGA_RECOVERY_ARTIFACT_HASH_MISMATCH",
@@ -78,6 +76,12 @@ recovery = File.read(recovery_path, encoding: "UTF-8")
   fail!("recovery_contract_missing:#{name}") unless recovery.include?(needle)
 end
 fail!("recovery_must_not_continue_on_error") if recovery.include?("continue-on-error: true")
+fail!("recovery_helper_must_not_override_model_url") if recovery.include?("OMEGA_LOCAL_BRAIN_MODEL_URL:")
+fail!("recovery_helper_must_not_override_qa_model_url") if recovery.include?("OMEGA_LOCAL_QA_BRAIN_MODEL_URL:")
+fail!("recovery_helper_must_not_override_model_sha") if recovery.include?("OMEGA_LOCAL_BRAIN_MODEL_SHA256:")
+fail!("recovery_helper_must_not_override_qa_model_sha") if recovery.include?("OMEGA_LOCAL_QA_BRAIN_MODEL_SHA256:")
+fail!("recovery_helper_must_not_override_llama_commit") if recovery.include?("OMEGA_LLAMA_CPP_COMMIT:")
+fail!("recovery_model_cache_must_follow_manifest") unless recovery.include?("hashFiles('omega/deploy/hosted/hf-model-manifest.json')")
 
 pr_bridge = File.read(WORKFLOWS.join("omega-private-pr-hosted-bridge.yml"), encoding: "UTF-8")
 fail!("pr_bridge_stale_ref_rejection_missing") unless pr_bridge.include?("OMEGA_EXACT_TRIGGER_STALE")
@@ -97,6 +101,7 @@ classifier = File.read(classifier_path, encoding: "UTF-8")
   ANDROID_RUNTIME
   CODE_TEST
   SUCCESS_WITHOUT_PROOF
+  UPSTREAM_PREREQUISITE
 ].each do |klass|
   fail!("gate_classifier_class_missing:#{klass}") unless classifier.include?(klass)
 end
@@ -166,6 +171,16 @@ fail!("coldstart_must_break_workflow_run_depth") if coldstart.include?("workflow
 fail!("coldstart_exact_signer_input_missing") unless coldstart.include?("signer_run_id:")
 fail!("signer_coldstart_dispatch_missing") unless signer.include?("gh workflow run omega-android-runtime-coldstart.yml") && signer.include?('signer_run_id="$SIGNER_RUN_ID"')
 fail!("signer_actions_write_missing") unless signer.include?("actions: write")
+fail!("candidate_evidence_must_fail_closed") unless File.read(WORKFLOWS.join("omega-candidate-evidence-root.yml"), encoding: "UTF-8").include?("OMEGA_EVIDENCE_ROOT_UPSTREAM_NOT_PASS") && File.read(WORKFLOWS.join("omega-candidate-evidence-root.yml"), encoding: "UTF-8").include?("exit 75")
+stager_text = File.read(WORKFLOWS.join("omega-recovery-evidence-release-stager.yml"), encoding: "UTF-8")
+fail!("release_stager_missing_artifact_must_fail") unless stager_text.include?("OMEGA_RELEASE_STAGE_NOT_EXECUTED_NO_EVIDENCE_ARTIFACT") && stager_text.include?("exit 75")
+fail!("signer_workflow_handoff_must_fail") unless signer.include?("OMEGA_SIGNER_NO_UNSIGNED_HANDOFF upstream_run=") && signer.include?("exit 75")
+postlive = File.read(WORKFLOWS.join("omega-post-live-verification.yml"), encoding: "UTF-8")
+fail!("postlive_must_not_use_workflow_run") if postlive.include?("workflow_run:")
+fail!("postlive_exact_dispatch_inputs_missing") unless postlive.include?("final_sha:") && postlive.include?("promoter_run_id:")
+fail!("promoter_postlive_dispatch_missing") unless promoter.include?("gh workflow run omega-post-live-verification.yml") && promoter.include?('promoter_run_id="$PROMOTER_RUN_ID"')
+fail!("promoter_actions_write_missing") unless promoter.include?("actions: write")
+fail!("production_provenance_application_id_missing") unless promoter.include?('"application_id":app_id.group(1)') && promoter.include?("OMEGA_FINAL_ANDROID_APPLICATION_ID_MISSING")
 fail!("single_promotion_release_ref_guard_missing") unless promoter.include?("release/recovery-evidence-")
 
 puts "OMEGA_CONTROL_PLANE_INTEGRITY_GREEN workflows=#{files.length}"
