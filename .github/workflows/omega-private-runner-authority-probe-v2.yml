@@ -1,0 +1,82 @@
+name: OMEGA Private Runner Authority Probe v2
+
+on:
+  push:
+    branches:
+      - support/private-runner-authority-probe-v2-20260926
+    paths:
+      - ".github/workflows/omega-private-runner-authority-probe-v2.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: omega-private-runner-authority-probe-v2
+  cancel-in-progress: true
+
+env:
+  PRIVATE_REPOSITORY: sublimedeaf-design/Omega-engines
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Probe existing authorities without exposing registration tokens
+        env:
+          TOKEN_BOOTSTRAP: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          TOKEN_CODESPACE: ${{ secrets.OMEGA_CODESPACE_PAT }}
+          TOKEN_FEDERATION: ${{ secrets.OMEGA_FEDERATION_PAT }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          set +x
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+          any=0
+          for name in CODESPACE FEDERATION BOOTSTRAP; do
+            case "$name" in
+              CODESPACE) token="${TOKEN_CODESPACE:-}" ;;
+              FEDERATION) token="${TOKEN_FEDERATION:-}" ;;
+              BOOTSTRAP) token="${TOKEN_BOOTSTRAP:-}" ;;
+            esac
+            if [ -z "$token" ]; then
+              echo "OMEGA_RUNNER_AUTHORITY_NOT_CONFIGURED source=$name"
+              continue
+            fi
+            out="$tmp/$name.json"
+            code="$(curl -sS -o "$out" -w '%{http_code}' -X POST \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2022-11-28' \
+              -H "Authorization: Bearer $token" \
+              "https://api.github.com/repos/$PRIVATE_REPOSITORY/actions/runners/registration-token" || true)"
+            if [ "$code" = 201 ]; then
+              python3 - "$out" <<'PY'
+          import json,sys
+          p=json.load(open(sys.argv[1],encoding="utf-8"))
+          if not isinstance(p.get("token"),str) or len(p["token"]) < 20:
+              raise SystemExit("OMEGA_RUNNER_REGISTRATION_TOKEN_RESPONSE_INVALID")
+          PY
+              any=1
+              echo "OMEGA_RUNNER_AUTHORITY_PASS source=$name"
+            else
+              message="$(python3 - "$out" <<'PY' 2>/dev/null || true
+          import json,sys
+          try:
+              p=json.load(open(sys.argv[1],encoding="utf-8"))
+              print(str(p.get("message") or "")[:160])
+          except Exception:
+              pass
+          PY
+              )"
+              echo "OMEGA_RUNNER_AUTHORITY_BLOCKED source=$name http=$code message=$message"
+            fi
+            rm -f "$out"
+            token=""
+          done
+          [ "$any" = 1 ] || {
+            echo "OMEGA_RUNNER_AUTHORITY_NONE_AVAILABLE" >&2
+            exit 78
+          }
+          echo "OMEGA_RUNNER_AUTHORITY_PROBE_PASS"
