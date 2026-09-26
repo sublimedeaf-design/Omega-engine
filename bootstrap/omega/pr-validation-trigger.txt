@@ -1,1 +1,1 @@
-validate-exact-pr 96914a2f2f63206c7ffaba914898b4b6a16bfab1 release/final-merge-1c6be61b-36246662762 exact-final-merge-v1
+validate-exact-pr a90fd56f48328f4322e6c7ab5469f1468714b575 release/final-gradle-release-metadata-20260926 exact-final-gradle-release-metadata-v1
