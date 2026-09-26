@@ -78,6 +78,12 @@ recovery = File.read(recovery_path, encoding: "UTF-8")
   fail!("recovery_contract_missing:#{name}") unless recovery.include?(needle)
 end
 fail!("recovery_must_not_continue_on_error") if recovery.include?("continue-on-error: true")
+fail!("recovery_helper_must_not_override_model_url") if recovery.include?("OMEGA_LOCAL_BRAIN_MODEL_URL:")
+fail!("recovery_helper_must_not_override_qa_model_url") if recovery.include?("OMEGA_LOCAL_QA_BRAIN_MODEL_URL:")
+fail!("recovery_helper_must_not_override_model_sha") if recovery.include?("OMEGA_LOCAL_BRAIN_MODEL_SHA256:")
+fail!("recovery_helper_must_not_override_qa_model_sha") if recovery.include?("OMEGA_LOCAL_QA_BRAIN_MODEL_SHA256:")
+fail!("recovery_helper_must_not_override_llama_commit") if recovery.include?("OMEGA_LLAMA_CPP_COMMIT:")
+fail!("recovery_model_cache_must_follow_manifest") unless recovery.include?("hashFiles('omega/deploy/hosted/hf-model-manifest.json')")
 
 pr_bridge = File.read(WORKFLOWS.join("omega-private-pr-hosted-bridge.yml"), encoding: "UTF-8")
 fail!("pr_bridge_stale_ref_rejection_missing") unless pr_bridge.include?("OMEGA_EXACT_TRIGGER_STALE")
