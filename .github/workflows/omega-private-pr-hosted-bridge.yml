@@ -1,4 +1,4 @@
-# exact candidate validation trigger: 69fc050c33bb2cf5d1dde054438afc0ac4e10638
+# exact candidate validation: stale trigger must never advance to another SHA
 name: OMEGA Private PR Hosted Bridge
 
 on:
@@ -70,8 +70,9 @@ jobs:
           ref_tip="$(gh api "/repos/$PRIVATE_REPOSITORY/commits?sha=$source_ref&per_page=1" --jq '.[0].sha // empty')"
           [[ "$ref_tip" =~ ^[0-9a-f]{40}$ ]] || { echo "OMEGA_EXACT_TRIGGER_REF_TIP_INVALID:$source_ref" >&2; exit 67; }
           if [ "$ref_tip" != "$requested_sha" ]; then
-            echo "OMEGA_EXACT_TRIGGER_ADVANCED stale=$requested_sha current=$ref_tip ref=$source_ref"
-            requested_sha="$ref_tip"
+            echo "OMEGA_EXACT_TRIGGER_STALE requested=$requested_sha current=$ref_tip ref=$source_ref" >&2
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            exit 68
           fi
           compare="$(gh api "/repos/$PRIVATE_REPOSITORY/compare/$base_sha...$requested_sha")"
           relation="$(printf '%s' "$compare" | jq -r '.status // ""')"
