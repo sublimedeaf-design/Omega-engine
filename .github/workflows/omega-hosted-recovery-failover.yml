@@ -137,6 +137,9 @@ jobs:
     needs: pin
     if: ${{ needs.pin.outputs.need_run == 'true' }}
     runs-on: ubuntu-latest
+    # Only the trusted pre-recovery producer may publish the immutable,
+    # content-addressed model cache. The clean recovery consumer stays read-only.
+    cache-mode: write
     outputs:
       recovery_package_sha256: ${{ steps.package.outputs.sha256 }}
     timeout-minutes: 90
@@ -167,7 +170,9 @@ jobs:
         with:
           gradle-version: "8.13"
           cache-read-only: true
-      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+      - name: Restore exact immutable model cache
+        id: model_cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
           path: ${{ runner.temp }}/omega-state/model-cache
           key: omega-localbrain-models-v4-${{ hashFiles('omega/deploy/hosted/hf-model-manifest.json') }}
@@ -227,6 +232,18 @@ jobs:
           export GITHUB_SHA="$source_sha"
           timeout --signal=TERM --kill-after=30s 50m bash deploy/codespaces/acceptance-test.sh
           test -s "$OMEGA_STATE/evidence/acceptance-pre-rebuild.json"
+          # Acceptance starts both LocalBrains and verifies each file against the
+          # exact private manifest before this cache may be published.
+          test -s "$OMEGA_STATE/model-cache/omega-qwen2.5-coder-1.5b-instruct-q4_k_m.gguf"
+          test -s "$OMEGA_STATE/model-cache/omega-qwen2.5-coder-0.5b-instruct-q4_k_m.gguf"
+
+      - name: Publish verified content-addressed model cache for clean recovery
+        if: ${{ success() && steps.model_cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: ${{ runner.temp }}/omega-state/model-cache
+          key: ${{ steps.model_cache.outputs.cache-primary-key }}
+
       - name: Record source and VM identity
         working-directory: omega
         shell: bash
