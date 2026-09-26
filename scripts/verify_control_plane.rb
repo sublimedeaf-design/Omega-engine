@@ -130,6 +130,7 @@ recovery = File.read(recovery_path, encoding: "UTF-8")
   "stale_ref_tip_base_guard" => "OMEGA_RECOVERY_TRIGGER_NOT_CURRENT_BASE",
   "serialized_recovery_no_livelock" => "cancel-in-progress: false",
   "bounded_recovery_queue" => "queue: max",
+  "dynamic_evidence_root_packaging" => 'source=(pathlib.Path(os.environ["OMEGA_STATE"])/"evidence").resolve()',
   "artifact_checksum_verify" => "sha256sum -c",
   "out_of_band_artifact_digest" => "recovery_package_sha256",
   "artifact_hash_mismatch_fails" => "OMEGA_RECOVERY_ARTIFACT_HASH_MISMATCH",
