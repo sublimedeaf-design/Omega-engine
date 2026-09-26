@@ -4,6 +4,16 @@ on:
   workflow_run:
     workflows: ["OMEGA Federation v3 Peer Bridge"]
     types: [completed]
+  workflow_dispatch:
+    inputs:
+      bridge_run_id:
+        description: "Exact successful Federation v3 Peer Bridge run id"
+        required: true
+        type: string
+      bridge_head_sha:
+        description: "Exact control-plane SHA used by that bridge run"
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -20,15 +30,17 @@ env:
 
 jobs:
   certify:
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 8
+    env:
+      BRIDGE_RUN_ID: ${{ inputs.bridge_run_id || github.event.workflow_run.id }}
+      BRIDGE_HEAD_SHA: ${{ inputs.bridge_head_sha || github.event.workflow_run.head_sha }}
     steps:
       - name: Inspect the exact authority epoch proven by this bridge
         id: epoch
         env:
           GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
-          BRIDGE_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -65,14 +77,12 @@ jobs:
           path: ${{ runner.temp }}/release-peer-proofs
           merge-multiple: true
           github-token: ${{ github.token }}
-          run-id: ${{ github.event.workflow_run.id }}
+          run-id: ${{ env.BRIDGE_RUN_ID }}
 
       - name: Require fresh 4-of-4 read-only proofs from this exact bridge run
         if: steps.epoch.outputs.release_epoch == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-          BRIDGE_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
-          BRIDGE_RUN_ID: ${{ github.event.workflow_run.id }}
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -120,7 +130,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           SOURCE_SHA: ${{ steps.epoch.outputs.source_sha }}
           SOURCE_REF: ${{ steps.epoch.outputs.source_ref }}
-          BRIDGE_RUN_ID: ${{ github.event.workflow_run.id }}
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -166,7 +175,6 @@ jobs:
           OMEGA_BOOTSTRAP_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
           SOURCE_SHA: ${{ steps.epoch.outputs.source_sha }}
           SOURCE_REF: ${{ steps.epoch.outputs.source_ref }}
-          BRIDGE_RUN_ID: ${{ github.event.workflow_run.id }}
         shell: bash
         run: |
           set -Eeuo pipefail
