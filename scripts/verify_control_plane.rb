@@ -97,6 +97,7 @@ classifier = File.read(classifier_path, encoding: "UTF-8")
   ANDROID_RUNTIME
   CODE_TEST
   SUCCESS_WITHOUT_PROOF
+  UPSTREAM_PREREQUISITE
 ].each do |klass|
   fail!("gate_classifier_class_missing:#{klass}") unless classifier.include?(klass)
 end
@@ -166,6 +167,15 @@ fail!("coldstart_must_break_workflow_run_depth") if coldstart.include?("workflow
 fail!("coldstart_exact_signer_input_missing") unless coldstart.include?("signer_run_id:")
 fail!("signer_coldstart_dispatch_missing") unless signer.include?("gh workflow run omega-android-runtime-coldstart.yml") && signer.include?('signer_run_id="$SIGNER_RUN_ID"')
 fail!("signer_actions_write_missing") unless signer.include?("actions: write")
+fail!("candidate_evidence_must_fail_closed") unless File.read(WORKFLOWS.join("omega-candidate-evidence-root.yml"), encoding: "UTF-8").include?("OMEGA_EVIDENCE_ROOT_UPSTREAM_NOT_PASS") && File.read(WORKFLOWS.join("omega-candidate-evidence-root.yml"), encoding: "UTF-8").include?("exit 75")
+stager_text = File.read(WORKFLOWS.join("omega-recovery-evidence-release-stager.yml"), encoding: "UTF-8")
+fail!("release_stager_missing_artifact_must_fail") unless stager_text.include?("OMEGA_RELEASE_STAGE_NOT_EXECUTED_NO_EVIDENCE_ARTIFACT") && stager_text.include?("exit 75")
+fail!("signer_workflow_handoff_must_fail") unless signer.include?("OMEGA_SIGNER_NO_UNSIGNED_HANDOFF upstream_run=") && signer.include?("exit 75")
+postlive = File.read(WORKFLOWS.join("omega-post-live-verification.yml"), encoding: "UTF-8")
+fail!("postlive_must_not_use_workflow_run") if postlive.include?("workflow_run:")
+fail!("postlive_exact_dispatch_inputs_missing") unless postlive.include?("final_sha:") && postlive.include?("promoter_run_id:")
+fail!("promoter_postlive_dispatch_missing") unless promoter.include?("gh workflow run omega-post-live-verification.yml") && promoter.include?('promoter_run_id="$PROMOTER_RUN_ID"')
+fail!("promoter_actions_write_missing") unless promoter.include?("actions: write")
 fail!("single_promotion_release_ref_guard_missing") unless promoter.include?("release/recovery-evidence-")
 
 puts "OMEGA_CONTROL_PLANE_INTEGRITY_GREEN workflows=#{files.length}"
