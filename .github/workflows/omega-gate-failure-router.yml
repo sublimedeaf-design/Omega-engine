@@ -226,7 +226,7 @@ jobs:
           gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$SOURCE_SHA"             -f state="$github_state"             -f context="omega/control-plane/$GATE"             -f description="$desc"             -f target_url="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" >/dev/null
 
       - name: Bounded infrastructure-only retry
-        if: steps.classify.outputs.retryable == 'true'
+        if: steps.classify.outputs.retryable == 'true' && github.event.workflow_run.conclusion == 'failure'
         env:
           GH_TOKEN: ${{ github.token }}
           RUN_ID: ${{ github.event.workflow_run.id }}
