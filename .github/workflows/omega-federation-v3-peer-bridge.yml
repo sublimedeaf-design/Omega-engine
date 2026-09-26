@@ -2,13 +2,9 @@ name: OMEGA Federation v3 Peer Bridge
 
 on:
   push:
-    branches: ['federation/v3-control-plane-20260926', main]
+    branches: [main]
     paths:
       - 'federation/epochs/current.json'
-      - '.github/workflows/omega-federation-v3-peer-bridge.yml'
-      - 'scripts/verify_federation_epoch.py'
-  schedule:
-    - cron: '17 * * * *'
   workflow_dispatch:
 
 permissions:
