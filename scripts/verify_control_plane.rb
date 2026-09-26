@@ -83,5 +83,25 @@ pr_bridge = File.read(WORKFLOWS.join("omega-private-pr-hosted-bridge.yml"), enco
 fail!("pr_bridge_stale_ref_rejection_missing") unless pr_bridge.include?("OMEGA_EXACT_TRIGGER_STALE")
 fail!("pr_bridge_stale_ref_base_guard_missing") unless pr_bridge.include?("OMEGA_EXACT_TRIGGER_NOT_CURRENT_BASE")
 
+classifier_path = ROOT.join("scripts", "omega_gate_classifier.py")
+fail!("gate_classifier_missing") unless classifier_path.exist?
+classifier = File.read(classifier_path, encoding: "UTF-8")
+%w[
+  INFRA_PRESTART
+  EXECUTION_IDENTITY
+  ARTIFACT_INTEGRITY
+  LEDGER_INTEGRITY
+  MODEL_COVERAGE
+  SIGNER_CONTINUITY
+  FEDERATION_IDENTITY
+  ANDROID_RUNTIME
+  CODE_TEST
+  SUCCESS_WITHOUT_PROOF
+].each do |klass|
+  fail!("gate_classifier_class_missing:#{klass}") unless classifier.include?(klass)
+end
+integrity_workflow = File.read(WORKFLOWS.join("omega-control-plane-integrity.yml"), encoding: "UTF-8")
+fail!("gate_classifier_self_test_missing") unless integrity_workflow.include?("omega_gate_classifier.py --self-test")
+
 puts "OMEGA_CONTROL_PLANE_INTEGRITY_GREEN workflows=#{files.length}"
 # support fastpath restack v2 exact-head trigger
