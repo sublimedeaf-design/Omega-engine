@@ -1,0 +1,264 @@
+name: OMEGA Candidate Evidence Root
+
+on:
+  workflow_run:
+    workflows: ["OMEGA Hosted Recovery Failover"]
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: omega-candidate-evidence-root
+  cancel-in-progress: false
+
+env:
+  PRIVATE_REPOSITORY: sublimedeaf-design/Omega-engines
+
+jobs:
+  evidence:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      RECOVERY_RUN_ID: ${{ github.event.workflow_run.id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Pin exact recovered candidate and require current recovery attestation
+        id: pin
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          set +x
+          read -r marker candidate source_ref _ < bootstrap/omega/recovery-trigger.txt
+          [ "$marker" = recover-exact ] || { echo "OMEGA_EVIDENCE_ROOT_TRIGGER_INVALID" >&2; exit 64; }
+          [[ "$candidate" =~ ^[0-9a-f]{40}$ ]] || { echo "OMEGA_EVIDENCE_ROOT_SHA_INVALID" >&2; exit 64; }
+          [[ "$source_ref" =~ ^[A-Za-z0-9._/-]+$ ]] || { echo "OMEGA_EVIDENCE_ROOT_REF_INVALID" >&2; exit 64; }
+          case "$source_ref" in *..*|/*|-*) echo "OMEGA_EVIDENCE_ROOT_REF_UNSAFE:$source_ref" >&2; exit 64 ;; esac
+          ref_tip="$(gh api "/repos/$PRIVATE_REPOSITORY/commits?sha=$source_ref&per_page=1" --jq '.[0].sha // empty')"
+          [ "$ref_tip" = "$candidate" ] || { echo "OMEGA_EVIDENCE_ROOT_TRIGGER_STALE:$candidate!=$ref_tip" >&2; exit 65; }
+
+          statuses="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/$candidate/status?per_page=100")"
+          STATUS_PAYLOAD="$statuses" RECOVERY_RUN_ID="$RECOVERY_RUN_ID" python3 <<'PY'
+          import json,os,sys
+          p=json.loads(os.environ["STATUS_PAYLOAD"])
+          run=str(os.environ["RECOVERY_RUN_ID"])
+          latest={}
+          for row in p.get("statuses",[]):
+              ctx=str(row.get("context") or "")
+              if ctx and ctx not in latest:
+                  latest[ctx]=row
+          required=[
+              "omega/hosted-ci/python311",
+              "omega/hosted-ci/python313",
+              "omega/hosted-ci/python314",
+              "omega/hosted-ci/storage",
+              "omega/hosted-governance",
+              "omega/hosted-android",
+              "omega/hosted-recovery",
+              "omega/recovery-attestation",
+          ]
+          bad=[x for x in required if (latest.get(x) or {}).get("state")!="success"]
+          if bad:
+              raise SystemExit("OMEGA_EVIDENCE_ROOT_REQUIRED_STATUS_NOT_GREEN:"+",".join(bad))
+          for ctx in ("omega/hosted-recovery","omega/recovery-attestation"):
+              target=str((latest.get(ctx) or {}).get("target_url") or "")
+              if not target.endswith("/actions/runs/"+run):
+                  raise SystemExit(f"OMEGA_EVIDENCE_ROOT_RECOVERY_RUN_MISMATCH:{ctx}:{target}")
+          PY
+          echo "sha=$candidate" >> "$GITHUB_OUTPUT"
+          echo "source_ref=$source_ref" >> "$GITHUB_OUTPUT"
+          echo "OMEGA_EVIDENCE_ROOT_PIN sha=$candidate recovery_run=$RECOVERY_RUN_ID"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: ${{ env.PRIVATE_REPOSITORY }}
+          ref: ${{ steps.pin.outputs.sha }}
+          token: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          persist-credentials: false
+          fetch-depth: 0
+          path: omega
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.13"
+
+      - name: Recreate supply-chain and SBOM evidence from exact candidate
+        working-directory: omega
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse HEAD)" = "${{ steps.pin.outputs.sha }}"
+          python -m venv .venv
+          .venv/bin/python scripts/install_locked_ci_deps.py
+          .venv/bin/python scripts/materialize_gradle_verification.py
+          .venv/bin/python scripts/validate_supply_chain_locks.py --out reports/candidate-evidence-supply-chain.json
+          .venv/bin/python scripts/generate_omega_sbom.py --out reports/omega-sbom.spdx.json
+
+      - name: Download exact recovery completion attestation
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: omega-recovery-attestation-${{ steps.pin.outputs.sha }}-${{ env.RECOVERY_RUN_ID }}
+          path: ${{ runner.temp }}/recovery-attestation
+          github-token: ${{ github.token }}
+          run-id: ${{ env.RECOVERY_RUN_ID }}
+
+      - name: Build candidate SBOM/provenance root
+        id: root
+        working-directory: omega
+        env:
+          SOURCE_SHA: ${{ steps.pin.outputs.sha }}
+          RECOVERY_ATTESTATION_DIR: ${{ runner.temp }}/recovery-attestation
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          .venv/bin/python - <<'PY'
+          import datetime,hashlib,json,os,pathlib,re
+
+          root=pathlib.Path(".")
+          recovery_dir=pathlib.Path(os.environ["RECOVERY_ATTESTATION_DIR"])
+          source=os.environ["SOURCE_SHA"]
+          if not re.fullmatch(r"[0-9a-f]{40}",source):
+              raise SystemExit("CANDIDATE_EVIDENCE_SOURCE_INVALID")
+
+          def sha(path):
+              h=hashlib.sha256()
+              with pathlib.Path(path).open("rb") as fh:
+                  for chunk in iter(lambda:fh.read(1<<20),b""):
+                      h.update(chunk)
+              return h.hexdigest()
+
+          att_path=recovery_dir/"recovery-attestation.json"
+          sbom_path=root/"reports/omega-sbom.spdx.json"
+          supply_path=root/"deploy/hosted/gradle-verification-lock.json"
+          hf_path=root/"deploy/hosted/hf-model-manifest.json"
+          for p in (att_path,sbom_path,supply_path,hf_path):
+              if not p.is_file():
+                  raise SystemExit(f"CANDIDATE_EVIDENCE_FILE_MISSING:{p}")
+
+          att=json.loads(att_path.read_text(encoding="utf-8"))
+          pred=att.get("predicate") or {}
+          if att.get("_type")!="https://in-toto.io/Statement/v1":
+              raise SystemExit("CANDIDATE_RECOVERY_ATTESTATION_TYPE_INVALID")
+          if pred.get("result")!="PASS" or pred.get("source_sha")!=source:
+              raise SystemExit("CANDIDATE_RECOVERY_ATTESTATION_NOT_PASS")
+          if ((pred.get("rto") or {}).get("state")!="MEASURED"
+              or (pred.get("rpo") or {}).get("state")!="MEASURED"
+              or ((pred.get("continuity") or {}).get("data_loss_bytes"))!=0):
+              raise SystemExit("CANDIDATE_RECOVERY_CONTINUITY_NOT_MEASURED")
+          xid=str(pred.get("omega_execution_id") or "")
+          if not re.fullmatch(r"[0-9a-f]{64}",xid):
+              raise SystemExit("CANDIDATE_EXECUTION_ID_INVALID")
+          subjects=att.get("subject") or []
+          if len(subjects)!=1 or str((subjects[0].get("digest") or {}).get("sha256") or "")!=str(pred.get("evidence_root_sha256") or ""):
+              raise SystemExit("CANDIDATE_RECOVERY_SUBJECT_ROOT_MISMATCH")
+
+          sbom=json.loads(sbom_path.read_text(encoding="utf-8"))
+          supply=json.loads(supply_path.read_text(encoding="utf-8"))
+          sbom_doc=str(sbom.get("omegaDocumentSha256") or "")
+          gradle_sha=str(supply.get("verification_metadata_sha256") or "")
+          gradle_snapshot=str(supply.get("snapshot_commit") or "")
+          gradle_manifest=str(supply.get("snapshot_manifest_sha256") or "")
+          for label,value,n in (
+              ("sbom_document",sbom_doc,64),
+              ("gradle_metadata",gradle_sha,64),
+              ("gradle_snapshot_manifest",gradle_manifest,64),
+          ):
+              if not re.fullmatch(r"[0-9a-f]{%d}"%n,value):
+                  raise SystemExit(f"CANDIDATE_{label.upper()}_INVALID")
+          if not re.fullmatch(r"[0-9a-f]{40}",gradle_snapshot):
+              raise SystemExit("CANDIDATE_GRADLE_SNAPSHOT_COMMIT_INVALID")
+
+          materials={
+              "source_sha":source,
+              "omega_execution_id":xid,
+              "recovery_run_id":os.environ["RECOVERY_RUN_ID"],
+              "recovery_attestation_sha256":sha(att_path),
+              "recovery_evidence_root_sha256":pred["evidence_root_sha256"],
+              "recovery_package_sha256":pred["recovery_package_sha256"],
+              "federation_lock_sha256":pred.get("federation_lock_sha256"),
+              "federation_authority_repository":pred.get("federation_authority_repository"),
+              "federation_authority_commit":pred.get("federation_authority_commit"),
+              "dependency_lock_sha256":pred.get("dependency_lock_sha256"),
+              "environment_lock_sha256":pred.get("environment_lock_sha256"),
+              "hf_model_manifest_sha256":sha(hf_path),
+              "worker_model_sha256":pred.get("worker_model_sha256"),
+              "qa_model_sha256":pred.get("qa_model_sha256"),
+              "supply_chain_lock_sha256":sha(supply_path),
+              "gradle_verification_metadata_sha256":gradle_sha,
+              "gradle_snapshot_commit":gradle_snapshot,
+              "gradle_snapshot_manifest_sha256":gradle_manifest,
+              "sbom_file_sha256":sha(sbom_path),
+              "sbom_document_sha256":sbom_doc,
+          }
+          canonical=json.dumps(materials,sort_keys=True,separators=(",",":"),ensure_ascii=False,allow_nan=False).encode()
+          evidence_root=hashlib.sha256(canonical).hexdigest()
+          payload={
+              "schema_version":1,
+              "state":"PASS",
+              "source_sha":source,
+              "omega_execution_id":xid,
+              "candidate_evidence_root_sha256":evidence_root,
+              "materials":materials,
+              "recovery_continuity":{
+                  "rto":pred.get("rto"),
+                  "rpo":pred.get("rpo"),
+                  "continuity":pred.get("continuity"),
+              },
+              "generated_at":datetime.datetime.now(datetime.timezone.utc).isoformat(),
+          }
+          out=root/"reports/candidate-evidence-root.json"
+          out.write_text(json.dumps(payload,indent=2,sort_keys=True,allow_nan=False)+"\n",encoding="utf-8")
+          statement={
+              "_type":"https://in-toto.io/Statement/v1",
+              "subject":[{"name":"omega-candidate-evidence-root","digest":{"sha256":evidence_root}}],
+              "predicateType":"https://omega.local/attestation/candidate-evidence-root/v1",
+              "predicate":payload,
+          }
+          prov=root/"reports/candidate-provenance-attestation.json"
+          prov.write_text(json.dumps(statement,indent=2,sort_keys=True,allow_nan=False)+"\n",encoding="utf-8")
+          with open(os.environ["GITHUB_OUTPUT"],"a",encoding="utf-8") as fh:
+              fh.write(f"root_sha256={evidence_root}\n")
+              fh.write(f"attestation_sha256={sha(prov)}\n")
+          print(f"OMEGA_CANDIDATE_EVIDENCE_ROOT_PASS source={source} execution_id={xid} root={evidence_root}")
+          PY
+
+      - name: Upload candidate evidence root bundle
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: omega-candidate-evidence-root-${{ steps.pin.outputs.sha }}
+          path: |
+            omega/reports/candidate-evidence-root.json
+            omega/reports/candidate-provenance-attestation.json
+            omega/reports/omega-sbom.spdx.json
+            omega/reports/candidate-evidence-supply-chain.json
+            omega/deploy/hosted/gradle-verification-lock.json
+            ${{ runner.temp }}/recovery-attestation/recovery-attestation.json
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Publish exact-SHA candidate evidence-root status
+        if: ${{ always() }}
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          SOURCE_SHA: ${{ steps.pin.outputs.sha }}
+          RESULT: ${{ job.status }}
+          ROOT_SHA256: ${{ steps.root.outputs.root_sha256 }}
+        shell: bash
+        run: |
+          set +x
+          state=failure
+          [ "$RESULT" = success ] && state=success
+          desc="candidate SBOM/provenance root: $RESULT"
+          [ -n "$ROOT_SHA256" ] && desc="$desc sha256=${ROOT_SHA256:0:12}"
+          gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$SOURCE_SHA" \
+            -f state="$state" \
+            -f context="omega/candidate-evidence-root" \
+            -f description="$desc" \
+            -f target_url="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" >/dev/null
