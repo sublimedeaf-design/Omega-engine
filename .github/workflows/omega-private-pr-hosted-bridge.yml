@@ -164,7 +164,7 @@ jobs:
         working-directory: omega
         shell: bash
         run: |
-          python -m pip --retries 5 --timeout 60 install -c requirements-ci.lock -e '.[${{ matrix.extra }}]'
+          python scripts/install_locked_ci_deps.py
           ${{ matrix.command }}
       - name: Publish exact-SHA hosted lane status
         if: ${{ always() }}
