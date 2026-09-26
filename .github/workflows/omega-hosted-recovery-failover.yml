@@ -105,6 +105,17 @@ jobs:
                 relation="$(printf '%s' "$compare" | jq -r '.status // ""')"
                 behind="$(printf '%s' "$compare" | jq -r '.behind_by // 999999')"
                 if [ "$relation" != ahead ] || [ "$behind" != 0 ]; then
+                  # A scheduled watchdog must never turn a deliberately frozen,
+                  # already-addressed release epoch into control-plane churn just
+                  # because private main advanced. Explicit trigger pushes remain
+                  # fail-closed so a human/control-plane promotion intent cannot
+                  # silently validate a divergent candidate.
+                  if [ "$EVENT_NAME" = schedule ]; then
+                    echo "sha=$candidate" >> "$GITHUB_OUTPUT"
+                    echo "need_run=false" >> "$GITHUB_OUTPUT"
+                    echo "OMEGA_HOSTED_RECOVERY_FROZEN_CANDIDATE_SKIPPED status=$relation behind=$behind main=$main_sha candidate=$candidate"
+                    exit 0
+                  fi
                   echo "OMEGA_RECOVERY_TRIGGER_NOT_CURRENT_BASE:status=$relation behind=$behind main=$main_sha candidate=$candidate" >&2
                   exit 66
                 fi
