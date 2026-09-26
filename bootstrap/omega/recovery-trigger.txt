@@ -1,1 +1,1 @@
-recover-exact 6560946cda03347289a76172b6a6a9b9b39bb1b2 hardening/canonical-evidence-envelope-20260926 recovery-identity-reproof-v7
+recover-exact 1c6be61b211b664d6a56bfe7db79519f54f3566a hardening/shadow-only-recommendation-contract-20260926 single-execution-source-v1
