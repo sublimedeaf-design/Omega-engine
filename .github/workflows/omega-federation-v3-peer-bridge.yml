@@ -9,7 +9,7 @@ on:
 
 permissions:
   contents: read
-  actions: read
+  actions: write
 
 concurrency:
   group: omega-federation-v3-peer-bridge
@@ -216,3 +216,23 @@ jobs:
               raise SystemExit("OMEGA_FEDERATION_PROOF_PEER_SET_INCOMPLETE")
           print("OMEGA_FEDERATION_4_OF_4_READ_ONLY_PROOF_PASS",source,epoch_id or "legacy")
           PY
+
+      - name: Explicitly dispatch exact bridge proof to release certifier
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRIDGE_RUN_ID: ${{ github.run_id }}
+          BRIDGE_HEAD_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          active="$(gh api "/repos/${GITHUB_REPOSITORY}/actions/workflows/omega-release-federation-certifier.yml/runs?status=queued&per_page=100" --jq '[.workflow_runs[] | select(.event=="workflow_dispatch")] | length')"
+          active_running="$(gh api "/repos/${GITHUB_REPOSITORY}/actions/workflows/omega-release-federation-certifier.yml/runs?status=in_progress&per_page=100" --jq '[.workflow_runs[] | select(.event=="workflow_dispatch")] | length')"
+          if [ "$active" -gt 0 ] || [ "$active_running" -gt 0 ]; then
+            echo "OMEGA_FEDERATION_CERTIFIER_ALREADY_ACTIVE queued=$active running=$active_running"
+            exit 0
+          fi
+          gh workflow run omega-release-federation-certifier.yml \
+            -R "$GITHUB_REPOSITORY" --ref main \
+            -f bridge_run_id="$BRIDGE_RUN_ID" \
+            -f bridge_head_sha="$BRIDGE_HEAD_SHA"
+          echo "OMEGA_FEDERATION_CERTIFIER_DISPATCHED bridge_run=$BRIDGE_RUN_ID bridge_head=$BRIDGE_HEAD_SHA"
