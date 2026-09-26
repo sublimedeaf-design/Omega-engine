@@ -30,6 +30,8 @@ jobs:
     timeout-minutes: 4
     outputs:
       found: ${{ steps.pr.outputs.found }}
+      reuse: ${{ steps.pr.outputs.reuse }}
+      prior_run_id: ${{ steps.pr.outputs.prior_run_id }}
       sha: ${{ steps.pr.outputs.sha }}
       base_sha: ${{ steps.pr.outputs.base_sha }}
       number: ${{ steps.pr.outputs.number }}
@@ -123,13 +125,39 @@ jobs:
           print("true" if all(latest.get(x)=="success" for x in required) else "false")
           ')"
           if [ "$already_green" = true ]; then
-            echo "found=false" >> "$GITHUB_OUTPUT"
-            echo "OMEGA_HOSTED_PR_ALREADY_GREEN sha=$requested_sha android=$android"
+            prior_run="$(printf '%s' "$statuses" | python3 -c '
+          import json,re,sys
+          p=json.load(sys.stdin); latest={}
+          for row in p.get("statuses",[]):
+              ctx=str(row.get("context") or "")
+              if ctx and ctx not in latest: latest[ctx]=row
+          row=latest.get("omega/exact-final-validation") or {}
+          if row.get("state")!="success": raise SystemExit(1)
+          m=re.search(r"/actions/runs/([0-9]+)$",str(row.get("target_url") or ""))
+          if not m: raise SystemExit(1)
+          print(m.group(1))
+          ')" || { echo "OMEGA_HOSTED_PR_REUSE_PROOF_MISSING" >&2; exit 69; }
+            prior_conclusion="$(gh api "/repos/$GITHUB_REPOSITORY/actions/runs/$prior_run" --jq '.conclusion // empty')"
+            [ "$prior_conclusion" = success ] || { echo "OMEGA_HOSTED_PR_REUSE_RUN_NOT_SUCCESS:$prior_run" >&2; exit 69; }
+            prior_exact="$(gh api "/repos/$GITHUB_REPOSITORY/actions/runs/$prior_run/jobs?filter=latest&per_page=100" --jq '[.jobs[] | select(.name=="exact_final" and .conclusion=="success")] | length')"
+            [ "$prior_exact" = 1 ] || { echo "OMEGA_HOSTED_PR_REUSE_EXACT_FINAL_NOT_PASS:$prior_run" >&2; exit 69; }
+            {
+              echo "found=false"
+              echo "reuse=true"
+              echo "prior_run_id=$prior_run"
+              echo "sha=$requested_sha"
+              echo "base_sha=$base_sha"
+              echo "number=0"
+              echo "android=$android"
+            } >> "$GITHUB_OUTPUT"
+            echo "OMEGA_HOSTED_PR_REUSE_PROOF sha=$requested_sha prior_run=$prior_run android=$android"
             exit 0
           fi
 
           {
             echo "found=true"
+            echo "reuse=false"
+            echo "prior_run_id="
             echo "sha=$requested_sha"
             echo "base_sha=$base_sha"
             echo "number=0"
@@ -335,14 +363,16 @@ jobs:
 
   exact_final:
     needs: [discover, governance, ci, android]
-    if: ${{ always() && needs.discover.outputs.found == 'true' }}
+    if: ${{ always() && (needs.discover.outputs.found == 'true' || needs.discover.outputs.reuse == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
-      - name: Publish terminal exact-final-SHA validation
+      - name: Publish terminal exact-final-SHA validation or verified re-attestation
         env:
           GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
           OMEGA_SHA: ${{ needs.discover.outputs.sha }}
+          REUSE_PROOF: ${{ needs.discover.outputs.reuse }}
+          PRIOR_RUN_ID: ${{ needs.discover.outputs.prior_run_id }}
           GOVERNANCE_RESULT: ${{ needs.governance.result }}
           CI_RESULT: ${{ needs.ci.result }}
           ANDROID_REQUIRED: ${{ needs.discover.outputs.android }}
@@ -352,14 +382,23 @@ jobs:
           set -Eeuo pipefail
           [[ "$OMEGA_SHA" =~ ^[0-9a-f]{40}$ ]]
           state=failure
-          if [ "$GOVERNANCE_RESULT" = success ] && [ "$CI_RESULT" = success ]; then
+          desc="exact final-SHA hosted validation: failure"
+          if [ "$REUSE_PROOF" = true ]; then
+            [[ "$PRIOR_RUN_ID" =~ ^[0-9]+$ ]]
+            prior_conclusion="$(gh api "/repos/$GITHUB_REPOSITORY/actions/runs/$PRIOR_RUN_ID" --jq '.conclusion // empty')"
+            prior_exact="$(gh api "/repos/$GITHUB_REPOSITORY/actions/runs/$PRIOR_RUN_ID/jobs?filter=latest&per_page=100" --jq '[.jobs[] | select(.name=="exact_final" and .conclusion=="success")] | length')"
+            [ "$prior_conclusion" = success ] && [ "$prior_exact" = 1 ] || { echo "OMEGA_HOSTED_PR_REATTEST_INVALID:$PRIOR_RUN_ID" >&2; exit 69; }
+            state=success
+            desc="exact final-SHA proof re-attested from run $PRIOR_RUN_ID"
+          elif [ "$GOVERNANCE_RESULT" = success ] && [ "$CI_RESULT" = success ]; then
             if [ "$ANDROID_REQUIRED" != true ] || [ "$ANDROID_RESULT" = success ]; then
               state=success
+              desc="exact final-SHA hosted validation: success"
             fi
           fi
           gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$OMEGA_SHA" \
             -f state="$state" \
             -f context="omega/exact-final-validation" \
-            -f description="exact final-SHA hosted validation: $state" \
+            -f description="$desc" \
             -f target_url="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" >/dev/null
           [ "$state" = success ] || exit 1
