@@ -2,7 +2,7 @@ name: OMEGA Canonical Android Signer
 
 on:
   workflow_run:
-    workflows: ["OMEGA Recovery Evidence Release Stager"]
+    workflows: ["OMEGA Recovery Evidence Release Stager", "OMEGA Candidate Evidence Root"]
     types: [completed]
   workflow_dispatch:
   schedule:
@@ -35,10 +35,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           EVENT_NAME: ${{ github.event_name }}
           EVENT_RUN_ID: ${{ github.event.workflow_run.id }}
+          EVENT_WORKFLOW_NAME: ${{ github.event.workflow_run.name }}
         shell: bash
         run: |
           set -Eeuo pipefail
-          if [ "$EVENT_NAME" = workflow_run ]; then
+          if [ "$EVENT_NAME" = workflow_run ] && [ "$EVENT_WORKFLOW_NAME" = "OMEGA Recovery Evidence Release Stager" ]; then
             runs=("$EVENT_RUN_ID")
           else
             mapfile -t runs < <(gh api "/repos/${{ github.repository }}/actions/workflows/omega-recovery-evidence-release-stager.yml/runs?status=success&per_page=10" --jq '.workflow_runs[].id')
@@ -93,14 +94,31 @@ jobs:
               target=str((latest.get(ctx) or {}).get("target_url") or "")
               if not target.endswith("/actions/runs/"+os.environ["STAGER_RUN_ID"]):
                   raise SystemExit("OMEGA_SIGNER_HANDOFF_RUN_MISMATCH:"+ctx)
-          final_row=latest.get("omega/exact-final-validation") or {}
-          final_state=str(final_row.get("state") or "")
-          final_target=str(final_row.get("target_url") or "")
-          if final_state!="success":
-              print("WAIT" if final_state in ("","pending") else "BLOCK")
+          final_required=(
+              "omega/exact-final-validation",
+              "omega/federation-v3-release",
+              "omega/hosted-recovery",
+              "omega/recovery-attestation",
+              "omega/candidate-evidence-root",
+          )
+          waiting=[]; blocked=[]
+          for ctx in final_required:
+              row=latest.get(ctx) or {}
+              state=str(row.get("state") or "")
+              if state=="success":
+                  target=str(row.get("target_url") or "")
+                  if not target.startswith("https://github.com/sublimedeaf-design/Omega-engine/actions/runs/"):
+                      raise SystemExit("OMEGA_SIGNER_FINAL_CERTIFICATION_PROVENANCE_INVALID:"+ctx)
+              elif state in ("","pending"):
+                  waiting.append(ctx)
+              else:
+                  blocked.append(ctx)
+          if blocked:
+              print("BLOCK")
               raise SystemExit(0)
-          if not final_target.startswith("https://github.com/sublimedeaf-design/Omega-engine/actions/runs/"):
-              raise SystemExit("OMEGA_SIGNER_FINAL_VALIDATION_PROVENANCE_INVALID")
+          if waiting:
+              print("WAIT")
+              raise SystemExit(0)
           signed=(latest.get("omega/android-release-signed") or {}).get("state")=="success"
           print("ALREADY" if signed else "SIGN")
           PY
@@ -118,12 +136,12 @@ jobs:
             WAIT)
               echo "need_sign=false" >> "$GITHUB_OUTPUT"
               echo "validation_state=pending" >> "$GITHUB_OUTPUT"
-              echo "OMEGA_CANONICAL_SIGNER_WAIT_EXACT_FINAL_VALIDATION sha=$FINAL_SHA"
+              echo "OMEGA_CANONICAL_SIGNER_WAIT_FINAL_CERTIFICATION sha=$FINAL_SHA"
               ;;
             BLOCK)
               echo "need_sign=false" >> "$GITHUB_OUTPUT"
               echo "validation_state=failure" >> "$GITHUB_OUTPUT"
-              echo "OMEGA_CANONICAL_SIGNER_BLOCKED_EXACT_FINAL_VALIDATION sha=$FINAL_SHA"
+              echo "OMEGA_CANONICAL_SIGNER_BLOCKED_FINAL_CERTIFICATION sha=$FINAL_SHA"
               ;;
             *)
               echo "OMEGA_CANONICAL_SIGNER_DECISION_INVALID:$decision" >&2
@@ -131,7 +149,7 @@ jobs:
               ;;
           esac
 
-      - name: Publish signing wait state for exact final validation
+      - name: Publish signing wait state for full final certification
         if: steps.handoff.outputs.ready == 'true' && steps.gate.outputs.validation_state != 'success'
         env:
           GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
@@ -145,7 +163,7 @@ jobs:
           gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$FINAL_SHA" \
             -f state="$state" \
             -f context="omega/android-release-signing" \
-            -f description="waiting for exact final-SHA hosted validation ($VALIDATION_STATE)" \
+            -f description="waiting for full final-SHA certification ($VALIDATION_STATE)" \
             -f target_url="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" >/dev/null
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
