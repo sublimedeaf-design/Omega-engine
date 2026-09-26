@@ -391,5 +391,15 @@ fail!("signer_escrow_blocked_state_missing") unless hosted_signer.include?("OMEG
 fail!("signer_escrow_status_missing") unless hosted_signer.include?('context="omega/signer/escrow"')
 fail!("signer_escrow_ready_status_missing") unless hosted_signer.include?('state=success') && hosted_signer.include?("OMEGA_HOSTED_SIGNER_ESCROW_READY")
 
+# A successful 4-of-4 peer proof must explicitly hand off its exact run identity.
+# Do not depend solely on workflow_run delivery/chaining for a release transition.
+peer_bridge = File.read(WORKFLOWS.join("omega-federation-v3-peer-bridge.yml"), encoding: "UTF-8")
+certifier = File.read(WORKFLOWS.join("omega-release-federation-certifier.yml"), encoding: "UTF-8")
+fail!("federation_peer_certifier_actions_write_missing") unless peer_bridge.include?("actions: write")
+fail!("federation_peer_explicit_certifier_dispatch_missing") unless peer_bridge.include?("OMEGA_FEDERATION_CERTIFIER_DISPATCHED") && peer_bridge.include?("bridge_run_id=") && peer_bridge.include?("bridge_head_sha=")
+fail!("federation_peer_certifier_duplicate_guard_missing") unless peer_bridge.include?("OMEGA_FEDERATION_CERTIFIER_ALREADY_ACTIVE") && peer_bridge.include?("status=queued") && peer_bridge.include?("status=in_progress")
+fail!("federation_certifier_manual_exact_handoff_missing") unless certifier.include?("bridge_run_id:") && certifier.include?("bridge_head_sha:") && certifier.include?("inputs.bridge_run_id") && certifier.include?("inputs.bridge_head_sha")
+fail!("federation_certifier_exact_bridge_api_verification_missing") unless certifier.include?("OMEGA_RELEASE_CERTIFIER_BRIDGE_IDENTITY_MISMATCH") && certifier.include?("/actions/runs/$BRIDGE_RUN_ID")
+
 puts "OMEGA_CONTROL_PLANE_INTEGRITY_GREEN workflows=#{files.length}"
 # support fastpath restack v2 exact-head trigger
