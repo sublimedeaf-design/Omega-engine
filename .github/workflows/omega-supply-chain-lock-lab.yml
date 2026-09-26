@@ -46,6 +46,8 @@ jobs:
         include:
           - lane: py311
             python: "3.11"
+          - lane: py312
+            python: "3.12"
           - lane: py313
             python: "3.13"
           - lane: py314
