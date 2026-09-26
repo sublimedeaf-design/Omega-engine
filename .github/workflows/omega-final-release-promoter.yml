@@ -13,6 +13,7 @@ on:
 
 permissions:
   contents: read
+  actions: write
   id-token: write
 
 concurrency:
@@ -394,3 +395,19 @@ jobs:
             -f description="production-final Android release published and verified" \
             -f target_url="$RELEASE_URL" >/dev/null
           echo "OMEGA_RELEASE_LIVE_PASS sha=$FINAL_SHA tag=$TAG url=$RELEASE_URL"
+
+      - name: Dispatch post-live verification for this exact promoter run
+        if: steps.gate.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FINAL_SHA: ${{ steps.gate.outputs.sha }}
+          PROMOTER_RUN_ID: ${{ github.run_id }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          gh workflow run omega-post-live-verification.yml \
+            -R "$GITHUB_REPOSITORY" \
+            --ref main \
+            -f final_sha="$FINAL_SHA" \
+            -f promoter_run_id="$PROMOTER_RUN_ID"
+          echo "OMEGA_POST_LIVE_DISPATCHED sha=$FINAL_SHA promoter_run=$PROMOTER_RUN_ID"
