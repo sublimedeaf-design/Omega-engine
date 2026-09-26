@@ -2,13 +2,15 @@
   "schema_version": 1,
   "federation_version": 3,
   "authority_repository": "sublimedeaf-design/Omega-engine",
-  "state": "PASS",
-  "blockers": [],
+  "state": "NOT_EXECUTED",
+  "blockers": [
+    "external read-only exact-SHA peer proof pending"
+  ],
   "primary": {
     "repository": "sublimedeaf-design/Omega-engines",
     "source_sha": "8bb4f93855c3be15fd2cee707ff1424171eecdc9",
     "pull_request": null,
-    "certification_state": "PASS",
+    "certification_state": "NOT_EXECUTED",
     "source_ref": "release/final-8bb4f938-20260926"
   },
   "peers": [
@@ -16,33 +18,33 @@
       "repository": "sublimedeaf-design/Omega-recovery",
       "sha": "9fc63d76bf0ac1c7ce6b7d137fee5bdd8f8f2d09",
       "role": "control_recovery",
-      "state": "PASS",
-      "contract_state": "PASS",
-      "reason": "external GitHub-hosted exact-SHA federation v3 peer contract validation PASS in Omega-engine run 36261379553"
+      "state": "NOT_EXECUTED",
+      "contract_state": "NOT_EXECUTED",
+      "reason": "external read-only exact-SHA federation proof pending; peer repository is not mutated for release rollover"
     },
     {
       "repository": "sublimedeaf-design/Omega-agents",
       "sha": "36f0da9b32c2314c3c60341dfd01a80fab2e9ec6",
       "role": "agent_execution",
-      "state": "PASS",
-      "contract_state": "PASS",
-      "reason": "external GitHub-hosted exact-SHA federation v3 peer contract validation PASS in Omega-engine run 36261379553"
+      "state": "NOT_EXECUTED",
+      "contract_state": "NOT_EXECUTED",
+      "reason": "external read-only exact-SHA federation proof pending; peer repository is not mutated for release rollover"
     },
     {
       "repository": "sublimedeaf-design/Omega-validation",
       "sha": "3875d71e9f6a260639f45f61dc0938d55be867a1",
       "role": "independent_validation",
-      "state": "PASS",
-      "contract_state": "PASS",
-      "reason": "external GitHub-hosted exact-SHA federation v3 peer contract validation PASS in Omega-engine run 36261379553"
+      "state": "NOT_EXECUTED",
+      "contract_state": "NOT_EXECUTED",
+      "reason": "external read-only exact-SHA federation proof pending; peer repository is not mutated for release rollover"
     },
     {
       "repository": "sublimedeaf-design/Omega-release",
       "sha": "bfee3d2ba922c05b4d5974105059355fd943d4fa",
       "role": "release_promotion",
-      "state": "PASS",
-      "contract_state": "PASS",
-      "reason": "external GitHub-hosted exact-SHA federation v3 peer contract validation PASS in Omega-engine run 36261379553"
+      "state": "NOT_EXECUTED",
+      "contract_state": "NOT_EXECUTED",
+      "reason": "external read-only exact-SHA federation proof pending; peer repository is not mutated for release rollover"
     }
   ],
   "hf": {
@@ -74,25 +76,26 @@
   },
   "release_rollover": {
     "source_ref": "release/final-8bb4f938-20260926",
-    "stage": "CERTIFIED_PASS",
-    "release_epoch_id": "c918f8741d02a5194f5cd427a747dfdcfa43f47bb6a8b3f7a79c3cb758598f28",
-    "immutable_path": "federation/epochs/releases/8bb4f93855c3be15fd2cee707ff1424171eecdc9-c918f8741d02a519.json",
-    "first_peer_bridge_run_id": "36261379553",
-    "second_peer_bridge_run_id": "36261422953"
+    "stage": "IMMUTABLE_EPOCH_STAGED_PENDING_READ_ONLY_PEER_PROOF",
+    "release_epoch_id": "e94729a52686dd5ca63178c8a4995fc429ee0365c4c879f4f4612d8336c19dee",
+    "immutable_path": "federation/epochs/releases/8bb4f93855c3be15fd2cee707ff1424171eecdc9-e94729a52686dd5c.json"
   },
   "release_epoch": {
-    "id": "c918f8741d02a5194f5cd427a747dfdcfa43f47bb6a8b3f7a79c3cb758598f28",
-    "sequence": 1,
-    "immutable_path": "federation/epochs/releases/8bb4f93855c3be15fd2cee707ff1424171eecdc9-c918f8741d02a519.json",
-    "control_contract_sha": "e87b732456e2221088c292f472051764c2797474",
-    "parent_epoch_id": "732003855d2fef8454a82a115d97287402243ee2630041b844ee488726c2b5d1",
-    "parent_control_contract_sha": "0994daebb8e10ff22cf9ebf8d49df4b9b9605676",
-    "parent_sequence": 0,
+    "contract_version": 2,
+    "id": "e94729a52686dd5ca63178c8a4995fc429ee0365c4c879f4f4612d8336c19dee",
+    "sequence": 2,
+    "immutable_path": "federation/epochs/releases/8bb4f93855c3be15fd2cee707ff1424171eecdc9-e94729a52686dd5c.json",
+    "control_contract_sha": "98cbaaf49053dbd544817df0e8128a16b33a0eac",
+    "parent_epoch_id": "c918f8741d02a5194f5cd427a747dfdcfa43f47bb6a8b3f7a79c3cb758598f28",
+    "parent_control_contract_sha": "e87b732456e2221088c292f472051764c2797474",
+    "parent_sequence": 1,
     "source_binding_mode": "external_epoch",
     "peer_contract_source_sha": "51fac1413e2177c7c94207a4c24dccd7657a6d3b",
     "new_deviation_requires_new_epoch": true,
     "old_evidence_runs_are_never_mutated": true,
     "monotonic_epoch_sequence": true,
-    "supersedes_unfinished_epoch_on_control_deviation": true
+    "supersedes_unfinished_epoch_on_control_deviation": true,
+    "supersedes_certified_pre_live_epoch_on_control_deviation": true,
+    "live_certified_epoch_is_immutable": true
   }
 }
