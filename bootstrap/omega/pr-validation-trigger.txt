@@ -1,1 +1,1 @@
-validate-exact-pr 14727063ff00b145ea0334b41694115c02263fd8 hardening/canonical-evidence-envelope-20260926 exact-green-freeze
+validate-exact-pr 156c7a5c16273ebdeeae0aa1b2bbb86e69d3659e hardening/canonical-evidence-envelope-20260926 supply-chain-sbom-gradle-strict-v2
