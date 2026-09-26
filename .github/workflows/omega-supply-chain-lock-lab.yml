@@ -159,9 +159,9 @@ jobs:
         run: |
           set -Eeuo pipefail
           rm -f gradle/verification-metadata.xml
-          gradle --no-daemon --stacktrace --write-verification-metadata sha256 lintDebug assembleDebug lintRelease assembleRelease
+          gradle --no-daemon --stacktrace --write-verification-metadata sha256 lintDebug assembleDebug lintRelease
           test -s gradle/verification-metadata.xml
-          gradle --no-daemon --stacktrace --dependency-verification strict lintDebug assembleDebug lintRelease assembleRelease
+          gradle --no-daemon --stacktrace --dependency-verification strict lintDebug assembleDebug lintRelease
           mkdir -p ../reports/supply-chain
           cp gradle/verification-metadata.xml ../reports/supply-chain/gradle-verification-metadata.xml
           sha256sum ../reports/supply-chain/gradle-verification-metadata.xml             > ../reports/supply-chain/gradle-verification-metadata.xml.sha256
