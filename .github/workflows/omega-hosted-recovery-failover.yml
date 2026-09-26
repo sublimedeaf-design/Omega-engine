@@ -28,7 +28,7 @@ concurrency:
   # supersede an older candidate watchdog/proof still occupying this lane.
   # Scheduled watchdogs and routine-main never cancel active recovery.
   cancel-in-progress: ${{ github.event_name == 'push' }}
-  queue: max
+  queue: single
 
 env:
   PRIVATE_REPOSITORY: sublimedeaf-design/Omega-engines
