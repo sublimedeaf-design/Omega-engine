@@ -7,11 +7,6 @@ on:
         description: "Exact successful OMEGA Candidate Evidence Root run id"
         required: true
         type: string
-  push:
-    branches: [main]
-    paths:
-      - "bootstrap/omega/release-stager-trigger.txt"
-
 permissions:
   contents: write
   actions: read
@@ -31,30 +26,15 @@ jobs:
     env:
       EVIDENCE_RUN_ID: ${{ inputs.evidence_run_id || '' }}
     steps:
-      - name: Resolve exact evidence run
+      - name: Validate explicit evidence handoff
         env:
-          GH_TOKEN: ${{ github.token }}
+          EVIDENCE_RUN_ID: ${{ inputs.evidence_run_id }}
         shell: bash
         run: |
           set -Eeuo pipefail
-          run_id="${EVIDENCE_RUN_ID:-}"
-          if [ -z "$run_id" ]; then
-            trigger="bootstrap/omega/release-stager-trigger.txt"
-            main_sha="$(gh api "/repos/${GITHUB_REPOSITORY}/commits/main" --jq .sha)"
-            [[ "$main_sha" =~ ^[0-9a-f]{40}$ ]]
-            [ "$GITHUB_SHA" = "$main_sha" ] || {
-              echo "OMEGA_RELEASE_STAGER_STALE_TRIGGER event_sha=$GITHUB_SHA main=$main_sha" >&2
-              exit 75
-            }
-            current_b64="$(gh api "/repos/${GITHUB_REPOSITORY}/contents/$trigger?ref=main" --jq .content)"
-            current_trigger="$(printf '%s' "$current_b64" | tr -d '\n' | base64 -d | tr -d '\r\n')"
-            [ -n "$current_trigger" ] || { echo "OMEGA_RELEASE_STAGER_TRIGGER_UNREADABLE" >&2; exit 68; }
-            read -r marker run_id _ <<<"$current_trigger"
-            [ "${marker:-}" = stage-exact ] || { echo "OMEGA_RELEASE_STAGER_TRIGGER_INVALID" >&2; exit 64; }
-          fi
-          [[ "$run_id" =~ ^[0-9]+$ ]] || { echo "OMEGA_RELEASE_STAGER_RUN_ID_INVALID:$run_id" >&2; exit 64; }
-          echo "EVIDENCE_RUN_ID=$run_id" >> "$GITHUB_ENV"
-          echo "OMEGA_RELEASE_STAGER_RUN_PIN run=$run_id"
+          [[ "$EVIDENCE_RUN_ID" =~ ^[0-9]+$ ]] || { echo "OMEGA_RELEASE_STAGER_RUN_ID_INVALID:$EVIDENCE_RUN_ID" >&2; exit 64; }
+          echo "EVIDENCE_RUN_ID=$EVIDENCE_RUN_ID" >> "$GITHUB_ENV"
+          echo "OMEGA_RELEASE_STAGER_EXPLICIT_HANDOFF run=$EVIDENCE_RUN_ID"
 
       - name: Resolve exact proven source from evidence-root artifact
         id: pin
@@ -286,6 +266,25 @@ jobs:
           elif fresh_observed==0:
               print("OMEGA_RELEASE_NO_BET_VALID_NO_FRESH_HISTORY_FIXTURES")
           PY
+
+      - name: Preflight private release mutation capability
+        if: steps.pin.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          SOURCE_SHA: ${{ steps.pin.outputs.source_sha }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          probe="omega-capability-probe-${GITHUB_RUN_ID}"
+          gh api --method POST "/repos/$PRIVATE_REPOSITORY/git/refs" -f ref="refs/heads/$probe" -f sha="$SOURCE_SHA" >/dev/null || {
+            echo "OMEGA_RELEASE_CAPABILITY_MISSING:private_contents_write" >&2
+            exit 77
+          }
+          gh api --method DELETE "/repos/$PRIVATE_REPOSITORY/git/refs/heads/$probe" >/dev/null || {
+            echo "OMEGA_RELEASE_CAPABILITY_CLEANUP_FAILED:$probe" >&2
+            exit 78
+          }
+          echo "OMEGA_RELEASE_CAPABILITY_PASS:private_contents_write"
 
       - name: Stage immutable recovery evidence and Android versionCode
         if: steps.pin.outputs.skip != 'true'
