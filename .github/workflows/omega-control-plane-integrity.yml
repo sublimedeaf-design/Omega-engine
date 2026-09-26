@@ -6,6 +6,7 @@ on:
     paths:
       - ".github/workflows/**"
       - "scripts/verify_control_plane.rb"
+      - "scripts/omega_gate_classifier.py"
 
 permissions:
   contents: read
@@ -24,4 +25,6 @@ jobs:
           persist-credentials: false
       - name: Verify workflow syntax, immutable actions and failproof contracts
         shell: bash
-        run: ruby scripts/verify_control_plane.rb
+        run: |
+          ruby scripts/verify_control_plane.rb
+          python3 scripts/omega_gate_classifier.py --self-test
