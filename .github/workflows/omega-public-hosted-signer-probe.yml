@@ -1,0 +1,50 @@
+name: OMEGA Public Hosted Signer Probe
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/omega-public-hosted-signer-probe.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: omega-public-hosted-signer-probe
+  cancel-in-progress: false
+
+env:
+  PRIVATE_REPOSITORY: sublimedeaf-design/Omega-engines
+  OMEGA_SOURCE_SHA: 6560946cda03347289a76172b6a6a9b9b39bb1b2
+
+jobs:
+  signer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: ${{ env.PRIVATE_REPOSITORY }}
+          ref: ${{ env.OMEGA_SOURCE_SHA }}
+          token: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          persist-credentials: false
+          fetch-depth: 1
+          path: omega
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Recover and verify canonical Android signer in ephemeral public runner
+        env:
+          OMEGA_ANDROID_KEYSTORE_B64: ${{ secrets.OMEGA_ANDROID_KEYSTORE_B64 }}
+          OMEGA_SIGNER_FINGERPRINT_FILE: ${{ github.workspace }}/omega/android/signing-cert.sha256
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          set +x
+          bash omega/android/restore-signing-key.sh
+          expected="$(tr -d '[:space:]' < omega/android/signing-cert.sha256 | tr 'A-F' 'a-f')"
+          actual="$(keytool -list -v -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey 2>/dev/null | sed -n 's/.*SHA256: //p' | head -1 | tr -d ':' | tr 'A-F' 'a-f')"
+          test "$actual" = "$expected"
+          echo "OMEGA_PUBLIC_HOSTED_SIGNER_PASS fingerprint_verified=true"
