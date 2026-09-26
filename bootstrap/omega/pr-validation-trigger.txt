@@ -1,1 +1,1 @@
-validate-exact-pr cd8fc989d53935f08c2c847588c6a02e2f44240b hardening/canonical-evidence-envelope-20260926 execution-identity-v2
+validate-exact-pr cd8fc989d53935f08c2c847588c6a02e2f44240b hardening/canonical-evidence-envelope-20260926 execution-identity-v3
