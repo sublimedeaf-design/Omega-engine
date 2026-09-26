@@ -136,7 +136,10 @@ jobs:
           ref: ${{ env.OMEGA_SOURCE_SHA }}
           token: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
           persist-credentials: false
-          fetch-depth: 1
+          # Full history is a proof input here: validate_supply_chain_locks.py
+          # must prove the recorded Gradle dependency-root source is an ancestor
+          # of this exact candidate and inspect dependency-input drift.
+          fetch-depth: 0
           path: omega
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
@@ -281,7 +284,10 @@ jobs:
           ref: ${{ env.OMEGA_SOURCE_SHA }}
           token: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
           persist-credentials: false
-          fetch-depth: 1
+          # Full history is a proof input here: validate_supply_chain_locks.py
+          # must prove the recorded Gradle dependency-root source is an ancestor
+          # of this exact candidate and inspect dependency-input drift.
+          fetch-depth: 0
           path: omega
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
