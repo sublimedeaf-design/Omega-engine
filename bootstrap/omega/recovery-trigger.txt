@@ -1,1 +1,1 @@
-recover-exact 37e166c8ba3e1c78281abfb9999d2be8a6adbaa9 hardening/canonical-evidence-envelope-20260926 hf-integral-proof-v8
+recover-exact 6321e1a095f197332c6985bd91d1f5d419cdaa34 hardening/canonical-evidence-envelope-20260926 integral-optimization-v1
