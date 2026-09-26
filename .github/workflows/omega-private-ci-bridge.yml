@@ -116,7 +116,7 @@ jobs:
           ref: ${{ needs.discover.outputs.sha }}
           token: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
           persist-credentials: false
-          fetch-depth: 0
+          fetch-depth: 1
           path: srcdir
       - name: Run lane
         working-directory: srcdir
@@ -161,9 +161,14 @@ jobs:
       - name: Verify exact source
         working-directory: srcdir
         run: test "$(git rev-parse HEAD)" = "$OMEGA_SOURCE_SHA"
-      - name: Install Android SDK 36
+      - name: Ensure Android SDK 36
         shell: bash
         run: |
+          set -Eeuo pipefail
+          if [ -d "$ANDROID_HOME/platforms/android-36" ] && [ -x "$ANDROID_HOME/build-tools/36.0.0/apksigner" ]; then
+            echo "OMEGA_ANDROID_SDK_REUSED platform=36 build_tools=36.0.0"
+            exit 0
+          fi
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "platforms;android-36" "build-tools;36.0.0"
       - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb
@@ -208,7 +213,7 @@ jobs:
           ref: ${{ needs.discover.outputs.sha }}
           token: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
           persist-credentials: false
-          fetch-depth: 0
+          fetch-depth: 1
           path: srcdir
       - name: Validate governance
         working-directory: srcdir
