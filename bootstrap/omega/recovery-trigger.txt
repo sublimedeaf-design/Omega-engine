@@ -1,1 +1,1 @@
-recover-exact f3625181c29054d083db59d8c17d5e4ec78f259b hardening/release-versioncode-lock-v2-mainmerge-20260926 candidate-v2-supply-chain
+recover-exact 2914e120acaca3ef022494205af731b28a43e67c hardening/release-versioncode-lock-v2-mainmerge-20260926 candidate-v3-supply-chain
