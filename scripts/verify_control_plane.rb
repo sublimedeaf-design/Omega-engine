@@ -55,6 +55,58 @@ files.each do |file|
   end
 end
 
+# GitHub limits workflow_run chaining to three levels. Build the workflow_run
+# dependency graph from parsed YAML so this platform limit cannot regress.
+workflow_names = {}
+workflow_run_deps = Hash.new { |h, k| h[k] = [] }
+files.each do |file|
+  doc = Psych.safe_load_file(file, aliases: true)
+  next unless doc.is_a?(Hash)
+  name = doc["name"].to_s.strip
+  fail!("#{file}:workflow_name_missing") if name.empty?
+  fail!("duplicate_workflow_name:#{name}") if workflow_names.key?(name)
+  workflow_names[name] = file
+
+  on_value = doc["on"] || doc[true]
+  next unless on_value.is_a?(Hash)
+  wr = on_value["workflow_run"]
+  next unless wr.is_a?(Hash)
+  deps = wr["workflows"]
+  deps = [deps] if deps.is_a?(String)
+  next if deps.nil?
+  fail!("#{file}:workflow_run_workflows_invalid") unless deps.is_a?(Array)
+  deps.each do |dep|
+    dep_name = dep.to_s.strip
+    fail!("#{file}:workflow_run_dependency_empty") if dep_name.empty?
+    workflow_run_deps[name] << dep_name
+  end
+end
+
+workflow_run_deps.each do |child, deps|
+  deps.each do |parent|
+    fail!("workflow_run_unknown_parent:#{child}:#{parent}") unless workflow_names.key?(parent)
+  end
+end
+
+children = Hash.new { |h, k| h[k] = [] }
+workflow_run_deps.each do |child, parents|
+  parents.each { |parent| children[parent] << child }
+end
+
+visit = lambda do |name, path|
+  if path.include?(name)
+    cycle = (path[path.index(name)..] + [name]).join(" -> ")
+    fail!("workflow_run_cycle:#{cycle}")
+  end
+  next_path = path + [name]
+  if next_path.length - 1 > 3
+    fail!("workflow_run_depth_exceeded:#{next_path.join(' -> ')}")
+  end
+  children[name].sort.each { |child| visit.call(child, next_path) }
+end
+
+workflow_names.keys.sort.each { |name| visit.call(name, []) }
+
 recovery_path = WORKFLOWS.join("omega-hosted-recovery-failover.yml")
 recovery = File.read(recovery_path, encoding: "UTF-8")
 {
@@ -172,7 +224,12 @@ fail!("coldstart_exact_signer_input_missing") unless coldstart.include?("signer_
 fail!("signer_coldstart_dispatch_missing") unless signer.include?("gh workflow run omega-android-runtime-coldstart.yml") && signer.include?('signer_run_id="$SIGNER_RUN_ID"')
 fail!("signer_actions_write_missing") unless signer.include?("actions: write")
 fail!("candidate_evidence_must_fail_closed") unless File.read(WORKFLOWS.join("omega-candidate-evidence-root.yml"), encoding: "UTF-8").include?("OMEGA_EVIDENCE_ROOT_UPSTREAM_NOT_PASS") && File.read(WORKFLOWS.join("omega-candidate-evidence-root.yml"), encoding: "UTF-8").include?("exit 75")
+candidate_root = File.read(WORKFLOWS.join("omega-candidate-evidence-root.yml"), encoding: "UTF-8")
+fail!("candidate_root_stager_dispatch_missing") unless candidate_root.include?("gh workflow run omega-recovery-evidence-release-stager.yml") && candidate_root.include?('evidence_run_id="$EVIDENCE_RUN_ID"')
+fail!("candidate_root_actions_write_missing") unless candidate_root.include?("actions: write")
 stager_text = File.read(WORKFLOWS.join("omega-recovery-evidence-release-stager.yml"), encoding: "UTF-8")
+fail!("release_stager_must_not_use_workflow_run") if stager_text.include?("workflow_run:")
+fail!("release_stager_exact_evidence_input_missing") unless stager_text.include?("evidence_run_id:") && stager_text.include?("inputs.evidence_run_id")
 fail!("release_stager_missing_artifact_must_fail") unless stager_text.include?("OMEGA_RELEASE_STAGE_NOT_EXECUTED_NO_EVIDENCE_ARTIFACT") && stager_text.include?("exit 75")
 fail!("signer_workflow_handoff_must_fail") unless signer.include?("OMEGA_SIGNER_NO_UNSIGNED_HANDOFF upstream_run=") && signer.include?("exit 75")
 postlive = File.read(WORKFLOWS.join("omega-post-live-verification.yml"), encoding: "UTF-8")
@@ -182,6 +239,9 @@ fail!("promoter_postlive_dispatch_missing") unless promoter.include?("gh workflo
 fail!("promoter_actions_write_missing") unless promoter.include?("actions: write")
 fail!("production_provenance_application_id_missing") unless promoter.include?('"application_id":app_id.group(1)') && promoter.include?("OMEGA_FINAL_ANDROID_APPLICATION_ID_MISSING")
 fail!("single_promotion_release_ref_guard_missing") unless promoter.include?("release/recovery-evidence-")
+fail!("promoter_must_not_trigger_from_signer") if promoter.include?('workflows:\n      - "OMEGA Canonical Android Signer"')
+fail!("promoter_must_not_trigger_from_private_bridge") if promoter.include?('workflows:\n      - "OMEGA Private PR Hosted Bridge"')
+fail!("promoter_coldstart_trigger_missing") unless promoter.include?('- "OMEGA Android Runtime Cold Start"')
 
 puts "OMEGA_CONTROL_PLANE_INTEGRITY_GREEN workflows=#{files.length}"
 # support fastpath restack v2 exact-head trigger

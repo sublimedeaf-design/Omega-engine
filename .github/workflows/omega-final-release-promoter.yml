@@ -3,9 +3,7 @@ name: OMEGA Final Release Promoter
 on:
   workflow_run:
     workflows:
-      - "OMEGA Canonical Android Signer"
       - "OMEGA Android Runtime Cold Start"
-      - "OMEGA Private PR Hosted Bridge"
     types: [completed]
   workflow_dispatch:
   schedule:
