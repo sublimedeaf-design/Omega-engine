@@ -420,5 +420,18 @@ fail!("federation_peer_control_binding_missing") unless peer_bridge.include?('"c
 certifier = File.read(WORKFLOWS.join("omega-release-federation-certifier.yml"), encoding: "UTF-8")
 fail!("federation_certifier_control_binding_missing") unless certifier.include?("OMEGA_RELEASE_CERTIFIER_PROOF_CONTROL_BINDING_MISMATCH") && certifier.include?("release_epoch_sequence")
 
+# Release orchestration is explicit and idempotent. Public control-plane pushes
+# and a low-frequency watchdog must wake a stale unfinished epoch without
+# touching evidence files merely to manufacture an event.
+orchestrator_path = WORKFLOWS.join("omega-release-orchestrator-arm.yml")
+fail!("release_orchestrator_arm_missing") unless orchestrator_path.exist?
+orchestrator = File.read(orchestrator_path, encoding: "UTF-8")
+fail!("release_orchestrator_actions_write_missing") unless orchestrator.include?("actions: write")
+fail!("release_orchestrator_schedule_missing") unless orchestrator.include?('cron: "3,18,33,48 * * * *"')
+fail!("release_orchestrator_explicit_rollover_missing") unless orchestrator.include?('gh workflow run "$ROLLOVER_WORKFLOW" -R "$GITHUB_REPOSITORY" --ref main')
+fail!("release_orchestrator_duplicate_guard_missing") unless orchestrator.include?("OMEGA_RELEASE_ORCHESTRATOR_ROLLOVER_ALREADY_ACTIVE") && orchestrator.include?("status=queued") && orchestrator.include?("status=in_progress")
+fail!("release_orchestrator_control_deviation_missing") unless orchestrator.include?("unfinished-control-deviation") && orchestrator.include?("completed-epoch-immutable")
+fail!("release_orchestrator_must_not_mutate_epoch") if orchestrator.include?("/contents/federation/epochs/current.json") && orchestrator.include?("--method PUT")
+
 puts "OMEGA_CONTROL_PLANE_INTEGRITY_GREEN workflows=#{files.length}"
 # support fastpath restack v2 exact-head trigger
