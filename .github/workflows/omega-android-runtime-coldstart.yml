@@ -1,0 +1,216 @@
+name: OMEGA Android Runtime Cold Start
+
+on:
+  workflow_run:
+    workflows: ["OMEGA Canonical Android Signer"]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: omega-android-runtime-coldstart
+  cancel-in-progress: false
+
+env:
+  PRIVATE_REPOSITORY: sublimedeaf-design/Omega-engines
+  CONTROL_REPOSITORY: sublimedeaf-design/Omega-engine
+
+jobs:
+  coldstart:
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Resolve exact signed release artifact
+        id: artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SIGNER_RUN_ID: ${{ github.event.workflow_run.id }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          if [ "${{ github.event_name }}" != workflow_run ]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "OMEGA_ANDROID_COLDSTART_MANUAL_REQUIRES_SIGNER_RUN"
+            exit 0
+          fi
+          json="$(gh api "/repos/$CONTROL_REPOSITORY/actions/runs/$SIGNER_RUN_ID/artifacts?per_page=100")"
+          row="$(python3 - "$json" <<'PY'
+          import json,re,sys
+          p=json.loads(sys.argv[1]); rows=[]
+          for a in p.get("artifacts",[]):
+              n=str(a.get("name") or "")
+              m=re.fullmatch(r"OMEGA-Signed-Release-([0-9a-f]{40})",n)
+              if m and not a.get("expired"):
+                  rows.append((m.group(1),n,str(a.get("id"))))
+          if len(rows)>1:
+              raise SystemExit(f"OMEGA_ANDROID_COLDSTART_SIGNED_ARTIFACT_AMBIGUOUS:{len(rows)}")
+          if rows:
+              print("|".join(rows[0]))
+          PY
+          )"
+          if [ -z "$row" ]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "OMEGA_ANDROID_COLDSTART_NOT_EXECUTED_NO_SIGNED_ARTIFACT run=$SIGNER_RUN_ID"
+            exit 0
+          fi
+          IFS='|' read -r final artifact artifact_id <<<"$row"
+          [[ "$final" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$artifact_id" =~ ^[0-9]+$ ]]
+          echo "ready=true" >> "$GITHUB_OUTPUT"
+          echo "final_sha=$final" >> "$GITHUB_OUTPUT"
+          echo "artifact_name=$artifact" >> "$GITHUB_OUTPUT"
+          echo "artifact_id=$artifact_id" >> "$GITHUB_OUTPUT"
+          echo "signer_run_id=$SIGNER_RUN_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Verify exact signer proof and mark runtime pending
+        if: steps.artifact.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          FINAL_SHA: ${{ steps.artifact.outputs.final_sha }}
+          SIGNER_RUN_ID: ${{ steps.artifact.outputs.signer_run_id }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          status="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/$FINAL_SHA/status?per_page=100")"
+          STATUS_PAYLOAD="$status" SIGNER_RUN_ID="$SIGNER_RUN_ID" python3 <<'PY'
+          import json,os
+          p=json.loads(os.environ["STATUS_PAYLOAD"]); latest={}
+          for row in p.get("statuses",[]):
+              ctx=str(row.get("context") or "")
+              if ctx and ctx not in latest:
+                  latest[ctx]=row
+          for ctx in ("omega/signer/continuity","omega/android-release-signed"):
+              row=latest.get(ctx) or {}
+              if row.get("state")!="success":
+                  raise SystemExit("OMEGA_ANDROID_COLDSTART_SIGNER_NOT_PASS:"+ctx)
+              target=str(row.get("target_url") or "")
+              if not target.endswith("/actions/runs/"+os.environ["SIGNER_RUN_ID"]):
+                  raise SystemExit("OMEGA_ANDROID_COLDSTART_SIGNER_RUN_MISMATCH:"+ctx)
+          PY
+          gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$FINAL_SHA"             -f state=pending             -f context="omega/android-runtime-coldstart"             -f description="signed APK emulator cold-start verification running"             -f target_url="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" >/dev/null
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        if: steps.artifact.outputs.ready == 'true'
+        with:
+          name: ${{ steps.artifact.outputs.artifact_name }}
+          path: ${{ runner.temp }}/signed
+          github-token: ${{ github.token }}
+          run-id: ${{ steps.artifact.outputs.signer_run_id }}
+
+      - name: Verify, install and cold-start signed APK
+        if: steps.artifact.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          FINAL_SHA: ${{ steps.artifact.outputs.final_sha }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p "$RUNNER_TEMP/android-coldstart"
+          publish_failure() {
+            rc=$?
+            trap - EXIT
+            adb emu kill >/dev/null 2>&1 || true
+            if [ "$rc" -ne 0 ]; then
+              gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$FINAL_SHA"                 -f state=failure                 -f context="omega/android-runtime-coldstart"                 -f description="signed APK emulator cold-start verification failed"                 -f target_url="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" >/dev/null || true
+            fi
+            exit "$rc"
+          }
+          trap publish_failure EXIT
+
+          mapfile -t apks < <(find "$RUNNER_TEMP/signed" -type f -name OMEGA-Engine.apk -print)
+          mapfile -t sums < <(find "$RUNNER_TEMP/signed" -type f -name OMEGA-Engine.apk.sha256 -print)
+          mapfile -t provs < <(find "$RUNNER_TEMP/signed" -type f -name OMEGA-Engine.signed.provenance.json -print)
+          [ "${#apks[@]}" -eq 1 ] && [ "${#sums[@]}" -eq 1 ] && [ "${#provs[@]}" -eq 1 ]
+          apk="${apks[0]}"; sum="${sums[0]}"; prov="${provs[0]}"
+          actual="$(sha256sum "$apk" | awk '{print $1}')"
+          recorded="$(awk '{print $1}' "$sum")"
+          [ "$actual" = "$recorded" ]
+
+          expected="$(python3 - "$prov" "$FINAL_SHA" "$actual" <<'PY'
+          import json,re,sys
+          p=json.load(open(sys.argv[1],encoding="utf-8"))
+          if p.get("source_commit")!=sys.argv[2] or p.get("signed_apk_sha256")!=sys.argv[3]:
+              raise SystemExit("OMEGA_ANDROID_COLDSTART_SIGNED_PROVENANCE_MISMATCH")
+          if p.get("signer_continuity")!="PASS":
+              raise SystemExit("OMEGA_ANDROID_COLDSTART_SIGNER_CONTINUITY_NOT_PASS")
+          fp=str(p.get("signer_certificate_sha256") or "").replace(":","").lower()
+          if not re.fullmatch(r"[0-9a-f]{64}",fp):
+              raise SystemExit("OMEGA_ANDROID_COLDSTART_SIGNER_FINGERPRINT_INVALID")
+          print(fp)
+          PY
+          )"
+
+          sdkmanager --install "platform-tools" "emulator" "build-tools;36.0.0" "system-images;android-35;default;x86_64" >/dev/null
+          test -e /dev/kvm || { echo OMEGA_ANDROID_COLDSTART_KVM_MISSING >&2; exit 72; }
+          sudo chmod 666 /dev/kvm
+          printf 'no\n' | avdmanager create avd --force --name omega-ci --package "system-images;android-35;default;x86_64" >/dev/null
+
+          out="$("$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$apk")"
+          signer="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' <<<"$out" | head -1 | tr -d ':' | tr 'A-F' 'a-f')"
+          [ "$signer" = "$expected" ] || { echo OMEGA_ANDROID_COLDSTART_SIGNER_MISMATCH >&2; exit 73; }
+
+          "$ANDROID_HOME/emulator/emulator" @omega-ci             -no-window -no-audio -no-boot-anim -no-snapshot -wipe-data             -gpu swiftshader_indirect -accel on             >"$RUNNER_TEMP/android-coldstart/emulator.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/android-coldstart/emulator.pid"
+          adb wait-for-device
+          ready=false
+          for _ in $(seq 1 90); do
+            if [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ]; then
+              ready=true
+              break
+            fi
+            sleep 2
+          done
+          [ "$ready" = true ] || { echo OMEGA_ANDROID_COLDSTART_EMULATOR_BOOT_TIMEOUT >&2; exit 74; }
+
+          adb install -r "$apk" > "$RUNNER_TEMP/android-coldstart/install.txt"
+          adb logcat -c
+          adb shell am force-stop com.omega.app
+          adb shell pm clear com.omega.app >/dev/null
+          adb shell am start -W -S -n com.omega.app/.MainActivity | tee "$RUNNER_TEMP/android-coldstart/launch.txt"
+          grep -Eq 'Status: ok|Complete' "$RUNNER_TEMP/android-coldstart/launch.txt"
+          sleep 8
+          pid="$(adb shell pidof com.omega.app | tr -d '\r')"
+          [ -n "$pid" ] || { echo OMEGA_ANDROID_COLDSTART_PROCESS_NOT_ALIVE >&2; exit 75; }
+          adb shell dumpsys activity activities > "$RUNNER_TEMP/android-coldstart/activities.txt"
+          grep -F "com.omega.app/.MainActivity" "$RUNNER_TEMP/android-coldstart/activities.txt" >/dev/null
+          adb exec-out screencap -p > "$RUNNER_TEMP/android-coldstart/coldstart.png" || true
+          adb logcat -d > "$RUNNER_TEMP/android-coldstart/logcat.txt"
+          if grep -E 'FATAL EXCEPTION|ANR in com\.omega\.app|Process: com\.omega\.app, PID:' "$RUNNER_TEMP/android-coldstart/logcat.txt"; then
+            echo OMEGA_ANDROID_COLDSTART_FATAL_RUNTIME_SIGNAL >&2
+            exit 76
+          fi
+
+          # A second fresh-data launch catches one-time initialization defects.
+          adb logcat -c
+          adb shell am force-stop com.omega.app
+          adb shell pm clear com.omega.app >/dev/null
+          adb shell am start -W -S -n com.omega.app/.MainActivity | tee "$RUNNER_TEMP/android-coldstart/relaunch.txt"
+          sleep 5
+          pid2="$(adb shell pidof com.omega.app | tr -d '\r')"
+          [ -n "$pid2" ] || { echo OMEGA_ANDROID_COLDSTART_RELAUNCH_PROCESS_NOT_ALIVE >&2; exit 77; }
+          adb logcat -d > "$RUNNER_TEMP/android-coldstart/relaunch-logcat.txt"
+          if grep -E 'FATAL EXCEPTION|ANR in com\.omega\.app|Process: com\.omega\.app, PID:' "$RUNNER_TEMP/android-coldstart/relaunch-logcat.txt"; then
+            echo OMEGA_ANDROID_COLDSTART_RELAUNCH_FATAL_RUNTIME_SIGNAL >&2
+            exit 78
+          fi
+
+          gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$FINAL_SHA"             -f state=success             -f context="omega/android-runtime-coldstart"             -f description="signed APK installed and survived two clean emulator cold starts"             -f target_url="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" >/dev/null
+          trap - EXIT
+          adb emu kill >/dev/null 2>&1 || true
+          echo "OMEGA_ANDROID_RUNTIME_COLDSTART_PASS sha=$FINAL_SHA apk_sha256=$actual"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always() && steps.artifact.outputs.ready == 'true'
+        with:
+          name: OMEGA-Android-ColdStart-${{ steps.artifact.outputs.final_sha }}
+          path: ${{ runner.temp }}/android-coldstart
+          if-no-files-found: warn
+          retention-days: 7
