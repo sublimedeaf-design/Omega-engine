@@ -32,6 +32,12 @@ STATE = Path(os.getenv("OMEGA_VALIDATOR_STATE", "/tmp/omega-validator-attestatio
 STATE.mkdir(parents=True, exist_ok=True)
 LOCK = threading.Lock()
 JWK = PyJWKClient(JWKS)
+VALIDATOR_CODE_SHA256 = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+RENDER_GIT_COMMIT = os.getenv("RENDER_GIT_COMMIT", "").strip().lower()
+RENDER_SERVICE_ID = os.getenv("RENDER_SERVICE_ID", "").strip()
+RENDER_GIT_REPO_SLUG = os.getenv("RENDER_GIT_REPO_SLUG", "").strip()
+if RENDER_GIT_COMMIT and (len(RENDER_GIT_COMMIT) != 40 or any(ch not in "0123456789abcdef" for ch in RENDER_GIT_COMMIT)):
+    raise RuntimeError("RENDER_GIT_COMMIT_INVALID")
 
 
 def _write(sha: str, payload: dict) -> None:
@@ -114,6 +120,12 @@ def _validate(sha: str, raw: bytes, bundle_sha: str, oidc_claims: dict) -> None:
         "state": "running",
         "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "credential_material_recorded": False,
+        "validator": {
+            "code_sha256": VALIDATOR_CODE_SHA256,
+            "render_git_commit": RENDER_GIT_COMMIT or None,
+            "render_service_id": RENDER_SERVICE_ID or None,
+            "render_git_repo_slug": RENDER_GIT_REPO_SLUG or None,
+        },
         "oidc": {
             "repository": oidc_claims.get("repository"),
             "ref": oidc_claims.get("ref"),
@@ -178,13 +190,33 @@ def _validate(sha: str, raw: bytes, bundle_sha: str, oidc_claims: dict) -> None:
 
 @app.get("/healthz")
 def healthz():
-    return jsonify({"ok": True, "provider": PROVIDER, "audience": AUDIENCE, "suite": "core", "python": EXPECTED_PYTHON})
+    return jsonify({
+        "ok": True,
+        "provider": PROVIDER,
+        "audience": AUDIENCE,
+        "suite": "core",
+        "python": EXPECTED_PYTHON,
+        "validator_code_sha256": VALIDATOR_CODE_SHA256,
+        "render_git_commit": RENDER_GIT_COMMIT or None,
+        "render_service_id": RENDER_SERVICE_ID or None,
+    })
 
 
 @app.post("/validate")
 def validate():
     try:
         claims = _oidc()
+        expected_validator = request.headers.get("x-omega-validator-code-sha256", "").strip().lower()
+        if len(expected_validator) != 64 or any(ch not in "0123456789abcdef" for ch in expected_validator):
+            return jsonify({"ok": False, "error": "INVALID_VALIDATOR_CODE_SHA256"}), 400
+        if expected_validator != VALIDATOR_CODE_SHA256:
+            return jsonify({
+                "ok": False,
+                "error": "VALIDATOR_CODE_MISMATCH",
+                "expected": expected_validator,
+                "actual": VALIDATOR_CODE_SHA256,
+                "render_git_commit": RENDER_GIT_COMMIT or None,
+            }), 409
         sha = request.headers.get("x-omega-sha", "").strip().lower()
         if len(sha) != 40 or any(ch not in "0123456789abcdef" for ch in sha):
             return jsonify({"ok": False, "error": "INVALID_SHA"}), 400
