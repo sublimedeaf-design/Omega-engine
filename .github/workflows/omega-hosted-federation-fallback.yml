@@ -109,7 +109,9 @@ jobs:
                       rows[repo]=r.status
               except urllib.error.HTTPError as e:
                   rows[repo]=e.code
-          expected={"Omega-release","Omega-validation","Omega-agents","Omega-recovery","Jarv"}
+          expected={str(item["repository"]) for item in cfg.get("peers",[]) if item.get("repository")}
+          if not expected or len(expected)!=len(cfg.get("peers",[])):
+              raise SystemExit("OMEGA_HOSTED_FEDERATION_PEER_CONFIG_INVALID")
           if set(rows)!=expected or any(rows[x]!=200 for x in expected):
               raise SystemExit("OMEGA_HOSTED_FEDERATION_PEER_HTTP_FAILED:"+json.dumps(rows,sort_keys=True))
           Path("/tmp/federation-access.json").write_text(json.dumps({
@@ -141,7 +143,9 @@ jobs:
           from pathlib import Path
           p=Path(os.environ["OMEGA_STATE"])/"evidence/federation-executor.json"
           d=json.loads(p.read_text())
-          expected={"Omega-release","Omega-validation","Omega-agents","Omega-recovery","Jarv"}
+          expected={str(item["repository"]) for item in cfg.get("peers",[]) if item.get("repository")}
+          if not expected or len(expected)!=len(cfg.get("peers",[])):
+              raise SystemExit("OMEGA_HOSTED_FEDERATION_PEER_CONFIG_INVALID")
           rows=d.get("peers") or []
           ok=(
               d.get("ok") is True and
@@ -180,7 +184,9 @@ jobs:
               raise SystemExit("HOSTED_FEDERATION_MAIN_SHA_MISMATCH")
           mesh=json.loads((root/".omega/repository-mesh.json").read_text())
           report=json.loads((Path(os.environ["OMEGA_STATE"])/"evidence/federation-executor.json").read_text())
-          expected={"Omega-release","Omega-validation","Omega-agents","Omega-recovery","Jarv"}
+          expected={str(item["repository"]) for item in cfg.get("peers",[]) if item.get("repository")}
+          if not expected or len(expected)!=len(cfg.get("peers",[])):
+              raise SystemExit("OMEGA_HOSTED_FEDERATION_PEER_CONFIG_INVALID")
           if report.get("source_pin")!=mesh.get("validated_federation_source_pin"):
               raise SystemExit("HOSTED_FEDERATION_SOURCE_PIN_MISMATCH")
           rows=report.get("peers") or []
