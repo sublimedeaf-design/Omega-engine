@@ -73,7 +73,7 @@ jobs:
               -f state=error \
               -f context="omega/signer/continuity" \
               -f description="BLOCKED: private Actions read/write permission unavailable" >/dev/null 2>&1 || true
-            exit 0
+            exit 77
           fi
           rm -f "$actions_err"
 
@@ -92,7 +92,7 @@ jobs:
               -f state=error \
               -f context="omega/signer/continuity" \
               -f description="BLOCKED: private Actions dispatch permission unavailable" >/dev/null 2>&1 || true
-            exit 0
+            exit 77
           fi
           rm -f "$dispatch_err"
           echo "OMEGA_SIGNER_ARM_DISPATCHED sha=$sha workflow=$SIGNER_WORKFLOW"
