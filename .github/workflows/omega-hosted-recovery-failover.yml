@@ -104,12 +104,7 @@ jobs:
           if [ "$mode" = main ]; then
             protocol_ok=true
             for required in scripts/install_locked_ci_deps.py scripts/materialize_gradle_verification.py scripts/validate_supply_chain_locks.py deploy/hosted/recovery-contract.json; do
-              encoded_path="$(python3 - "$required" <<'PY'
-import sys,urllib.parse
-print(urllib.parse.quote(sys.argv[1],safe="/"))
-PY
-)"
-              if ! gh api "/repos/$PRIVATE_REPOSITORY/contents/$encoded_path?ref=$sha" >/dev/null 2>&1; then
+              if ! gh api "/repos/$PRIVATE_REPOSITORY/contents/$required?ref=$sha" >/dev/null 2>&1; then
                 protocol_ok=false
                 echo "OMEGA_HOSTED_RECOVERY_MAIN_PROTOCOL_MISSING:$required sha=$sha"
               fi
