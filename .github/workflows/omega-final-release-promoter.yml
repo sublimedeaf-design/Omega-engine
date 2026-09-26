@@ -3,7 +3,6 @@ name: OMEGA Final Release Promoter
 on:
   workflow_run:
     workflows:
-      - "OMEGA Candidate Evidence Root"
       - "OMEGA Canonical Android Signer"
       - "OMEGA Private PR Hosted Bridge"
     types: [completed]
