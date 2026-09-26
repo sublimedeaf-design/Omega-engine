@@ -9,30 +9,64 @@ on:
 permissions:
   contents: read
 
+env:
+  PRIVATE_REPOSITORY: sublimedeaf-design/Omega-engines
+
 jobs:
   probe:
     runs-on: ubuntu-latest
     timeout-minutes: 3
-    env:
-      OMEGA_BOOTSTRAP_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
     steps:
-      - name: Probe repository runner registration capability
+      - name: Probe exact private runner-registration authority
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
         shell: bash
         run: |
+          set -Eeuo pipefail
           set +x
-          code="$(curl -sS -o /tmp/runner-registration.json -w '%{http_code}' -X POST \
+          [ -n "${GH_TOKEN:-}" ] || {
+            echo "OMEGA_RUNNER_REGISTRATION_TOKEN_MISSING" >&2
+            exit 78
+          }
+
+          private_sha="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/main" --jq '.sha')"
+          [[ "$private_sha" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "OMEGA_RUNNER_REGISTRATION_PRIVATE_SHA_INVALID" >&2
+            exit 64
+          }
+
+          response="$(mktemp)"
+          code="$(curl -sS -o "$response" -w '%{http_code}' -X POST \
             -H 'Accept: application/vnd.github+json' \
-            -H 'X-GitHub-Api-Version: 2026-03-10' \
-            -H "Authorization: Bearer $OMEGA_BOOTSTRAP_TOKEN" \
-            https://api.github.com/repos/sublimedeaf-design/Omega-engines/actions/runners/registration-token || true)"
-          echo "OMEGA_RUNNER_REGISTRATION_HTTP=$code"
-          python3 - <<'PY'
-          import json
-          p="/tmp/runner-registration.json"
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            "https://api.github.com/repos/$PRIVATE_REPOSITORY/actions/runners/registration-token" || true)"
+
+          token_present="$(python3 - "$response" <<'PY'
+          import json,sys
           try:
-              d=json.load(open(p))
+              payload=json.load(open(sys.argv[1],encoding="utf-8"))
           except Exception:
-              d={}
-          print("OMEGA_RUNNER_REGISTRATION_TOKEN_PRESENT="+("true" if bool(d.get("token")) else "false"))
-          print("OMEGA_RUNNER_REGISTRATION_MESSAGE="+str(d.get("message",""))[:160])
+              payload={}
+          print("true" if bool(payload.get("token")) else "false")
           PY
+          )"
+          rm -f "$response"
+
+          state=error
+          desc="runner registration authority blocked HTTP $code"
+          rc=77
+          if [ "$code" = "201" ] && [ "$token_present" = "true" ]; then
+            state=success
+            desc="runner registration authority verified"
+            rc=0
+          fi
+
+          gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$private_sha" \
+            -f state="$state" \
+            -f context="omega/runner-registration-authority" \
+            -f description="$desc" \
+            -f target_url="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" >/dev/null 2>&1 || true
+
+          echo "OMEGA_RUNNER_REGISTRATION_HTTP=$code token_present=$token_present sha=$private_sha"
+          exit "$rc"
