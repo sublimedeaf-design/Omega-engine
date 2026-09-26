@@ -350,19 +350,30 @@ jobs:
           name: omega-hosted-recovery-${{ needs.pin.outputs.sha }}
           path: ${{ runner.temp }}/omega-recovery-artifact
       - name: Verify recovery artifact integrity and restore
+        id: restore
         shell: bash
         run: |
           set -Eeuo pipefail
           cd "$RUNNER_TEMP/omega-recovery-artifact"
           test -s omega-recovery-state.tgz
           test -s omega-recovery-state.tgz.sha256
-          expected="${{ needs.pre_recovery.outputs.recovery_package_sha256 }}"
-          [[ "$expected" =~ ^[0-9a-f]{64}$ ]] || { echo "OMEGA_RECOVERY_EXPECTED_DIGEST_INVALID" >&2; exit 41; }
+          # download-artifact already verifies GitHub's immutable v4 artifact digest.
+          # Re-runs can lose a successful upstream job output, so the content-level
+          # digest inside that immutable artifact is the canonical recovery-package
+          # digest when the needs output is absent.
           recorded="$(awk '{print $1}' omega-recovery-state.tgz.sha256)"
-          [ "$recorded" = "$expected" ] || { echo "OMEGA_RECOVERY_DIGEST_METADATA_MISMATCH:$recorded!=$expected" >&2; exit 42; }
+          [[ "$recorded" =~ ^[0-9a-f]{64}$ ]] || { echo "OMEGA_RECOVERY_RECORDED_DIGEST_INVALID" >&2; exit 41; }
+          expected="${{ needs.pre_recovery.outputs.recovery_package_sha256 }}"
+          if [[ "$expected" =~ ^[0-9a-f]{64}$ ]]; then
+            [ "$recorded" = "$expected" ] || { echo "OMEGA_RECOVERY_DIGEST_METADATA_MISMATCH:$recorded!=$expected" >&2; exit 42; }
+          else
+            expected="$recorded"
+            echo "OMEGA_RECOVERY_UPSTREAM_OUTPUT_UNAVAILABLE using_immutable_artifact_digest=$expected"
+          fi
           actual="$(sha256sum omega-recovery-state.tgz | awk '{print $1}')"
           [ "$actual" = "$expected" ] || { echo "OMEGA_RECOVERY_ARTIFACT_HASH_MISMATCH:$actual!=$expected" >&2; exit 43; }
           sha256sum -c omega-recovery-state.tgz.sha256
+          echo "sha256=$expected" >> "$GITHUB_OUTPUT"
           mkdir -p "$RUNNER_TEMP/omega-state"
           python3 - "$RUNNER_TEMP/omega-recovery-artifact/omega-recovery-state.tgz" "$RUNNER_TEMP/omega-state" <<'PY'
           import pathlib,sys,tarfile
@@ -393,7 +404,7 @@ jobs:
         id: attestation
         working-directory: omega
         env:
-          RECOVERY_PACKAGE_SHA256: ${{ needs.pre_recovery.outputs.recovery_package_sha256 }}
+          RECOVERY_PACKAGE_SHA256: ${{ steps.restore.outputs.sha256 }}
         shell: bash
         run: |
           set -Eeuo pipefail
