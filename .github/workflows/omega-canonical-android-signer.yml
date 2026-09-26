@@ -15,6 +15,7 @@ permissions:
 concurrency:
   group: omega-canonical-android-signer
   cancel-in-progress: false
+  queue: max
 
 env:
   PRIVATE_REPOSITORY: sublimedeaf-design/Omega-engines
