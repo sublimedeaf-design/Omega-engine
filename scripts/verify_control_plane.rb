@@ -405,11 +405,14 @@ fail!("federation_certifier_exact_bridge_api_verification_missing") unless certi
 # orchestrator deviation creates a new immutable, monotonically sequenced epoch.
 fail!("release_epoch_monotonic_sequence_missing") unless rollover_script.include?('"monotonic_epoch_sequence": True') && rollover_script.include?("sequence = prior_sequence + 1")
 fail!("release_epoch_unfinished_supersede_missing") unless rollover_script.include?("safe_unfinished_supersede") && rollover_script.include?("OMEGA_RELEASE_EPOCH_SUPERSEDE_UNFINISHED_CONTROL_DEVIATION")
-fail!("release_epoch_supersede_policy_missing") unless rollover_script.include?('"supersedes_unfinished_epoch_on_control_deviation": True')
+fail!("release_epoch_certified_pre_live_supersede_missing") unless rollover_script.include?("safe_certified_pre_live_supersede") && rollover_script.include?("OMEGA_RELEASE_EPOCH_SUPERSEDE_CERTIFIED_PRE_LIVE_CONTROL_DEVIATION")
+fail!("release_epoch_live_immutability_missing") unless rollover_script.include?("OMEGA_RELEASE_EPOCH_LIVE_CERTIFIED_IMMUTABLE")
+fail!("release_epoch_supersede_policy_missing") unless rollover_script.include?('"supersedes_unfinished_epoch_on_control_deviation": True') && rollover_script.include?('"supersedes_certified_pre_live_epoch_on_control_deviation": True') && rollover_script.include?('"live_certified_epoch_is_immutable": True')
 fail!("release_epoch_parent_control_binding_missing") unless rollover_script.include?('"control_contract_sha": prior_control_contract or None') && rollover_script.include?('"parent_sequence": prior_sequence')
 
 epoch_verifier = File.read(ROOT.join("scripts", "verify_federation_epoch.py"), encoding: "UTF-8")
 fail!("release_epoch_sequence_verifier_missing") unless epoch_verifier.include?("release_epoch_sequence_not_monotonic") && epoch_verifier.include?("release_epoch_parent_control_sha")
+fail!("release_epoch_live_bound_verifier_missing") unless epoch_verifier.include?("release_epoch_pre_live_supersede_policy") && epoch_verifier.include?("release_epoch_live_immutability_policy")
 
 peer_bridge = File.read(WORKFLOWS.join("omega-federation-v3-peer-bridge.yml"), encoding: "UTF-8")
 fail!("federation_control_rollback_guard_missing") unless peer_bridge.include?("OMEGA_FEDERATION_CONTROL_ROLLBACK_DETECTED") && peer_bridge.include?("git merge-base --is-ancestor")
@@ -430,8 +433,15 @@ fail!("release_orchestrator_actions_write_missing") unless orchestrator.include?
 fail!("release_orchestrator_schedule_missing") unless orchestrator.include?('cron: "3,18,33,48 * * * *"')
 fail!("release_orchestrator_explicit_rollover_missing") unless orchestrator.include?('gh workflow run "$ROLLOVER_WORKFLOW" -R "$GITHUB_REPOSITORY" --ref main')
 fail!("release_orchestrator_duplicate_guard_missing") unless orchestrator.include?("OMEGA_RELEASE_ORCHESTRATOR_ROLLOVER_ALREADY_ACTIVE") && orchestrator.include?("status=queued") && orchestrator.include?("status=in_progress")
-fail!("release_orchestrator_control_deviation_missing") unless orchestrator.include?("unfinished-control-deviation") && orchestrator.include?("completed-epoch-immutable")
+fail!("release_orchestrator_control_deviation_missing") unless orchestrator.include?("pre-live-control-deviation") && orchestrator.include?("live-certified-epoch-immutable") && orchestrator.include?('omega/live-certified')
 fail!("release_orchestrator_must_not_mutate_epoch") if orchestrator.include?("/contents/federation/epochs/current.json") && orchestrator.include?("--method PUT")
+
+# Supply-chain provenance must survive the unsigned handoff and be verified before
+# any canonical key operation. This is intentionally independent of paid attestation features.
+fail!("release_stager_slsa_statement_missing") unless stager.include?("https://in-toto.io/Statement/v1") && stager.include?("https://slsa.dev/provenance/v1") && stager.include?("resolvedDependencies") && stager.include?("OMEGA-Engine-unsigned.intoto.jsonl")
+fail!("release_stager_builder_binding_missing") unless stager.include?("OMEGA_CONTROL_WORKFLOW_SHA") && stager.include?("github.workflow_sha")
+fail!("signer_slsa_subject_verification_missing") unless signer.include?("OMEGA_SIGNER_SLSA_SUBJECT_MISMATCH") && signer.include?("OMEGA_SIGNER_SLSA_BUILDER_INVALID")
+fail!("signer_slsa_dependency_verification_missing") unless signer.include?("OMEGA_SIGNER_SLSA_DEPENDENCY_MISMATCH") && signer.include?("omega-sbom.spdx.json") && signer.include?("release-stage-supply-chain.json")
 
 puts "OMEGA_CONTROL_PLANE_INTEGRITY_GREEN workflows=#{files.length}"
 # support fastpath restack v2 exact-head trigger
