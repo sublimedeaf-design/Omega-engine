@@ -12,7 +12,7 @@ permissions:
 
 concurrency:
   group: omega-supply-chain-lock-lab
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 env:
   PRIVATE_REPOSITORY: sublimedeaf-design/Omega-engines
