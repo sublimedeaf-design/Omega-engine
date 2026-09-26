@@ -165,6 +165,12 @@ jobs:
           test -s "$RUNNER_TEMP/signed/OMEGA-Engine.apk"
           test -s "$RUNNER_TEMP/signed/OMEGA-Engine.apk.sha256"
           test -s "$RUNNER_TEMP/signed/OMEGA-Engine.signed.provenance.json"
+          mapfile -t root_matches < <(find "$RUNNER_TEMP/final-root" -type f -name candidate-evidence-root.json -print)
+          mapfile -t att_matches < <(find "$RUNNER_TEMP/final-root" -type f -name recovery-attestation.json -print)
+          [ "${#root_matches[@]}" -eq 1 ] || { echo "OMEGA_FINAL_ROOT_LAYOUT_AMBIGUOUS count=${#root_matches[@]}" >&2; exit 69; }
+          [ "${#att_matches[@]}" -eq 1 ] || { echo "OMEGA_FINAL_ATTESTATION_LAYOUT_AMBIGUOUS count=${#att_matches[@]}" >&2; exit 69; }
+          cp -- "${root_matches[0]}" "$RUNNER_TEMP/final-root/candidate-evidence-root.json"
+          cp -- "${att_matches[0]}" "$RUNNER_TEMP/final-root/recovery-attestation.json"
           test -s "$RUNNER_TEMP/final-root/candidate-evidence-root.json"
           test -s "$RUNNER_TEMP/final-root/recovery-attestation.json"
 
@@ -349,13 +355,13 @@ jobs:
             gh release create "$tag" -R "$PRIVATE_REPOSITORY" --target "$FINAL_SHA" \
               --title "OMEGA Android $version (code $code)" \
               --notes "Production-final OMEGA Android release. Exact source: $FINAL_SHA. Clean recovery, candidate evidence root, federation v3, canonical signer continuity, hosted CI/Android and Sigstore provenance are all bound to this release." \
-              omega/dist/OMEGA-Engine.apk#OMEGA-Engine.apk \
-              omega/dist/OMEGA-Engine.apk.sha256#OMEGA-Engine.apk.sha256 \
-              omega/dist/OMEGA-Engine.provenance.json#OMEGA-Engine.provenance.json \
-              omega/dist/OMEGA-Engine.apk.sigstore.json#OMEGA-Engine.apk.sigstore.json \
-              omega/dist/OMEGA-Engine.provenance.sigstore.json#OMEGA-Engine.provenance.sigstore.json \
-              omega/dist/OMEGA-Engine.sbom.spdx.json#OMEGA-Engine.sbom.spdx.json \
-              omega/dist/OMEGA-Engine.supply-chain.json#OMEGA-Engine.supply-chain.json \
+              dist/OMEGA-Engine.apk#OMEGA-Engine.apk \
+              dist/OMEGA-Engine.apk.sha256#OMEGA-Engine.apk.sha256 \
+              dist/OMEGA-Engine.provenance.json#OMEGA-Engine.provenance.json \
+              dist/OMEGA-Engine.apk.sigstore.json#OMEGA-Engine.apk.sigstore.json \
+              dist/OMEGA-Engine.provenance.sigstore.json#OMEGA-Engine.provenance.sigstore.json \
+              dist/OMEGA-Engine.sbom.spdx.json#OMEGA-Engine.sbom.spdx.json \
+              dist/OMEGA-Engine.supply-chain.json#OMEGA-Engine.supply-chain.json \
               dist/OMEGA-Engine.final-recovery-root.json#OMEGA-Engine.final-recovery-root.json
             url="$(gh api "/repos/$PRIVATE_REPOSITORY/releases/tags/$tag" --jq .html_url)"
           fi
