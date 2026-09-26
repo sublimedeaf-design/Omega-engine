@@ -189,6 +189,7 @@ control_deviation = bool(
     and prior_control_contract != CONTROL_CONTRACT_SHA
 )
 authority_pass = prior_state == "PASS" and prior_certification == "PASS"
+live_certified = (latest.get("omega/live-certified") or {}).get("state") == "success"
 safe_unfinished_supersede = (
     prior_state == "NOT_EXECUTED"
     and prior_certification == "NOT_EXECUTED"
@@ -196,11 +197,25 @@ safe_unfinished_supersede = (
     and same_ref
     and control_deviation
 )
+safe_certified_pre_live_supersede = (
+    authority_pass
+    and same_target
+    and same_ref
+    and control_deviation
+    and not live_certified
+)
 if not authority_pass and not safe_unfinished_supersede:
     raise SystemExit("OMEGA_FEDERATION_AUTHORITY_NOT_PASS")
+if live_certified and same_target and same_ref and control_deviation:
+    raise SystemExit("OMEGA_RELEASE_EPOCH_LIVE_CERTIFIED_IMMUTABLE")
 if safe_unfinished_supersede:
     print(
         f"OMEGA_RELEASE_EPOCH_SUPERSEDE_UNFINISHED_CONTROL_DEVIATION:"
+        f"{prior_control_contract}->{CONTROL_CONTRACT_SHA}"
+    )
+if safe_certified_pre_live_supersede:
+    print(
+        f"OMEGA_RELEASE_EPOCH_SUPERSEDE_CERTIFIED_PRE_LIVE_CONTROL_DEVIATION:"
         f"{prior_control_contract}->{CONTROL_CONTRACT_SHA}"
     )
 
@@ -270,6 +285,8 @@ seed_core = {
         "one_staged_child_sha_per_epoch": True,
         "monotonic_epoch_sequence": True,
         "supersedes_unfinished_epoch_on_control_deviation": True,
+        "supersedes_certified_pre_live_epoch_on_control_deviation": True,
+        "live_certified_epoch_is_immutable": True,
     },
 }
 epoch_id = canonical_sha256(seed_core)
@@ -363,6 +380,8 @@ projection["release_epoch"] = {
     "old_evidence_runs_are_never_mutated": True,
     "monotonic_epoch_sequence": True,
     "supersedes_unfinished_epoch_on_control_deviation": True,
+    "supersedes_certified_pre_live_epoch_on_control_deviation": True,
+    "live_certified_epoch_is_immutable": True,
 }
 by_repo = {row["repository"]: row for row in projection["peers"]}
 for repo, role in PEERS:
