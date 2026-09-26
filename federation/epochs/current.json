@@ -4,11 +4,12 @@
   "authority_repository": "sublimedeaf-design/Omega-engine",
   "state": "NOT_EXECUTED",
   "blockers": [
-    "candidate primary exact-SHA hosted certification pending"
+    "recovery exact-SHA certification pending",
+    "federation peer exact-SHA validation pending"
   ],
   "primary": {
     "repository": "sublimedeaf-design/Omega-engines",
-    "source_sha": "aee643a6506f30ed1e43d4e79c92e45a79b09c4b",
+    "source_sha": "6321e1a095f197332c6985bd91d1f5d419cdaa34",
     "pull_request": 273,
     "certification_state": "NOT_EXECUTED"
   },
