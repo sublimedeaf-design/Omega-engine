@@ -304,5 +304,31 @@ fail!("promoter_must_not_trigger_from_signer") if promoter.include?('workflows:\
 fail!("promoter_must_not_trigger_from_private_bridge") if promoter.include?('workflows:\n      - "OMEGA Private PR Hosted Bridge"')
 fail!("promoter_coldstart_trigger_missing") unless promoter.include?('- "OMEGA Android Runtime Cold Start"')
 
+# Immutable release-epoch contract: the public control authority owns the epoch,
+# while private federation peers are read-only during rollover.
+rollover_workflow = File.read(WORKFLOWS.join("omega-release-federation-rollover.yml"), encoding: "UTF-8")
+fail!("release_epoch_control_token_missing") unless rollover_workflow.include?("OMEGA_CONTROL_TOKEN: ${{ github.token }}")
+fail!("release_epoch_control_write_permission_missing") unless rollover_workflow.include?("permissions:\n  contents: write")
+fail!("release_epoch_control_sha_binding_missing") unless rollover_workflow.include?("OMEGA_CONTROL_CONTRACT_SHA: ${{ github.sha }}")
+%w[POST PUT PATCH DELETE].each do |method|
+  fail!("release_epoch_private_peer_mutation_forbidden:#{method}") if rollover_script.include?("private_api(\"#{method}\"")
+end
+fail!("release_epoch_immutable_seed_missing") unless rollover_script.include?("IMMUTABLE_PREFIX = \"federation/epochs/releases\"")
+fail!("release_epoch_new_deviation_policy_missing") unless rollover_script.include?("\"new_deviation_requires_new_epoch\": True")
+fail!("release_epoch_old_evidence_mutation_policy_missing") unless rollover_script.include?("\"old_evidence_runs_are_never_mutated\": True")
+fail!("release_epoch_read_only_peer_policy_missing") unless rollover_script.include?("\"peer_repositories_are_read_only_during_rollover\": True")
+
+peer_bridge = File.read(WORKFLOWS.join("omega-federation-v3-peer-bridge.yml"), encoding: "UTF-8")
+fail!("federation_peer_status_write_forbidden") if peer_bridge.include?("/statuses/$PEER_SHA")
+fail!("federation_peer_proof_artifact_missing") unless peer_bridge.include?("OMEGA-Federation-Peer-Proof-") && peer_bridge.include?("peer_repository_mutated")
+fail!("federation_peer_external_epoch_binding_missing") unless peer_bridge.include?("SOURCE_BINDING_MODE") && peer_bridge.include?("release_epoch_id")
+fail!("federation_peer_four_of_four_proof_missing") unless peer_bridge.include?("OMEGA_FEDERATION_4_OF_4_READ_ONLY_PROOF_PASS")
+
+fail!("federation_certifier_fresh_proof_missing") unless certifier.include?("OMEGA_RELEASE_CERTIFIER_FRESH_4_OF_4_PASS")
+fail!("federation_certifier_stale_status_dependency_forbidden") if certifier.include?("OMEGA_RELEASE_PEER_STATUS_NOT_PASS")
+
+epoch_verifier = File.read(ROOT.join("scripts", "verify_federation_epoch.py"), encoding: "UTF-8")
+fail!("release_epoch_verifier_missing") unless epoch_verifier.include?("release_epoch_deviation_policy") && epoch_verifier.include?("external_epoch")
+
 puts "OMEGA_CONTROL_PLANE_INTEGRITY_GREEN workflows=#{files.length}"
 # support fastpath restack v2 exact-head trigger
