@@ -1,0 +1,145 @@
+name: OMEGA Release Federation Certifier
+
+on:
+  workflow_run:
+    workflows: ["OMEGA Federation v3 Peer Bridge"]
+    types: [completed]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: omega-release-federation-certifier
+  cancel-in-progress: false
+
+env:
+  PRIVATE_REPOSITORY: sublimedeaf-design/Omega-engines
+  CONTROL_REPOSITORY: sublimedeaf-design/Omega-engine
+
+jobs:
+  certify:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Inspect the exact authority epoch proven by this bridge
+        id: epoch
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          BRIDGE_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          raw="$(gh api "/repos/$CONTROL_REPOSITORY/contents/federation/epochs/current.json?ref=$BRIDGE_HEAD_SHA" --jq '.content' | tr -d '\n' | base64 -d)"
+          parsed="$(python3 - "$raw" <<'PY'
+          import json,re,sys
+          d=json.loads(sys.argv[1])
+          p=d.get("primary") or {}
+          source=str(p.get("source_sha") or "")
+          ref=str(p.get("source_ref") or "")
+          state=str(d.get("state") or "")
+          rollover=d.get("release_rollover") or {}
+          if not re.fullmatch(r"[0-9a-f]{40}",source):
+              raise SystemExit("OMEGA_RELEASE_CERTIFIER_SOURCE_INVALID")
+          if not ref.startswith("release/recovery-evidence-"):
+              print("false||||")
+          else:
+              print("|".join(("true",state,source,ref,str(rollover.get("stage") or ""))))
+          PY
+          )"
+          IFS='|' read -r release_epoch state source source_ref stage <<<"$parsed"
+          echo "release_epoch=$release_epoch" >> "$GITHUB_OUTPUT"
+          [ "$release_epoch" = true ] || { echo "OMEGA_RELEASE_CERTIFIER_NON_RELEASE_EPOCH"; exit 0; }
+          echo "state=$state" >> "$GITHUB_OUTPUT"
+          echo "source_sha=$source" >> "$GITHUB_OUTPUT"
+          echo "source_ref=$source_ref" >> "$GITHUB_OUTPUT"
+          echo "stage=$stage" >> "$GITHUB_OUTPUT"
+
+      - name: Require exact peer statuses from this proven epoch
+        if: steps.epoch.outputs.release_epoch == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          BRIDGE_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          epoch="$(gh api "/repos/$CONTROL_REPOSITORY/contents/federation/epochs/current.json?ref=$BRIDGE_HEAD_SHA" --jq '.content' | tr -d '\n' | base64 -d)"
+          EPOCH_PAYLOAD="$epoch" python3 <<'PY'
+          import json,os,subprocess
+          d=json.loads(os.environ["EPOCH_PAYLOAD"])
+          for peer in d["peers"]:
+              repo=peer["repository"]; sha=peer["sha"]
+              raw=subprocess.check_output(["gh","api",f"/repos/{repo}/commits/{sha}/status?per_page=100"],text=True)
+              status=json.loads(raw); latest={}
+              for row in status.get("statuses",[]):
+                  ctx=str(row.get("context") or "")
+                  if ctx and ctx not in latest: latest[ctx]=row
+              if (latest.get("omega/federation-v3-peer-contract") or {}).get("state")!="success":
+                  raise SystemExit(f"OMEGA_RELEASE_PEER_STATUS_NOT_PASS:{repo}:{sha}")
+          PY
+
+      - name: Promote staged authority to PASS only after external 4-of-4 proof
+        if: steps.epoch.outputs.release_epoch == 'true' && steps.epoch.outputs.state == 'NOT_EXECUTED'
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          SOURCE_SHA: ${{ steps.epoch.outputs.source_sha }}
+          SOURCE_REF: ${{ steps.epoch.outputs.source_ref }}
+          BRIDGE_RUN_ID: ${{ github.event.workflow_run.id }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          meta="$(gh api "/repos/$CONTROL_REPOSITORY/contents/federation/epochs/current.json?ref=main")"
+          current="$(printf '%s' "$meta" | jq -r '.content' | tr -d '\n' | base64 -d)"
+          blob_sha="$(printf '%s' "$meta" | jq -r '.sha')"
+          CURRENT="$current" SOURCE_SHA="$SOURCE_SHA" SOURCE_REF="$SOURCE_REF" BRIDGE_RUN_ID="$BRIDGE_RUN_ID" python3 <<'PY' > "$RUNNER_TEMP/epoch-pass.json"
+          import json,os
+          d=json.loads(os.environ["CURRENT"])
+          p=d.get("primary") or {}
+          if d.get("state")!="NOT_EXECUTED" or p.get("source_sha")!=os.environ["SOURCE_SHA"] or p.get("source_ref")!=os.environ["SOURCE_REF"]:
+              raise SystemExit("OMEGA_RELEASE_CERTIFIER_AUTHORITY_MOVED")
+          d["state"]="PASS"; d["blockers"]=[]
+          p["certification_state"]="PASS"
+          reason=f"external GitHub-hosted exact-SHA federation v3 peer contract validation PASS in Omega-engine run {os.environ['BRIDGE_RUN_ID']}"
+          for row in d["peers"]:
+              row["state"]="PASS"; row["contract_state"]="PASS"; row["reason"]=reason
+          rr=d.setdefault("release_rollover",{})
+          rr["stage"]="CERTIFIED_PASS_PENDING_SECOND_PROOF"
+          rr["first_peer_bridge_run_id"]=os.environ["BRIDGE_RUN_ID"]
+          print(json.dumps(d,indent=2,ensure_ascii=False))
+          PY
+          encoded="$(base64 -w0 "$RUNNER_TEMP/epoch-pass.json")"
+          gh api --method PUT "/repos/$CONTROL_REPOSITORY/contents/federation/epochs/current.json" \
+            -f message="Federation v3: certify exact release epoch ${SOURCE_SHA:0:12} PASS" \
+            -f content="$encoded" -f sha="$blob_sha" -f branch=main >/dev/null
+          echo "OMEGA_RELEASE_FEDERATION_AUTHORITY_PROMOTED_PASS source=$SOURCE_SHA"
+
+      - name: Trigger exact final-SHA recovery after second PASS bridge
+        if: steps.epoch.outputs.release_epoch == 'true' && steps.epoch.outputs.state == 'PASS' && steps.epoch.outputs.stage == 'CERTIFIED_PASS_PENDING_SECOND_PROOF'
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          SOURCE_SHA: ${{ steps.epoch.outputs.source_sha }}
+          SOURCE_REF: ${{ steps.epoch.outputs.source_ref }}
+          BRIDGE_RUN_ID: ${{ github.event.workflow_run.id }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          # Bind a dedicated exact-SHA federation success status to the second proof run.
+          gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$SOURCE_SHA" \
+            -f state=success -f context="omega/federation-v3-release" \
+            -f description="release federation exact-SHA PASS after second external peer proof" \
+            -f target_url="https://github.com/${{ github.repository }}/actions/runs/$BRIDGE_RUN_ID" >/dev/null
+
+          path="bootstrap/omega/recovery-trigger.txt"
+          desired="recover-exact $SOURCE_SHA $SOURCE_REF release-federation-second-proof"
+          meta="$(gh api "/repos/$CONTROL_REPOSITORY/contents/$path?ref=main")"
+          current="$(printf '%s' "$meta" | jq -r '.content' | tr -d '\n' | base64 -d | tr -d '\r\n')"
+          if [ "$current" = "$desired" ]; then
+            echo "OMEGA_RELEASE_FINAL_RECOVERY_ALREADY_ARMED source=$SOURCE_SHA"
+            exit 0
+          fi
+          blob_sha="$(printf '%s' "$meta" | jq -r '.sha')"
+          encoded="$(printf '%s\n' "$desired" | base64 -w0)"
+          gh api --method PUT "/repos/$CONTROL_REPOSITORY/contents/$path" \
+            -f message="Recovery: prove exact certified release SHA ${SOURCE_SHA:0:12}" \
+            -f content="$encoded" -f sha="$blob_sha" -f branch=main >/dev/null
+          echo "OMEGA_RELEASE_FINAL_RECOVERY_ARMED source=$SOURCE_SHA ref=$SOURCE_REF"
