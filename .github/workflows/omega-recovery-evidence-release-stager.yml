@@ -26,6 +26,7 @@ jobs:
         id: pin
         env:
           GH_TOKEN: ${{ github.token }}
+          PRIVATE_GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
           EVIDENCE_RUN_ID: ${{ github.event.workflow_run.id }}
         shell: bash
         run: |
@@ -51,8 +52,19 @@ jobs:
           echo "source_sha=$source" >> "$GITHUB_OUTPUT"
           echo "artifact_name=$artifact" >> "$GITHUB_OUTPUT"
           echo "artifact_id=$artifact_id" >> "$GITHUB_OUTPUT"
+          skip=false
+          encoded="$(GH_TOKEN="$PRIVATE_GH_TOKEN" gh api "/repos/$PRIVATE_REPOSITORY/contents/evidence/release-stage.json?ref=$source" --jq '.content' 2>/dev/null || true)"
+          if [ -n "$encoded" ]; then
+            stage_status="$(printf '%s' "$encoded" | tr -d '\n' | base64 -d 2>/dev/null | python3 -c 'import json,sys; print((json.load(sys.stdin).get("status") or ""))' 2>/dev/null || true)"
+            if [ "$stage_status" = "T60_EVIDENCE_FINALIZED" ]; then
+              skip=true
+              echo "OMEGA_RELEASE_STAGE_ALREADY_FINALIZED source=$source"
+            fi
+          fi
+          echo "skip=$skip" >> "$GITHUB_OUTPUT"
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        if: steps.pin.outputs.skip != 'true'
         with:
           name: ${{ steps.pin.outputs.artifact_name }}
           path: ${{ runner.temp }}/candidate-root
@@ -60,6 +72,7 @@ jobs:
           run-id: ${{ github.event.workflow_run.id }}
 
       - name: Verify evidence root and resolve recovery run
+        if: steps.pin.outputs.skip != 'true'
         id: root
         env:
           SOURCE_SHA: ${{ steps.pin.outputs.source_sha }}
@@ -121,6 +134,7 @@ jobs:
           echo "omega_execution_id=$xid" >> "$GITHUB_OUTPUT"
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        if: steps.pin.outputs.skip != 'true'
         with:
           name: omega-hosted-recovery-${{ steps.pin.outputs.source_sha }}
           path: ${{ runner.temp }}/recovery-package
@@ -128,6 +142,7 @@ jobs:
           run-id: ${{ steps.root.outputs.recovery_run_id }}
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        if: steps.pin.outputs.skip != 'true'
         with:
           repository: ${{ env.PRIVATE_REPOSITORY }}
           ref: ${{ steps.pin.outputs.source_sha }}
@@ -137,10 +152,12 @@ jobs:
           path: omega
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        if: steps.pin.outputs.skip != 'true'
         with:
           python-version: "3.13"
 
       - name: Verify recovery package and extract only bounded evidence
+        if: steps.pin.outputs.skip != 'true'
         env:
           SOURCE_SHA: ${{ steps.pin.outputs.source_sha }}
           OMEGA_EXECUTION_ID: ${{ steps.root.outputs.omega_execution_id }}
@@ -195,6 +212,7 @@ jobs:
           PY
 
       - name: Stage immutable recovery evidence and Android versionCode
+        if: steps.pin.outputs.skip != 'true'
         working-directory: omega
         env:
           SOURCE_SHA: ${{ steps.pin.outputs.source_sha }}
@@ -274,6 +292,7 @@ jobs:
           echo "OMEGA_RELEASE_EVIDENCE_STAGED source=$SOURCE_SHA final=$final branch=$branch"
 
       - name: Dispatch exact final-SHA hosted validation
+        if: steps.pin.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -289,22 +308,26 @@ jobs:
           echo "OMEGA_FINAL_SHA_VALIDATION_DISPATCHED sha=$FINAL_SHA branch=$RELEASE_BRANCH"
 
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6
+        if: steps.pin.outputs.skip != 'true'
         with:
           distribution: temurin
           java-version: "17"
 
       - name: Install Android SDK 36 for unsigned canonical build
+        if: steps.pin.outputs.skip != 'true'
         shell: bash
         run: |
           set -Eeuo pipefail
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "platforms;android-36" "build-tools;36.0.0" >/dev/null
 
       - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb
+        if: steps.pin.outputs.skip != 'true'
         with:
           gradle-version: "8.13"
           cache-read-only: true
 
       - name: Build exact final release payload without rotating signer
+        if: steps.pin.outputs.skip != 'true'
         id: unsigned
         working-directory: omega
         shell: bash
@@ -362,6 +385,7 @@ jobs:
           echo "apk_sha256=$(awk '{print $1}' dist/OMEGA-Engine-unsigned.apk.sha256)" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: steps.pin.outputs.skip != 'true'
         with:
           name: OMEGA-Unsigned-Release-${{ env.FINAL_SHA }}
           retention-days: 7
@@ -374,6 +398,7 @@ jobs:
             omega/reports/release-stage-supply-chain.json
 
       - name: Publish unsigned release payload status
+        if: steps.pin.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
           APK_SHA256: ${{ steps.unsigned.outputs.apk_sha256 }}
@@ -389,6 +414,7 @@ jobs:
             -f target_url="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" >/dev/null
 
       - name: Publish staged release evidence status
+        if: steps.pin.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
         shell: bash
