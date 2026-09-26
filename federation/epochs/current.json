@@ -12,31 +12,31 @@
   "peers": [
     {
       "repository": "sublimedeaf-design/Omega-recovery",
-      "sha": "2ff4bcfd7d17e7076b21c43220af69e5bdd17b81",
+      "sha": "01c6c921e4a7092cafeb4ea01dc05c991f769670",
       "role": "control_recovery",
       "state": "NOT_EXECUTED",
-      "reason": "v3 contract rollout pending"
+      "reason": "v3 peer branch exact SHA bound; CI evidence pending"
     },
     {
       "repository": "sublimedeaf-design/Omega-agents",
-      "sha": "bb4a7fc18ae51b3546b1434c15d2b7ecd1cd1d37",
+      "sha": "3daddb877574546a99382914d5bb7f8d6dc16e2f",
       "role": "agent_execution",
       "state": "NOT_EXECUTED",
-      "reason": "v3 contract rollout pending"
+      "reason": "v3 peer branch exact SHA bound; CI evidence pending"
     },
     {
       "repository": "sublimedeaf-design/Omega-validation",
-      "sha": "c84c4bb9743e26761c10000ddcd3517673918291",
+      "sha": "ec4e0b3433c54547c1751014c62362084ee09d2b",
       "role": "independent_validation",
       "state": "NOT_EXECUTED",
-      "reason": "v3 contract rollout pending"
+      "reason": "v3 peer branch exact SHA bound; CI evidence pending"
     },
     {
       "repository": "sublimedeaf-design/Omega-release",
-      "sha": "2a1c5586bc07eb16c602fcb26a87f9fd25d35a2c",
+      "sha": "360256db0176382a5f091cb73d6bc3be7a772670",
       "role": "release_promotion",
       "state": "NOT_EXECUTED",
-      "reason": "v3 contract rollout pending"
+      "reason": "v3 peer branch exact SHA bound; CI evidence pending"
     }
   ],
   "hf": {
