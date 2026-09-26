@@ -3,6 +3,7 @@ name: OMEGA LocalBrain Model Cache Prime
 on:
   workflow_dispatch:
   push:
+    branches: [main]
     paths:
       - ".github/workflows/omega-localbrain-model-cache-prime.yml"
 
@@ -16,7 +17,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  CACHE_KEY: omega-localbrain-models-v3-worker-cc324af070c2ecbfd324a30884d2f951a7ff756aba85cb811a6ec436933bb046-qa-1d9614638d18024d0fbb36575a15f1302a3adf044df10345688ec4f6e1c4ff32
+  CACHE_KEY: omega-localbrain-models-v4-d9f17661893ffe952c2deece88dc3154b9da41c9e393e6acd1fae50c6411bfe8
   WORKER_NAME: omega-qwen2.5-coder-1.5b-instruct-q4_k_m.gguf
   WORKER_SHA256: cc324af070c2ecbfd324a30884d2f951a7ff756aba85cb811a6ec436933bb046
   WORKER_URL: https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF/resolve/2ab9f8f42af02fc212effaef7c4850c885e965f4/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf?download=true
