@@ -160,8 +160,12 @@ jobs:
           if not manifest.is_file():
               raise SystemExit("OMEGA_HOSTED_STATE_MANIFEST_MISSING")
           p=json.loads(manifest.read_text(encoding="utf-8"))
-          if p.get("schema_version")!=1 or p.get("source_sha")!=sha or p.get("mode")!=mode:
+          if p.get("schema_version") not in {1,2} or p.get("source_sha")!=sha or p.get("mode")!=mode:
               raise SystemExit("OMEGA_HOSTED_STATE_MANIFEST_IDENTITY_MISMATCH")
+          if p.get("schema_version")==2:
+              expected={"daily":["daily"],"t24":["t24"],"t60":["t24","t60"],"settlement":["t24","t60","settlement"]}.get(mode,[mode])
+              if p.get("chain_order")!=expected:
+                  raise SystemExit("OMEGA_HOSTED_STATE_CHAIN_ORDER_MISMATCH")
           rows=p.get("files")
           if not isinstance(rows,list) or not rows:
               raise SystemExit("OMEGA_HOSTED_STATE_MANIFEST_EMPTY")
@@ -248,11 +252,13 @@ jobs:
               run_cycle t60
               ;;
             settlement)
+              bootstrapped_t24=0
               if [ ! -s "$OMEGA_STATE/evidence/latest-24h.json" ] || [ ! -s "$OMEGA_STATE/evidence/forecast-ledger.jsonl" ]; then
                 echo "OMEGA_HOSTED_CHAIN_BOOTSTRAP t24_for_settlement sha=$OMEGA_SHA"
                 run_cycle t24
+                bootstrapped_t24=1
               fi
-              if [ ! -s "$OMEGA_STATE/evidence/latest-t60.json" ]; then
+              if [ "$bootstrapped_t24" -eq 1 ] || [ ! -s "$OMEGA_STATE/evidence/latest-t60.json" ]; then
                 echo "OMEGA_HOSTED_CHAIN_BOOTSTRAP t60_for_settlement sha=$OMEGA_SHA"
                 run_cycle t60
               fi
@@ -286,10 +292,31 @@ jobs:
               files=(evidence/latest-24h.json evidence/coverage-gaps.json evidence/forecast-ledger.jsonl evidence/prematch-intelligence.jsonl evidence/prematch-intelligence-refresh-24h.json data/fabric/sync_state.json)
               ;;
             t60)
-              files=(evidence/latest-t60.json evidence/shadow-ledger.jsonl evidence/prematch-intelligence.jsonl evidence/prematch-intelligence-refresh-t60.json)
+              files=(
+                evidence/latest-24h.json
+                evidence/coverage-gaps.json
+                evidence/forecast-ledger.jsonl
+                evidence/prematch-intelligence-refresh-24h.json
+                evidence/latest-t60.json
+                evidence/shadow-ledger.jsonl
+                evidence/prematch-intelligence.jsonl
+                evidence/prematch-intelligence-refresh-t60.json
+                data/fabric/sync_state.json
+              )
               ;;
             settlement)
-              files=(evidence/latest-settlement.json evidence/shadow-ledger.jsonl)
+              files=(
+                evidence/latest-24h.json
+                evidence/coverage-gaps.json
+                evidence/forecast-ledger.jsonl
+                evidence/prematch-intelligence-refresh-24h.json
+                evidence/latest-t60.json
+                evidence/latest-settlement.json
+                evidence/shadow-ledger.jsonl
+                evidence/prematch-intelligence.jsonl
+                evidence/prematch-intelligence-refresh-t60.json
+                data/fabric/sync_state.json
+              )
               ;;
             *) exit 64 ;;
           esac
@@ -332,10 +359,12 @@ jobs:
               })
           if not rows:
               raise SystemExit("OMEGA_HOSTED_RUNTIME_HANDOFF_EMPTY")
+          chain={"daily":["daily"],"t24":["t24"],"t60":["t24","t60"],"settlement":["t24","t60","settlement"]}.get(mode,[mode])
           payload={
-              "schema_version":1,
+              "schema_version":2,
               "source_sha":source_sha,
               "mode":mode,
+              "chain_order":chain,
               "generated_at":datetime.now(timezone.utc).isoformat(),
               "semantics":"shadow_data_handoff_only",
               "production_release_authority":False,
