@@ -140,6 +140,14 @@ def _validate(sha: str, raw: bytes, bundle_sha: str, oidc_claims: dict) -> None:
         head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=work, text=True, timeout=30).strip()
         if head != sha:
             raise RuntimeError(f"EXACT_SHA_MISMATCH:{head}!={sha}")
+        shallow = subprocess.check_output(
+            ["git", "rev-parse", "--is-shallow-repository"],
+            cwd=work,
+            text=True,
+            timeout=30,
+        ).strip().lower()
+        if shallow != "false":
+            raise RuntimeError("SOURCE_HISTORY_SHALLOW")
         version = subprocess.check_output([os.sys.executable, "-c", "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"], text=True).strip()
         if version != EXPECTED_PYTHON:
             raise RuntimeError(f"PYTHON_VERSION_MISMATCH:{version}!={EXPECTED_PYTHON}")
