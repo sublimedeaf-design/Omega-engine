@@ -356,7 +356,7 @@ jobs:
               omega/dist/OMEGA-Engine.provenance.sigstore.json#OMEGA-Engine.provenance.sigstore.json \
               omega/dist/OMEGA-Engine.sbom.spdx.json#OMEGA-Engine.sbom.spdx.json \
               omega/dist/OMEGA-Engine.supply-chain.json#OMEGA-Engine.supply-chain.json \
-              omega/dist/OMEGA-Engine.final-recovery-root.json#OMEGA-Engine.final-recovery-root.json
+              dist/OMEGA-Engine.final-recovery-root.json#OMEGA-Engine.final-recovery-root.json
             url="$(gh api "/repos/$PRIVATE_REPOSITORY/releases/tags/$tag" --jq .html_url)"
           fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
