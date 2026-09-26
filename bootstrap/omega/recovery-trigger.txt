@@ -1,1 +1,1 @@
-recover-exact 2914e120acaca3ef022494205af731b28a43e67c hardening/release-versioncode-lock-v2-mainmerge-20260926 candidate-v4-complete-evidence-package
+recover-exact 51fac1413e2177c7c94207a4c24dccd7657a6d3b hardening/release-versioncode-lock-v3-20260926 candidate-v5-versioncode-recovery
