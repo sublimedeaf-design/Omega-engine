@@ -352,20 +352,191 @@ jobs:
         working-directory: omega
         shell: bash
         run: bash deploy/hosted/verify-recovery.sh
+
+      - name: Issue machine-readable recovery attestation
+        id: attestation
+        working-directory: omega
+        env:
+          RECOVERY_PACKAGE_SHA256: ${{ needs.pre_recovery.outputs.recovery_package_sha256 }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          .venv/bin/python - <<'PY'
+          import datetime,hashlib,json,os,pathlib,re
+
+          state=pathlib.Path(os.environ["OMEGA_STATE"])/"evidence"
+          source=os.environ["OMEGA_SOURCE_SHA"]
+          package_sha=os.environ["RECOVERY_PACKAGE_SHA256"].lower()
+          if not re.fullmatch(r"[0-9a-f]{40}",source):
+              raise SystemExit("RECOVERY_ATTESTATION_SOURCE_SHA_INVALID")
+          if not re.fullmatch(r"[0-9a-f]{64}",package_sha):
+              raise SystemExit("RECOVERY_ATTESTATION_PACKAGE_SHA_INVALID")
+
+          names=(
+              "hosted-pre-recovery.json",
+              "hosted-recovery-live.json",
+              "execution-envelope.json",
+              "recovery-binding.json",
+              "hosted-recovery-agents.json",
+              "repo-audit-hosted-recovery.json",
+              "OMEGA-Engine-debug-hosted-recovery.apk.sha256",
+          )
+          for name in names:
+              if not (state/name).is_file():
+                  raise SystemExit(f"RECOVERY_ATTESTATION_EVIDENCE_MISSING:{name}")
+
+          def load(name):
+              return json.loads((state/name).read_text(encoding="utf-8"))
+          def sha(path):
+              h=hashlib.sha256()
+              with path.open("rb") as fh:
+                  for chunk in iter(lambda:fh.read(1<<20),b""):
+                      h.update(chunk)
+              return h.hexdigest()
+          def parse_time(value):
+              return datetime.datetime.fromisoformat(str(value).replace("Z","+00:00")).astimezone(datetime.timezone.utc)
+
+          pre=load("hosted-pre-recovery.json")
+          live=load("hosted-recovery-live.json")
+          env=load("execution-envelope.json")
+          binding=load("recovery-binding.json")
+          if pre.get("source_sha")!=source or live.get("source_sha")!=source or env.get("source_sha")!=source:
+              raise SystemExit("RECOVERY_ATTESTATION_SOURCE_MISMATCH")
+          xid=str(env.get("omega_execution_id") or "")
+          if not re.fullmatch(r"[0-9a-f]{64}",xid):
+              raise SystemExit("RECOVERY_ATTESTATION_EXECUTION_ID_INVALID")
+          if live.get("omega_execution_id")!=xid or binding.get("omega_execution_id")!=xid:
+              raise SystemExit("RECOVERY_ATTESTATION_EXECUTION_ID_MISMATCH")
+          if binding.get("binding_state")!="PASS":
+              raise SystemExit("RECOVERY_ATTESTATION_BINDING_NOT_PASS")
+          required_true=(
+              "recovery_gate","fresh_vm_proven","ledger_hashes_match_pre_rebuild",
+              "localbrain_recovered","independent_qa_recovered",
+              "multi_agent_smoke_recovered","apk_signature_verified",
+          )
+          bad=[k for k in required_true if live.get(k) is not True]
+          if bad:
+              raise SystemExit("RECOVERY_ATTESTATION_LIVE_ASSERTION_FAILED:"+",".join(bad))
+
+          rows=[]
+          for name in names:
+              path=state/name
+              rows.append({"path":name,"sha256":sha(path),"bytes":path.stat().st_size})
+          supply=pathlib.Path("reports/recovery-supply-chain-locks.json")
+          if not supply.is_file():
+              raise SystemExit("RECOVERY_ATTESTATION_SUPPLY_CHAIN_REPORT_MISSING")
+          rows.append({"path":"reports/recovery-supply-chain-locks.json","sha256":sha(supply),"bytes":supply.stat().st_size})
+          rows.sort(key=lambda x:x["path"])
+          root=hashlib.sha256(json.dumps(rows,sort_keys=True,separators=(",",":")).encode()).hexdigest()
+
+          start=parse_time(pre["at"])
+          finish=parse_time(live["at"])
+          observed=max(0.0,(finish-start).total_seconds())
+          ledger_names=("forecast-ledger.jsonl","shadow-ledger.jsonl","prematch-intelligence.jsonl","inplay-ledger.jsonl")
+          protected_bytes=0
+          for name in ledger_names:
+              p=state/name
+              if not p.is_file():
+                  raise SystemExit(f"RECOVERY_ATTESTATION_LEDGER_MISSING:{name}")
+              protected_bytes+=p.stat().st_size
+
+          predicate={
+              "schema_version":1,
+              "result":"PASS",
+              "source_sha":source,
+              "omega_execution_id":xid,
+              "recovery_package_sha256":package_sha,
+              "evidence_root_sha256":root,
+              "federation_lock_sha256":env.get("federation_lock_sha256"),
+              "federation_authority_repository":env.get("federation_authority_repository"),
+              "federation_authority_commit":env.get("federation_authority_commit"),
+              "dependency_lock_sha256":env.get("dependency_lock_sha256"),
+              "environment_lock_sha256":env.get("environment_lock_sha256"),
+              "hf_model_manifest_sha256":env.get("hf_model_manifest_sha256"),
+              "worker_model_sha256":live.get("worker_model_sha256"),
+              "qa_model_sha256":live.get("qa_model_sha256"),
+              "fresh_environment":{
+                  "pre_boot_id":live.get("pre_boot_id"),
+                  "post_boot_id":live.get("post_boot_id"),
+                  "proven":live.get("fresh_vm_proven") is True,
+              },
+              "continuity":{
+                  "protected_ledgers":list(ledger_names),
+                  "protected_bytes":protected_bytes,
+                  "data_loss_bytes":0,
+                  "basis":"exact pre/post SHA-256 equality for all protected ledgers",
+              },
+              "rto":{
+                  "state":"MEASURED",
+                  "seconds":round(observed,3),
+                  "semantics":"hosted clean-recovery evidence window from pre-recovery snapshot timestamp to verified recovery completion",
+              },
+              "rpo":{
+                  "state":"BLOCKED",
+                  "seconds":None,
+                  "reason":"no production recovery-point objective/event-watermark contract is configured for this candidate; byte-exact protected-state continuity is proven separately",
+              },
+              "artifacts":rows,
+              "completed_at":finish.isoformat(),
+              "github_run_id":os.environ.get("GITHUB_RUN_ID"),
+              "github_run_attempt":os.environ.get("GITHUB_RUN_ATTEMPT"),
+          }
+          statement={
+              "_type":"https://in-toto.io/Statement/v1",
+              "subject":[{"name":"omega-hosted-recovery-evidence","digest":{"sha256":root}}],
+              "predicateType":"https://omega.local/attestation/recovery/v1",
+              "predicate":predicate,
+          }
+          out=state/"recovery-attestation.json"
+          out.write_text(json.dumps(statement,indent=2,sort_keys=True,allow_nan=False)+"\n",encoding="utf-8")
+          digest=sha(out)
+          with open(os.environ["GITHUB_OUTPUT"],"a",encoding="utf-8") as fh:
+              fh.write(f"sha256={digest}\n")
+              fh.write(f"evidence_root_sha256={root}\n")
+          print(f"OMEGA_RECOVERY_ATTESTATION_PASS source={source} execution_id={xid} sha256={digest} rto_seconds={observed:.3f} rpo=BLOCKED data_loss_bytes=0")
+          PY
+
+      - name: Upload immutable recovery attestation evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: omega-recovery-attestation-${{ needs.pin.outputs.sha }}-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/omega-state/evidence/recovery-attestation.json
+            ${{ runner.temp }}/omega-state/evidence/hosted-recovery-live.json
+            ${{ runner.temp }}/omega-state/evidence/execution-envelope.json
+            ${{ runner.temp }}/omega-state/evidence/recovery-binding.json
+            ${{ runner.temp }}/omega-state/evidence/hosted-recovery-agents.json
+            ${{ runner.temp }}/omega-state/evidence/repo-audit-hosted-recovery.json
+            ${{ runner.temp }}/omega-state/evidence/OMEGA-Engine-debug-hosted-recovery.apk.sha256
+            omega/reports/recovery-supply-chain-locks.json
+          retention-days: 7
+          if-no-files-found: error
+
       - name: Publish hosted recovery status
         if: ${{ always() }}
         env:
           GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
           RESULT: ${{ job.status }}
+          ATTESTATION_SHA256: ${{ steps.attestation.outputs.sha256 }}
         shell: bash
         run: |
           set +x
           state=failure
           [ "$RESULT" = success ] && state=success
+          target="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          desc="clean two-VM hosted recovery: $RESULT"
+          attest_desc="recovery attestation: $RESULT"
+          [ -n "$ATTESTATION_SHA256" ] && attest_desc="$attest_desc sha256=${ATTESTATION_SHA256:0:12}"
           gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$OMEGA_SOURCE_SHA" \
             -f state="$state" \
             -f context="omega/hosted-recovery" \
-            -f description="clean two-VM hosted recovery: $RESULT" >/dev/null
+            -f description="$desc" \
+            -f target_url="$target" >/dev/null
+          gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$OMEGA_SOURCE_SHA" \
+            -f state="$state" \
+            -f context="omega/recovery-attestation" \
+            -f description="$attest_desc" \
+            -f target_url="$target" >/dev/null
 
   pre_recovery_failure_status:
     needs: [pin, pre_recovery]
@@ -384,3 +555,7 @@ jobs:
             -f state=failure \
             -f context="omega/hosted-recovery" \
             -f description="hosted pre-recovery acceptance failed" >/dev/null
+          gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$OMEGA_SOURCE_SHA" \
+            -f state=failure \
+            -f context="omega/recovery-attestation" \
+            -f description="recovery attestation unavailable: pre-recovery failed" >/dev/null
