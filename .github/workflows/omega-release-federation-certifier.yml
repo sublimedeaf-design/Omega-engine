@@ -195,15 +195,18 @@ jobs:
           desired="recover-exact $SOURCE_SHA $SOURCE_REF release-federation-second-proof"
           meta="$(gh api "/repos/$CONTROL_REPOSITORY/contents/$path?ref=main")"
           current="$(printf '%s' "$meta" | jq -r '.content' | python3 -c 'import base64,sys; print(base64.b64decode("".join(sys.stdin.read().split()),validate=True).decode(),end="")' | tr -d '\r\n')"
+          trigger_updated=false
           if [ "$current" = "$desired" ]; then
             echo "OMEGA_RELEASE_FINAL_RECOVERY_ALREADY_ARMED source=$SOURCE_SHA"
-            exit 0
+          else
+            blob_sha="$(printf '%s' "$meta" | jq -r '.sha')"
+            encoded="$(printf '%s\n' "$desired" | base64 -w0)"
+            gh api --method PUT "/repos/$CONTROL_REPOSITORY/contents/$path" \
+              -f message="Recovery: prove exact certified release SHA ${SOURCE_SHA:0:12}" \
+              -f content="$encoded" -f sha="$blob_sha" -f branch=main >/dev/null
+            trigger_updated=true
+            echo "OMEGA_RELEASE_FINAL_RECOVERY_TRIGGER_UPDATED source=$SOURCE_SHA"
           fi
-          blob_sha="$(printf '%s' "$meta" | jq -r '.sha')"
-          encoded="$(printf '%s\n' "$desired" | base64 -w0)"
-          gh api --method PUT "/repos/$CONTROL_REPOSITORY/contents/$path" \
-            -f message="Recovery: prove exact certified release SHA ${SOURCE_SHA:0:12}" \
-            -f content="$encoded" -f sha="$blob_sha" -f branch=main >/dev/null
           # Consume the second-proof transition exactly once. This closes the
           # rollover state machine before dispatching recovery so later peer
           # bridge watchdogs cannot re-arm the same certified release.
@@ -229,6 +232,9 @@ jobs:
             -f content="$encoded" -f sha="$blob_sha" -f branch=main >/dev/null
           echo "OMEGA_RELEASE_FEDERATION_SECOND_PROOF_FINALIZED source=$SOURCE_SHA bridge_run=$BRIDGE_RUN_ID"
 
-          echo "OMEGA_RELEASE_FINAL_RECOVERY_ARMED source=$SOURCE_SHA ref=$SOURCE_REF"
-          gh workflow run omega-hosted-recovery-failover.yml -R "$CONTROL_REPOSITORY" --ref main
-          echo "OMEGA_RELEASE_FINAL_RECOVERY_DISPATCHED source=$SOURCE_SHA"
+          echo "OMEGA_RELEASE_FINAL_RECOVERY_ARMED source=$SOURCE_SHA ref=$SOURCE_REF trigger_updated=$trigger_updated"
+          if [ "$trigger_updated" = true ]; then
+            echo "OMEGA_RELEASE_FINAL_RECOVERY_DISPATCH_VIA_TRIGGER_PUSH source=$SOURCE_SHA"
+          else
+            echo "OMEGA_RELEASE_FINAL_RECOVERY_REUSE_ARMED_TRIGGER source=$SOURCE_SHA"
+          fi
