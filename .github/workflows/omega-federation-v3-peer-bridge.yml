@@ -1,16 +1,26 @@
 name: OMEGA Federation v3 Peer Bridge
+
 on:
   push:
     branches: ['federation/v3-control-plane-20260926', main]
     paths:
       - 'federation/epochs/current.json'
+      - 'federation/epochs/releases/**'
       - '.github/workflows/omega-federation-v3-peer-bridge.yml'
       - 'scripts/verify_federation_epoch.py'
   schedule:
     - cron: '17 * * * *'
   workflow_dispatch:
+
 permissions:
   contents: read
+  actions: read
+
+concurrency:
+  group: omega-federation-v3-peer-bridge
+  cancel-in-progress: false
+  queue: max
+
 jobs:
   prepare:
     runs-on: ubuntu-24.04
@@ -18,12 +28,32 @@ jobs:
       matrix: ${{ steps.matrix.outputs.matrix }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Verify authority projection
+        run: python scripts/verify_federation_epoch.py federation/epochs/current.json
       - id: matrix
         shell: bash
         run: |
           set -Eeuo pipefail
-          matrix="$(jq -c '{include:[.peers[] | {repo:.repository,sha:.sha,role:.role}]}' federation/epochs/current.json)"
+          matrix="$(jq -c '{
+            include:[
+              . as $root
+              | .peers[]
+              | {
+                  repo:.repository,
+                  sha:.sha,
+                  role:.role,
+                  source_sha:$root.primary.source_sha,
+                  source_ref:($root.primary.source_ref // ""),
+                  epoch_id:($root.release_epoch.id // ""),
+                  binding_mode:($root.release_epoch.source_binding_mode // "peer_pinned"),
+                  baseline_source_sha:($root.release_epoch.peer_contract_source_sha // $root.primary.source_sha)
+                }
+            ]
+          }' federation/epochs/current.json)"
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
   peer:
     needs: prepare
     strategy:
@@ -36,19 +66,19 @@ jobs:
       PEER_REPO: ${{ matrix.repo }}
       PEER_SHA: ${{ matrix.sha }}
       PEER_ROLE: ${{ matrix.role }}
-      STATUS_CONTEXT: omega/federation-v3-peer-contract
+      EPOCH_SOURCE_SHA: ${{ matrix.source_sha }}
+      EPOCH_SOURCE_REF: ${{ matrix.source_ref }}
+      RELEASE_EPOCH_ID: ${{ matrix.epoch_id }}
+      SOURCE_BINDING_MODE: ${{ matrix.binding_mode }}
+      BASELINE_SOURCE_SHA: ${{ matrix.baseline_source_sha }}
     steps:
       - name: Checkout control plane
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           path: control
           persist-credentials: false
-      - name: Publish pending
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          gh api --method POST "/repos/$PEER_REPO/statuses/$PEER_SHA"             -f state=pending             -f context="$STATUS_CONTEXT"             -f description="OMEGA federation v3 external validation running"
-      - name: Checkout exact private peer
+
+      - name: Checkout exact private peer read-only
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: ${{ matrix.repo }}
@@ -57,56 +87,137 @@ jobs:
           path: peer
           fetch-depth: 1
           persist-credentials: false
+
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: '3.13'
-      - name: Verify exact v3 identity and local contract
+
+      - name: Verify exact peer implementation and external epoch binding
         shell: bash
         run: |
           set -Eeuo pipefail
           test "$(git -C peer rev-parse HEAD)" = "$PEER_SHA"
           python peer/scripts/validate_integration_contract.py
           python peer/scripts/validate_mesh.py
+          mkdir -p "$RUNNER_TEMP/federation-proof"
           python - <<'PY'
-          import json, os
-          from pathlib import Path
-          epoch=json.loads(Path("control/federation/epochs/current.json").read_text())
-          contract=json.loads(Path("peer/OMEGA_INTEGRATION_CONTRACT.json").read_text())
+          import json, os, pathlib, re
+          epoch=json.loads(pathlib.Path("control/federation/epochs/current.json").read_text(encoding="utf-8"))
+          contract=json.loads(pathlib.Path("peer/OMEGA_INTEGRATION_CONTRACT.json").read_text(encoding="utf-8"))
           repo=os.environ["PEER_REPO"]; sha=os.environ["PEER_SHA"]; role=os.environ["PEER_ROLE"]
+          source=os.environ["EPOCH_SOURCE_SHA"]; source_ref=os.environ["EPOCH_SOURCE_REF"]
+          epoch_id=os.environ["RELEASE_EPOCH_ID"]; mode=os.environ["SOURCE_BINDING_MODE"]
+          baseline=os.environ["BASELINE_SOURCE_SHA"]
+          if not re.fullmatch(r"[0-9a-f]{40}",source):
+              raise SystemExit("OMEGA_FEDERATION_EXTERNAL_SOURCE_INVALID")
+          if not re.fullmatch(r"[0-9a-f]{40}",baseline):
+              raise SystemExit("OMEGA_FEDERATION_EXTERNAL_BASELINE_INVALID")
           row=next((x for x in epoch["peers"] if x["repository"]==repo),None)
-          assert row and row["sha"]==sha and row["role"]==role
-          assert contract["repository"]==repo and contract["role"]==role
-          assert contract["source"]["sha"]==epoch["primary"]["source_sha"]
-          assert contract["authority"]=={"repository":"sublimedeaf-design/Omega-engine","mode":"external_epoch_lock"}
+          if not row or row["sha"]!=sha or row["role"]!=role:
+              raise SystemExit("OMEGA_FEDERATION_PEER_IDENTITY_MISMATCH")
+          if contract.get("repository")!=repo or contract.get("role")!=role:
+              raise SystemExit("OMEGA_FEDERATION_PEER_CONTRACT_IDENTITY_MISMATCH")
+          if contract.get("authority")!={"repository":"sublimedeaf-design/Omega-engine","mode":"external_epoch_lock"}:
+              raise SystemExit("OMEGA_FEDERATION_PEER_AUTHORITY_MISMATCH")
+          contract_source=str((contract.get("source") or {}).get("sha") or "")
+          if mode=="external_epoch":
+              if not re.fullmatch(r"[0-9a-f]{64}",epoch_id):
+                  raise SystemExit("OMEGA_FEDERATION_RELEASE_EPOCH_ID_INVALID")
+              if contract_source!=baseline:
+                  raise SystemExit("OMEGA_FEDERATION_PEER_BASELINE_SOURCE_MISMATCH")
+              rel=epoch.get("release_epoch") or {}
+              if rel.get("id")!=epoch_id or rel.get("source_binding_mode")!="external_epoch":
+                  raise SystemExit("OMEGA_FEDERATION_RELEASE_EPOCH_BINDING_MISMATCH")
+              if rel.get("new_deviation_requires_new_epoch") is not True:
+                  raise SystemExit("OMEGA_FEDERATION_RELEASE_EPOCH_MUTABILITY_POLICY_INVALID")
+          else:
+              if contract_source!=source:
+                  raise SystemExit("OMEGA_FEDERATION_LEGACY_SOURCE_PIN_MISMATCH")
           for model_role in ("worker","qa"):
               a=epoch["hf"][model_role]; b=contract["huggingface"][model_role]
-              assert a["repo_id"]==b["repo_id"]
-              assert a["revision"]==b["revision"]
-              assert a["sha256"]==b["sha256"]
-          assert contract["certification_state"]=="NOT_EXECUTED"
+              if a["repo_id"]!=b["repo_id"] or a["revision"]!=b["revision"] or a["sha256"]!=b["sha256"]:
+                  raise SystemExit("OMEGA_FEDERATION_MODEL_IDENTITY_MISMATCH:"+model_role)
+          if contract.get("certification_state")!="NOT_EXECUTED":
+              raise SystemExit("OMEGA_FEDERATION_PEER_CONTRACT_STATE_INVALID")
+          proof={
+              "schema_version":1,
+              "state":"PASS",
+              "release_epoch_id":epoch_id or None,
+              "source_binding_mode":mode,
+              "source_sha":source,
+              "source_ref":source_ref,
+              "peer_repository":repo,
+              "peer_sha":sha,
+              "peer_role":role,
+              "peer_contract_source_sha":contract_source,
+              "peer_repository_mutated":False,
+          }
+          out=pathlib.Path(os.environ["RUNNER_TEMP"])/"federation-proof"/(role+".json")
+          out.write_text(json.dumps(proof,indent=2,sort_keys=True)+"\n",encoding="utf-8")
+          print("OMEGA_FEDERATION_READ_ONLY_PEER_PASS",repo,sha,source,epoch_id or "legacy")
           PY
-      - name: Publish exact peer result
-        if: always()
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          if [ "${{ job.status }}" = "success" ]; then
-            state=success
-            desc="OMEGA federation v3 peer contract PASS"
-          else
-            state=failure
-            desc="OMEGA federation v3 peer contract FAIL"
-          fi
-          gh api --method POST "/repos/$PEER_REPO/statuses/$PEER_SHA"             -f state="$state"             -f context="$STATUS_CONTEXT"             -f description="$desc"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: OMEGA-Federation-Peer-Proof-${{ matrix.role }}-${{ matrix.sha }}
+          path: ${{ runner.temp }}/federation-proof/${{ matrix.role }}.json
+          if-no-files-found: error
+          retention-days: 30
+
   certify:
     needs: [prepare, peer]
     if: always()
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
       - name: Verify epoch structure
         run: python scripts/verify_federation_epoch.py federation/epochs/current.json
+
       - name: Require every peer job green
         shell: bash
         run: |
+          set -Eeuo pipefail
           test "${{ needs.peer.result }}" = "success"
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          pattern: OMEGA-Federation-Peer-Proof-*
+          path: ${{ runner.temp }}/federation-proofs
+          merge-multiple: true
+
+      - name: Verify complete 4-of-4 proof set is bound to this epoch
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python - <<'PY'
+          import json, pathlib
+          epoch=json.loads(pathlib.Path("federation/epochs/current.json").read_text(encoding="utf-8"))
+          expected={x["repository"]:(x["sha"],x["role"]) for x in epoch["peers"]}
+          source=epoch["primary"]["source_sha"]
+          rel=epoch.get("release_epoch") or {}
+          epoch_id=rel.get("id")
+          rows=[]
+          for path in pathlib.Path(__import__("os").environ["RUNNER_TEMP"]).joinpath("federation-proofs").glob("*.json"):
+              rows.append(json.loads(path.read_text(encoding="utf-8")))
+          if len(rows)!=4:
+              raise SystemExit(f"OMEGA_FEDERATION_PROOF_COUNT_INVALID:{len(rows)}")
+          seen=set()
+          for row in rows:
+              repo=row.get("peer_repository")
+              if repo not in expected or repo in seen:
+                  raise SystemExit("OMEGA_FEDERATION_PROOF_PEER_SET_INVALID")
+              seen.add(repo)
+              sha,role=expected[repo]
+              if row.get("state")!="PASS" or row.get("peer_sha")!=sha or row.get("peer_role")!=role:
+                  raise SystemExit("OMEGA_FEDERATION_PROOF_IDENTITY_INVALID:"+str(repo))
+              if row.get("source_sha")!=source or row.get("release_epoch_id")!=(epoch_id or None):
+                  raise SystemExit("OMEGA_FEDERATION_PROOF_SOURCE_BINDING_INVALID:"+str(repo))
+              if row.get("peer_repository_mutated") is not False:
+                  raise SystemExit("OMEGA_FEDERATION_PROOF_MUTATION_FLAG_INVALID:"+str(repo))
+          if set(expected)!=seen:
+              raise SystemExit("OMEGA_FEDERATION_PROOF_PEER_SET_INCOMPLETE")
+          print("OMEGA_FEDERATION_4_OF_4_READ_ONLY_PROOF_PASS",source,epoch_id or "legacy")
+          PY
