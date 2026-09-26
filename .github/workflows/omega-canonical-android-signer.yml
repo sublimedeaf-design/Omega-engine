@@ -114,7 +114,9 @@ jobs:
           p=json.loads(os.environ["STATUS_PAYLOAD"]); latest={}
           for r in p.get("statuses",[]):
               c=str(r.get("context") or "")
-              if c and c not in latest: latest[c]=r
+              stamp=str(r.get("updated_at") or r.get("created_at") or "")
+              if c and (c not in latest or stamp > str(latest[c].get("_omega_stamp") or "")):
+                  latest[c]={**r,"_omega_stamp":stamp}
           for ctx in ("omega/release-evidence-staged","omega/android-release-unsigned"):
               if (latest.get(ctx) or {}).get("state")!="success":
                   raise SystemExit("OMEGA_SIGNER_PREREQUISITE_NOT_PASS:"+ctx)
