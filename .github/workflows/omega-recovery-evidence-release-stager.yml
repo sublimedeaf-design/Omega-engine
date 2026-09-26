@@ -273,6 +273,106 @@ jobs:
           echo "RELEASE_BRANCH=$branch" >> "$GITHUB_ENV"
           echo "OMEGA_RELEASE_EVIDENCE_STAGED source=$SOURCE_SHA final=$final branch=$branch"
 
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install Android SDK 36 for unsigned canonical build
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "platforms;android-36" "build-tools;36.0.0" >/dev/null
+
+      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb
+        with:
+          gradle-version: "8.13"
+          cache-read-only: true
+
+      - name: Build exact final release payload without rotating signer
+        id: unsigned
+        working-directory: omega
+        shell: bash
+        env:
+          OMEGA_SOURCE_SHA: ${{ env.FINAL_SHA }}
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse HEAD)" = "$FINAL_SHA"
+          python3 scripts/materialize_gradle_verification.py
+          python3 scripts/validate_supply_chain_locks.py --out reports/release-stage-supply-chain.json
+          python3 scripts/generate_omega_sbom.py --out reports/omega-sbom.spdx.json
+          mkdir -p android/app/src/main/assets/evidence
+          for name in latest-24h.json latest-t60.json coverage-gaps.json release-stage.json execution-envelope.json t24-binding.json t60-binding.json qa-binding.json; do
+            test -s "evidence/$name"
+            cp "evidence/$name" "android/app/src/main/assets/evidence/$name"
+          done
+          # Never generate or rotate signing material. Build the exact release payload
+          # unsigned, then canonical signing can be a separate cryptographic operation.
+          sed -i '/signingConfig = signingConfigs.getByName("omegaPersonal")/d' android/app/build.gradle.kts
+          (cd android && gradle --no-daemon --dependency-verification strict --stacktrace lintRelease assembleRelease)
+          apk="$(find android/app/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' -print -quit)"
+          test -s "$apk" || { echo "OMEGA_UNSIGNED_RELEASE_APK_MISSING" >&2; exit 71; }
+          if "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify "$apk" >/dev/null 2>&1; then
+            echo "OMEGA_UNSIGNED_RELEASE_UNEXPECTEDLY_SIGNED" >&2
+            exit 72
+          fi
+          mkdir -p dist
+          "$ANDROID_HOME/build-tools/36.0.0/zipalign" -f -P 16 4 "$apk" dist/OMEGA-Engine-unsigned.apk
+          "$ANDROID_HOME/build-tools/36.0.0/zipalign" -c -P 16 -v 4 dist/OMEGA-Engine-unsigned.apk >/dev/null
+          sha256sum dist/OMEGA-Engine-unsigned.apk > dist/OMEGA-Engine-unsigned.apk.sha256
+          python3 - <<'PY'
+          import hashlib,json,os,pathlib,re
+          apk=pathlib.Path("dist/OMEGA-Engine-unsigned.apk")
+          digest=hashlib.sha256(apk.read_bytes()).hexdigest()
+          recorded=pathlib.Path("dist/OMEGA-Engine-unsigned.apk.sha256").read_text().split()[0]
+          if digest!=recorded: raise SystemExit("OMEGA_UNSIGNED_RELEASE_SHA_MISMATCH")
+          source=os.environ["FINAL_SHA"]
+          code_source=json.loads(pathlib.Path("evidence/release-stage.json").read_text())["code_source_sha"]
+          if not re.fullmatch(r"[0-9a-f]{40}",source) or not re.fullmatch(r"[0-9a-f]{40}",code_source):
+              raise SystemExit("OMEGA_UNSIGNED_RELEASE_SOURCE_INVALID")
+          payload={
+              "schema_version":1,
+              "classification":"PRODUCTION_RELEASE_PAYLOAD_UNSIGNED",
+              "production_final":False,
+              "source_commit":source,
+              "code_source_sha":code_source,
+              "signer_state":"PENDING_CANONICAL_SIGNER",
+              "expected_signer_certificate_sha256":pathlib.Path("android/signing-cert.sha256").read_text().strip().lower(),
+              "apk_sha256":digest,
+              "artifact":"OMEGA-Engine-unsigned.apk",
+          }
+          pathlib.Path("dist/OMEGA-Engine-unsigned.provenance.json").write_text(
+              json.dumps(payload,indent=2,sort_keys=True)+"\n",encoding="utf-8")
+          PY
+          echo "apk_sha256=$(awk '{print $1}' dist/OMEGA-Engine-unsigned.apk.sha256)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: OMEGA-Unsigned-Release-${{ env.FINAL_SHA }}
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            omega/dist/OMEGA-Engine-unsigned.apk
+            omega/dist/OMEGA-Engine-unsigned.apk.sha256
+            omega/dist/OMEGA-Engine-unsigned.provenance.json
+            omega/reports/omega-sbom.spdx.json
+            omega/reports/release-stage-supply-chain.json
+
+      - name: Publish unsigned release payload status
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          APK_SHA256: ${{ steps.unsigned.outputs.apk_sha256 }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          desc="exact release payload built; canonical signer pending"
+          [ -n "$APK_SHA256" ] && desc="$desc sha256=${APK_SHA256:0:12}"
+          gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$FINAL_SHA" \
+            -f state=success \
+            -f context="omega/android-release-unsigned" \
+            -f description="$desc" \
+            -f target_url="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" >/dev/null
+
       - name: Publish staged release evidence status
         env:
           GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
