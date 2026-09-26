@@ -172,3 +172,77 @@ jobs:
             omega/reports/supply-chain/gradle-verification-metadata.xml.sha256
           if-no-files-found: error
           retention-days: 7
+
+  promote:
+    needs: [discover, python-locks, gradle-lock]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    env:
+      GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+      SOURCE_SHA: ${{ needs.discover.outputs.sha }}
+      TARGET_BRANCH: hardening/canonical-evidence-envelope-20260926
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: ${{ env.PRIVATE_REPOSITORY }}
+          ref: ${{ env.SOURCE_SHA }}
+          token: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          persist-credentials: false
+          fetch-depth: 0
+          path: omega
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          pattern: omega-python-lock-*-${{ env.SOURCE_SHA }}
+          path: generated/python
+          merge-multiple: true
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: omega-gradle-verification-${{ env.SOURCE_SHA }}
+          path: generated/gradle
+      - name: Assemble reviewed supply-chain inputs
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(git -C omega rev-parse HEAD)" = "$SOURCE_SHA"
+          for lane in py311 py312 py313 py314; do
+            src="generated/python/requirements-ci-${lane}-linux-x86_64.lock"
+            test -s "$src"
+            cp "$src" "omega/requirements-ci-${lane}-linux-x86_64.lock"
+          done
+          test -s generated/gradle/gradle-verification-metadata.xml
+          test -s generated/gradle/gradle-verification-metadata.xml.sha256
+          expected="$(awk '{print $1}' generated/gradle/gradle-verification-metadata.xml.sha256)"
+          actual="$(sha256sum generated/gradle/gradle-verification-metadata.xml | awk '{print $1}')"
+          test "$expected" = "$actual"
+          mkdir -p omega/android/gradle
+          cp generated/gradle/gradle-verification-metadata.xml omega/android/gradle/verification-metadata.xml
+          grep -q '<sha256 value=' omega/android/gradle/verification-metadata.xml
+      - name: Commit exact generated locks on isolated branch
+        id: push
+        working-directory: omega
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          branch="generated/supply-chain-locks-${SOURCE_SHA:0:12}"
+          git switch -c "$branch"
+          git config user.name "omega-supply-chain-bot"
+          git config user.email "omega-supply-chain-bot@users.noreply.github.com"
+          git add requirements-ci-py*-linux-x86_64.lock android/gradle/verification-metadata.xml
+          git commit -m "Supply chain: lock Python wheels and Gradle artifacts"
+          set +x
+          auth="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth"             push --force-with-lease origin "HEAD:refs/heads/$branch"
+          unset auth
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+      - name: Open generated lock PR against exact hardening branch
+        env:
+          GENERATED_BRANCH: ${{ steps.push.outputs.branch }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          existing="$(gh api "/repos/$PRIVATE_REPOSITORY/pulls?state=open&head=sublimedeaf-design:$GENERATED_BRANCH&base=$TARGET_BRANCH" --jq '.[0].number // empty')"
+          if [ -n "$existing" ]; then
+            echo "existing_pr=$existing"
+            exit 0
+          fi
+          gh api --method POST "/repos/$PRIVATE_REPOSITORY/pulls"             -f title="Supply chain: exact wheel hashes and Gradle verification metadata"             -f head="$GENERATED_BRANCH"             -f base="$TARGET_BRANCH"             -f body="Generated on GitHub-hosted Ubuntu from exact source $SOURCE_SHA. Python locks were dry-run verified with --require-hashes/--only-binary; Gradle metadata passed strict dependency verification. Generated artifacts require normal review before merge."             --jq '.html_url'
