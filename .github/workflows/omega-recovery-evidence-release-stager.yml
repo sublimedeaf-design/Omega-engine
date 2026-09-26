@@ -355,7 +355,17 @@ jobs:
           gh api --method PUT "/repos/${{ github.repository }}/contents/$path" \
             -f message="Validation: prove exact staged Android release SHA" \
             -f content="$encoded" -f sha="$current" -f branch=main >/dev/null
+
+          recovery_payload="recover-exact $FINAL_SHA $RELEASE_BRANCH staged-final-recovery"
+          recovery_path="bootstrap/omega/recovery-trigger.txt"
+          recovery_current="$(gh api "/repos/${{ github.repository }}/contents/$recovery_path" --jq '.sha')"
+          recovery_encoded="$(printf '%s\n' "$recovery_payload" | base64 -w0)"
+          gh api --method PUT "/repos/${{ github.repository }}/contents/$recovery_path" \
+            -f message="Recovery: prove exact staged final release SHA" \
+            -f content="$recovery_encoded" -f sha="$recovery_current" -f branch=main >/dev/null
+
           echo "OMEGA_FINAL_SHA_VALIDATION_DISPATCHED sha=$FINAL_SHA branch=$RELEASE_BRANCH"
+          echo "OMEGA_FINAL_SHA_RECOVERY_DISPATCHED sha=$FINAL_SHA branch=$RELEASE_BRANCH"
 
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6
         if: steps.pin.outputs.skip != 'true'
