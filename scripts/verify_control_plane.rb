@@ -434,6 +434,8 @@ fail!("release_orchestrator_schedule_missing") unless orchestrator.include?('cro
 fail!("release_orchestrator_explicit_rollover_missing") unless orchestrator.include?('gh workflow run "$ROLLOVER_WORKFLOW" -R "$GITHUB_REPOSITORY" --ref main')
 fail!("release_orchestrator_duplicate_guard_missing") unless orchestrator.include?("OMEGA_RELEASE_ORCHESTRATOR_ROLLOVER_ALREADY_ACTIVE") && orchestrator.include?("status=queued") && orchestrator.include?("status=in_progress")
 fail!("release_orchestrator_control_deviation_missing") unless orchestrator.include?("pre-live-control-deviation") && orchestrator.include?("live-certified-epoch-immutable") && orchestrator.include?('omega/live-certified')
+fail!("release_orchestrator_state_only_drift_missing") unless orchestrator.include?("state-only-control-head-advance") && orchestrator.include?('path.startswith("federation/epochs/")') && orchestrator.include?("bootstrap/omega/")
+fail!("release_orchestrator_compare_guard_missing") unless orchestrator.include?("/compare/$contract...$control_main") && orchestrator.include?("control-diff-too-large") && orchestrator.include?("control-history-")
 fail!("release_orchestrator_must_not_mutate_epoch") if orchestrator.include?("/contents/federation/epochs/current.json") && orchestrator.include?("--method PUT")
 
 # Supply-chain provenance must survive the unsigned handoff and be verified before

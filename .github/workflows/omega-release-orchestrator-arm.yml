@@ -66,9 +66,15 @@ jobs:
           control_main="$(GH_TOKEN="$CONTROL_TOKEN" gh api "/repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)"
           epoch="$(GH_TOKEN="$CONTROL_TOKEN" gh api "/repos/$GITHUB_REPOSITORY/contents/federation/epochs/current.json?ref=main" --jq '.content' | python3 -c 'import base64,sys; print(base64.b64decode("".join(sys.stdin.read().split()),validate=True).decode(),end="")')"
           candidate_status="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/$candidate/status?per_page=100")"
-          decision="$(EPOCH="$epoch" STATUS_PAYLOAD="$candidate_status" CANDIDATE="$candidate" SOURCE_REF="$source_ref" CONTROL_MAIN="$control_main" python3 <<'PY'
+          contract="$(EPOCH="$epoch" python3 -c 'import json,os; print(str((json.loads(os.environ["EPOCH"]).get("release_epoch") or {}).get("control_contract_sha") or ""))')"
+          compare='{"status":"identical","files":[]}'
+          if [[ "$contract" =~ ^[0-9a-f]{40}$ ]] && [ "$contract" != "$control_main" ]; then
+            compare="$(GH_TOKEN="$CONTROL_TOKEN" gh api "/repos/$GITHUB_REPOSITORY/compare/$contract...$control_main?per_page=100")"
+          fi
+          decision="$(EPOCH="$epoch" COMPARE_PAYLOAD="$compare" STATUS_PAYLOAD="$candidate_status" CANDIDATE="$candidate" SOURCE_REF="$source_ref" CONTROL_MAIN="$control_main" python3 <<'PY'
           import json,os,re
           d=json.loads(os.environ["EPOCH"])
+          compare=json.loads(os.environ["COMPARE_PAYLOAD"])
           status=json.loads(os.environ["STATUS_PAYLOAD"])
           latest={}
           for row in status.get("statuses",[]):
@@ -89,10 +95,20 @@ jobs:
           if not re.fullmatch(r"[0-9a-f]{40}",control):
               raise SystemExit("OMEGA_RELEASE_ORCHESTRATOR_CONTROL_SHA_INVALID")
           live=(latest.get("omega/live-certified") or {}).get("state")=="success"
-          if epoch_source!=candidate or epoch_ref!=source_ref:
+          compare_status=str(compare.get("status") or "")
+          changed=[str(x.get("filename") or "") for x in compare.get("files",[]) if x.get("filename")]
+          state_only=lambda path: path.startswith("federation/epochs/") or bool(re.fullmatch(r"bootstrap/omega/[A-Za-z0-9._-]*trigger[A-Za-z0-9._-]*\.txt",path))
+          code_drift=any(not state_only(path) for path in changed)
+          if len(changed)>=300:
+              print("BLOCKED:control-diff-too-large")
+          elif contract and contract!=control and compare_status not in ("ahead","identical"):
+              print("BLOCKED:control-history-"+compare_status.lower())
+          elif epoch_source!=candidate or epoch_ref!=source_ref:
               print("DISPATCH:release-identity-changed")
           elif contract==control:
               print("NOOP:control-contract-current")
+          elif not code_drift:
+              print("NOOP:state-only-control-head-advance")
           elif live:
               print("NOOP:live-certified-epoch-immutable")
           elif (state=="PASS" and certification=="PASS") or (state=="NOT_EXECUTED" and certification=="NOT_EXECUTED"):
