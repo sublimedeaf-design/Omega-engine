@@ -1,1 +1,1 @@
-validate-exact-pr 5f75916f493b969c2764ffe932b616a40bd02d33 hardening/canonical-evidence-envelope-20260926 calibration-ensemble-evidence-hardening
+validate-exact-pr 34c5c3cca5a2085ab482dce2fbfac8d2e9903277 hardening/canonical-evidence-envelope-20260926 least-privilege-hf-cache-identity
