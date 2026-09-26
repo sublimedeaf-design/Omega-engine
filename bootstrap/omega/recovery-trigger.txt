@@ -1,1 +1,1 @@
-recover-exact 96914a2f2f63206c7ffaba914898b4b6a16bfab1 release/final-merge-1c6be61b-36246662762 merge-final-recovery-v1
+recover-exact f3625181c29054d083db59d8c17d5e4ec78f259b hardening/release-versioncode-lock-v2-mainmerge-20260926 candidate-v2-supply-chain
