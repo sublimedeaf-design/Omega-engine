@@ -6,7 +6,7 @@ on:
     types: [completed]
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: omega-release-federation-certifier
@@ -83,7 +83,7 @@ jobs:
       - name: Promote staged authority to PASS only after external 4-of-4 proof
         if: steps.epoch.outputs.release_epoch == 'true' && steps.epoch.outputs.state == 'NOT_EXECUTED'
         env:
-          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
           SOURCE_SHA: ${{ steps.epoch.outputs.source_sha }}
           SOURCE_REF: ${{ steps.epoch.outputs.source_ref }}
           BRIDGE_RUN_ID: ${{ github.event.workflow_run.id }}
@@ -118,15 +118,16 @@ jobs:
       - name: Trigger exact final-SHA recovery after second PASS bridge
         if: steps.epoch.outputs.release_epoch == 'true' && steps.epoch.outputs.state == 'PASS' && steps.epoch.outputs.stage == 'CERTIFIED_PASS_PENDING_SECOND_PROOF'
         env:
-          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+          OMEGA_BOOTSTRAP_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
           SOURCE_SHA: ${{ steps.epoch.outputs.source_sha }}
           SOURCE_REF: ${{ steps.epoch.outputs.source_ref }}
           BRIDGE_RUN_ID: ${{ github.event.workflow_run.id }}
         shell: bash
         run: |
           set -Eeuo pipefail
-          # Bind a dedicated exact-SHA federation success status to the second proof run.
-          gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$SOURCE_SHA" \
+          # Private exact-SHA status uses the restricted cross-repo credential.
+          GH_TOKEN="$OMEGA_BOOTSTRAP_TOKEN" gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$SOURCE_SHA" \
             -f state=success -f context="omega/federation-v3-release" \
             -f description="release federation exact-SHA PASS after second external peer proof" \
             -f target_url="https://github.com/${{ github.repository }}/actions/runs/$BRIDGE_RUN_ID" >/dev/null
