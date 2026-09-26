@@ -180,6 +180,7 @@ fail!("postlive_must_not_use_workflow_run") if postlive.include?("workflow_run:"
 fail!("postlive_exact_dispatch_inputs_missing") unless postlive.include?("final_sha:") && postlive.include?("promoter_run_id:")
 fail!("promoter_postlive_dispatch_missing") unless promoter.include?("gh workflow run omega-post-live-verification.yml") && promoter.include?('promoter_run_id="$PROMOTER_RUN_ID"')
 fail!("promoter_actions_write_missing") unless promoter.include?("actions: write")
+fail!("production_provenance_application_id_missing") unless promoter.include?('"application_id":app_id.group(1)') && promoter.include?("OMEGA_FINAL_ANDROID_APPLICATION_ID_MISSING")
 fail!("single_promotion_release_ref_guard_missing") unless promoter.include?("release/recovery-evidence-")
 
 puts "OMEGA_CONTROL_PLANE_INTEGRITY_GREEN workflows=#{files.length}"
