@@ -66,15 +66,7 @@ jobs:
             local_trigger="$(tr -d '\r\n' < bootstrap/omega/pr-validation-trigger.txt)"
             encoded="$(gh api "/repos/$GITHUB_REPOSITORY/contents/bootstrap/omega/pr-validation-trigger.txt?ref=main" --jq '.content // empty' 2>/dev/null || true)"
             [ -n "$encoded" ] || { echo "OMEGA_HOSTED_PR_CURRENT_TRIGGER_UNREADABLE" >&2; exit 68; }
-            current_trigger="$(ENCODED="$encoded" python3 - <<'PY'
-import base64,binascii,os
-raw="".join(os.environ["ENCODED"].split())
-try:
-    print(base64.b64decode(raw,validate=True).decode("utf-8").replace("\r","").replace("\n",""),end="")
-except (binascii.Error,UnicodeDecodeError,ValueError) as exc:
-    raise SystemExit(f"OMEGA_HOSTED_PR_CURRENT_TRIGGER_INVALID:{exc}")
-PY
-)"
+            current_trigger="$(printf '%s' "$encoded" | python3 -c 'import base64,binascii,sys; raw="".join(sys.stdin.read().split()); print(base64.b64decode(raw,validate=True).decode("utf-8").replace("\\r","").replace("\\n",""),end="")')"
             if [ "$local_trigger" != "$current_trigger" ]; then
               echo "found=false" >> "$GITHUB_OUTPUT"
               echo "OMEGA_HOSTED_PR_STALE_TRIGGER_MAIN local=$local_trigger current=$current_trigger"
