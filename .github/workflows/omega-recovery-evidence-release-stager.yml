@@ -7,6 +7,14 @@ on:
         description: "Exact successful OMEGA Candidate Evidence Root run id"
         required: true
         type: string
+      staged_ref:
+        description: "Optional externally pre-staged release ref to adopt after exact verification"
+        required: false
+        type: string
+      staged_sha:
+        description: "Optional exact externally pre-staged child SHA; requires staged_ref"
+        required: false
+        type: string
 permissions:
   contents: write
   actions: write
@@ -29,12 +37,22 @@ jobs:
       - name: Validate explicit evidence handoff
         env:
           EVIDENCE_RUN_ID: ${{ inputs.evidence_run_id }}
+          INPUT_STAGED_REF: ${{ inputs.staged_ref || '' }}
+          INPUT_STAGED_SHA: ${{ inputs.staged_sha || '' }}
         shell: bash
         run: |
           set -Eeuo pipefail
           [[ "$EVIDENCE_RUN_ID" =~ ^[0-9]+$ ]] || { echo "OMEGA_RELEASE_STAGER_RUN_ID_INVALID:$EVIDENCE_RUN_ID" >&2; exit 64; }
+          if [ -n "${INPUT_STAGED_REF:-}" ] || [ -n "${INPUT_STAGED_SHA:-}" ]; then
+            [ -n "${INPUT_STAGED_REF:-}" ] && [ -n "${INPUT_STAGED_SHA:-}" ] || { echo "OMEGA_RELEASE_STAGER_ADOPTION_INPUT_PAIR_REQUIRED" >&2; exit 64; }
+            [[ "$INPUT_STAGED_REF" =~ ^release/recovery-evidence-[A-Za-z0-9._/-]+$ ]] || { echo "OMEGA_RELEASE_STAGER_ADOPTION_REF_INVALID:$INPUT_STAGED_REF" >&2; exit 64; }
+            case "$INPUT_STAGED_REF" in *..*|/*|-*) echo "OMEGA_RELEASE_STAGER_ADOPTION_REF_UNSAFE:$INPUT_STAGED_REF" >&2; exit 64 ;; esac
+            [[ "$INPUT_STAGED_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "OMEGA_RELEASE_STAGER_ADOPTION_SHA_INVALID:$INPUT_STAGED_SHA" >&2; exit 64; }
+          fi
           echo "EVIDENCE_RUN_ID=$EVIDENCE_RUN_ID" >> "$GITHUB_ENV"
-          echo "OMEGA_RELEASE_STAGER_EXPLICIT_HANDOFF run=$EVIDENCE_RUN_ID"
+          echo "ADOPT_STAGED_REF=${INPUT_STAGED_REF:-}" >> "$GITHUB_ENV"
+          echo "ADOPT_STAGED_SHA=${INPUT_STAGED_SHA:-}" >> "$GITHUB_ENV"
+          echo "OMEGA_RELEASE_STAGER_EXPLICIT_HANDOFF run=$EVIDENCE_RUN_ID staged_ref=${INPUT_STAGED_REF:-none} staged_sha=${INPUT_STAGED_SHA:-none}"
 
       - name: Detect scoped private release authority configuration
         id: release_app_config
@@ -129,23 +147,33 @@ jobs:
           echo "skip=$skip" >> "$GITHUB_OUTPUT"
 
       - name: Preflight private release mutation capability
+        id: private_write
         if: steps.pin.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ env.OMEGA_PRIVATE_RELEASE_TOKEN }}
           SOURCE_SHA: ${{ steps.pin.outputs.source_sha }}
+          ADOPT_STAGED_REF: ${{ env.ADOPT_STAGED_REF }}
+          ADOPT_STAGED_SHA: ${{ env.ADOPT_STAGED_SHA }}
         shell: bash
         run: |
           set -Eeuo pipefail
           probe="omega-capability-probe-${GITHUB_RUN_ID}"
-          gh api --method POST "/repos/$PRIVATE_REPOSITORY/git/refs" -f ref="refs/heads/$probe" -f sha="$SOURCE_SHA" >/dev/null || {
-            echo "OMEGA_RELEASE_CAPABILITY_MISSING:private_contents_write" >&2
-            exit 77
-          }
-          gh api --method DELETE "/repos/$PRIVATE_REPOSITORY/git/refs/heads/$probe" >/dev/null || {
-            echo "OMEGA_RELEASE_CAPABILITY_CLEANUP_FAILED:$probe" >&2
-            exit 78
-          }
-          echo "OMEGA_RELEASE_CAPABILITY_PASS:private_contents_write"
+          if gh api --method POST "/repos/$PRIVATE_REPOSITORY/git/refs" -f ref="refs/heads/$probe" -f sha="$SOURCE_SHA" >/dev/null 2>&1; then
+            gh api --method DELETE "/repos/$PRIVATE_REPOSITORY/git/refs/heads/$probe" >/dev/null || {
+              echo "OMEGA_RELEASE_CAPABILITY_CLEANUP_FAILED:$probe" >&2
+              exit 78
+            }
+            echo "available=true" >> "$GITHUB_OUTPUT"
+            echo "OMEGA_RELEASE_CAPABILITY_PASS:private_contents_write"
+            exit 0
+          fi
+          if [ -n "${ADOPT_STAGED_REF:-}" ] && [ -n "${ADOPT_STAGED_SHA:-}" ]; then
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "OMEGA_RELEASE_CAPABILITY_FALLBACK:externally_staged_child_adoption"
+            exit 0
+          fi
+          echo "OMEGA_RELEASE_CAPABILITY_MISSING:private_contents_write" >&2
+          exit 77
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         if: steps.pin.outputs.skip != 'true'
@@ -405,19 +433,74 @@ jobs:
           python3 scripts/evidence_identity.py verify             --envelope evidence/execution-envelope.json             --binding evidence/t24-binding.json             --binding evidence/t60-binding.json             --binding evidence/qa-binding.json             --json-file evidence/latest-24h.json             --json-file evidence/latest-t60.json             --json-file evidence/release-stage.json
           illegal="$(git status --porcelain | awk '{print $2}' | grep -Ev '^(evidence/|android/app/build.gradle.kts$)' || true)"
           [ -z "$illegal" ] || { echo "OMEGA_RELEASE_STAGE_ILLEGAL_DELTA:$illegal" >&2; exit 61; }
-          git config user.name omega-release-bot
-          git config user.email omega-release-bot@users.noreply.github.com
-          branch="release/recovery-evidence-${SOURCE_SHA:0:12}-${EVIDENCE_RUN_ID}"
-          git checkout -b "$branch"
-          git add evidence android/app/build.gradle.kts
-          git commit -m "release: finalize attested recovery evidence and Android versionCode"
-          final="$(git rev-parse HEAD)"
-          parent="$(git rev-parse HEAD^)"
-          [ "$parent" = "$SOURCE_SHA" ] || { echo "OMEGA_RELEASE_STAGE_PARENT_MISMATCH:$parent!=$SOURCE_SHA" >&2; exit 62; }
-          git push origin "HEAD:refs/heads/$branch"
+          if [ "${{ steps.private_write.outputs.available }}" = "true" ]; then
+            git config user.name omega-release-bot
+            git config user.email omega-release-bot@users.noreply.github.com
+            branch="release/recovery-evidence-${SOURCE_SHA:0:12}-${EVIDENCE_RUN_ID}"
+            git checkout -b "$branch"
+            git add evidence android/app/build.gradle.kts
+            git commit -m "release: finalize attested recovery evidence and Android versionCode"
+            final="$(git rev-parse HEAD)"
+            parent="$(git rev-parse HEAD^)"
+            [ "$parent" = "$SOURCE_SHA" ] || { echo "OMEGA_RELEASE_STAGE_PARENT_MISMATCH:$parent!=$SOURCE_SHA" >&2; exit 62; }
+            git push origin "HEAD:refs/heads/$branch"
+            mode=private-writer
+          else
+            branch="$ADOPT_STAGED_REF"
+            final="$ADOPT_STAGED_SHA"
+            tip="$(GH_TOKEN="$OMEGA_PRIVATE_RELEASE_TOKEN" gh api "/repos/$PRIVATE_REPOSITORY/commits/$branch" --jq .sha)"
+            [ "$tip" = "$final" ] || { echo "OMEGA_RELEASE_STAGE_ADOPTION_REF_MOVED:$tip!=$final" >&2; exit 62; }
+            git fetch --no-tags origin "$branch"
+            parent_line="$(git rev-list --parents -n 1 "$final")"
+            set -- $parent_line
+            [ "$#" -eq 2 ] || { echo "OMEGA_RELEASE_STAGE_ADOPTION_PARENT_COUNT:$#" >&2; exit 62; }
+            [ "$2" = "$SOURCE_SHA" ] || { echo "OMEGA_RELEASE_STAGE_ADOPTION_PARENT_MISMATCH:$2!=$SOURCE_SHA" >&2; exit 62; }
+
+            mapfile -t changed < <(git diff --name-only "$SOURCE_SHA" "$final")
+            [ "${#changed[@]}" -gt 0 ] || { echo "OMEGA_RELEASE_STAGE_ADOPTION_EMPTY_DELTA" >&2; exit 61; }
+            for path in "${changed[@]}"; do
+              case "$path" in
+                evidence/*|android/app/build.gradle.kts) ;;
+                *) echo "OMEGA_RELEASE_STAGE_ADOPTION_ILLEGAL_DELTA:$path" >&2; exit 61 ;;
+              esac
+            done
+
+            for name in execution-envelope.json execution-runtime.json federation-epoch.json federation-epoch.authority.json t24-binding.json t60-binding.json qa-binding.json settlement-binding.json latest-24h.json latest-t60.json latest-settlement.json coverage-gaps.json intelligence-refresh-t24.json intelligence-refresh-t60.json acceptance-agents.json latest-agent-promotion.json repo-audit-after-agents.json forecast-ledger.jsonl shadow-ledger.jsonl prematch-intelligence.jsonl; do
+              git show "$final:evidence/$name" > "$RUNNER_TEMP/adopt-$name"
+              cmp -s "evidence/$name" "$RUNNER_TEMP/adopt-$name" || { echo "OMEGA_RELEASE_STAGE_ADOPTION_EVIDENCE_MISMATCH:$name" >&2; exit 61; }
+            done
+            git show "$final:android/app/build.gradle.kts" > "$RUNNER_TEMP/adopt-build.gradle.kts"
+            cmp -s android/app/build.gradle.kts "$RUNNER_TEMP/adopt-build.gradle.kts" || { echo "OMEGA_RELEASE_STAGE_ADOPTION_ANDROID_VERSION_MISMATCH" >&2; exit 61; }
+            git show "$final:evidence/release-stage.json" > "$RUNNER_TEMP/adopt-release-stage.json"
+            python3 - "$RUNNER_TEMP/adopt-release-stage.json" "$SOURCE_SHA" "$OMEGA_EXECUTION_ID" "$EVIDENCE_RUN_ID" "$RECOVERY_RUN_ID" <<'PY'
+          import datetime,json,re,sys
+          p=json.load(open(sys.argv[1],encoding="utf-8"))
+          source,xid,evidence_run,recovery_run=sys.argv[2:]
+          if p.get("status")!="T60_EVIDENCE_FINALIZED": raise SystemExit("OMEGA_RELEASE_STAGE_ADOPTION_STATUS_INVALID")
+          if p.get("code_source_sha")!=source or p.get("omega_execution_id")!=xid: raise SystemExit("OMEGA_RELEASE_STAGE_ADOPTION_IDENTITY_MISMATCH")
+          if str(p.get("candidate_evidence_root_run_id"))!=evidence_run or str(p.get("recovery_run_id"))!=recovery_run: raise SystemExit("OMEGA_RELEASE_STAGE_ADOPTION_RUN_BINDING_MISMATCH")
+          if p.get("t24_git_commit")!=source or p.get("t60_source_sha")!=source: raise SystemExit("OMEGA_RELEASE_STAGE_ADOPTION_SOURCE_BINDING_MISMATCH")
+          for key in ("created_at","finalized_at"):
+              raw=str(p.get(key) or "")
+              try: datetime.datetime.fromisoformat(raw.replace("Z","+00:00"))
+              except ValueError: raise SystemExit("OMEGA_RELEASE_STAGE_ADOPTION_TIMESTAMP_INVALID:"+key)
+          PY
+            git reset --hard "$final"
+            python3 scripts/evidence_identity.py verify \
+              --envelope evidence/execution-envelope.json \
+              --binding evidence/t24-binding.json \
+              --binding evidence/t60-binding.json \
+              --binding evidence/qa-binding.json \
+              --json-file evidence/latest-24h.json \
+              --json-file evidence/latest-t60.json \
+              --json-file evidence/release-stage.json
+            mode=external-adoption
+            echo "OMEGA_RELEASE_STAGE_EXTERNAL_CHILD_ADOPTED source=$SOURCE_SHA final=$final ref=$branch"
+          fi
           echo "FINAL_SHA=$final" >> "$GITHUB_ENV"
           echo "RELEASE_BRANCH=$branch" >> "$GITHUB_ENV"
-          echo "OMEGA_RELEASE_EVIDENCE_STAGED source=$SOURCE_SHA final=$final branch=$branch"
+          echo "STAGING_MODE=$mode" >> "$GITHUB_ENV"
+          echo "OMEGA_RELEASE_EVIDENCE_STAGED source=$SOURCE_SHA final=$final branch=$branch mode=$mode"
 
       - name: Dispatch exact final-SHA hosted validation
         if: steps.pin.outputs.skip != 'true'
