@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 concurrency:
   group: omega-release-federation-certifier
@@ -115,6 +116,16 @@ jobs:
             -f content="$encoded" -f sha="$blob_sha" -f branch=main >/dev/null
           echo "OMEGA_RELEASE_FEDERATION_AUTHORITY_PROMOTED_PASS source=$SOURCE_SHA"
 
+      - name: Explicitly dispatch second independent peer proof
+        if: steps.epoch.outputs.release_epoch == 'true' && steps.epoch.outputs.state == 'NOT_EXECUTED'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          gh workflow run omega-federation-v3-peer-bridge.yml --ref main
+          echo "OMEGA_RELEASE_FEDERATION_SECOND_PROOF_DISPATCHED"
+
       - name: Trigger exact final-SHA recovery after second PASS bridge
         if: steps.epoch.outputs.release_epoch == 'true' && steps.epoch.outputs.state == 'PASS' && steps.epoch.outputs.stage == 'CERTIFIED_PASS_PENDING_SECOND_PROOF'
         env:
@@ -146,3 +157,5 @@ jobs:
             -f message="Recovery: prove exact certified release SHA ${SOURCE_SHA:0:12}" \
             -f content="$encoded" -f sha="$blob_sha" -f branch=main >/dev/null
           echo "OMEGA_RELEASE_FINAL_RECOVERY_ARMED source=$SOURCE_SHA ref=$SOURCE_REF"
+          gh workflow run omega-hosted-recovery-failover.yml --ref main
+          echo "OMEGA_RELEASE_FINAL_RECOVERY_DISPATCHED source=$SOURCE_SHA"
