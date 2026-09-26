@@ -19,10 +19,11 @@ permissions:
 cache-mode: read
 
 concurrency:
-  # Serialize explicit recovery proofs and keep their queue. The pin job rejects
-  # stale trigger revisions, preventing cancellation livelock and redundant
-  # parallel recovery jobs from exhausting hosted-runner capacity.
-  group: omega-hosted-recovery-v2-${{ github.event_name == 'schedule' && (github.event.schedule == '22,52 * * * *' && 'candidate-watch' || 'routine-main') || 'exact-candidate' }}
+  # Serialize every candidate recovery proof in one candidate lane, regardless
+  # of whether it came from an exact-trigger push or the candidate watchdog.
+  # This prevents duplicate clean-recovery runs for the same frozen candidate
+  # from consuming hosted-runner minutes in parallel. Routine-main stays isolated.
+  group: omega-hosted-recovery-v2-${{ (github.event_name == 'push' || (github.event_name == 'schedule' && github.event.schedule == '22,52 * * * *')) && 'candidate' || 'routine-main' }}
   cancel-in-progress: false
   queue: max
 
