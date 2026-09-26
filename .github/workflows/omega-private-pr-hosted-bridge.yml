@@ -137,7 +137,7 @@ jobs:
           - lane: python313
             python: "3.13"
             extra: "dev"
-            command: "python -m pytest -q && python -m compileall -q src scripts && python -m pip check && python scripts/repo_audit.py --out reports/repo-audit-ci.json && python -c \"from omega.research.preflight import run_preflight; r=run_preflight('reports/preflight-ci.json'); assert r['passed'], r\" && python scripts/final_audit_gate.py --audit reports/repo-audit-ci.json --out reports/final-audit-gate.json"
+            command: "python -m pytest -q && python -m compileall -q src scripts && python -m pip check && python scripts/validate_supply_chain_locks.py --out reports/supply-chain-locks.json && python scripts/generate_omega_sbom.py --out reports/omega-sbom.spdx.json && python scripts/repo_audit.py --out reports/repo-audit-ci.json && python -c \"from omega.research.preflight import run_preflight; r=run_preflight('reports/preflight-ci.json'); assert r['passed'], r\" && python scripts/final_audit_gate.py --audit reports/repo-audit-ci.json --out reports/final-audit-gate.json"
           - lane: python314
             python: "3.14"
             extra: "dev"
