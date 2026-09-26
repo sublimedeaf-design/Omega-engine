@@ -25,8 +25,47 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
+          fetch-depth: 0
       - name: Verify authority projection
         run: python scripts/verify_federation_epoch.py federation/epochs/current.json
+
+      - name: Reject control-plane drift outside this immutable epoch
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY' > "$RUNNER_TEMP/epoch-control-contract.txt"
+          import json,pathlib,re
+          d=json.loads(pathlib.Path("federation/epochs/current.json").read_text(encoding="utf-8"))
+          rel=d.get("release_epoch") or {}
+          contract=str(rel.get("control_contract_sha") or "")
+          sequence=rel.get("sequence")
+          immutable=str(rel.get("immutable_path") or "")
+          if not re.fullmatch(r"[0-9a-f]{40}",contract):
+              raise SystemExit("OMEGA_FEDERATION_CONTROL_CONTRACT_INVALID")
+          if isinstance(sequence,bool) or not isinstance(sequence,int) or sequence < 1:
+              raise SystemExit("OMEGA_FEDERATION_EPOCH_SEQUENCE_REQUIRED")
+          if not re.fullmatch(r"federation/epochs/releases/[0-9a-f]{40}-[0-9a-f]{16}\.json",immutable):
+              raise SystemExit("OMEGA_FEDERATION_IMMUTABLE_PATH_INVALID")
+          print(contract)
+          print(sequence)
+          print(immutable)
+          PY
+          contract="$(sed -n '1p' "$RUNNER_TEMP/epoch-control-contract.txt")"
+          sequence="$(sed -n '2p' "$RUNNER_TEMP/epoch-control-contract.txt")"
+          immutable="$(sed -n '3p' "$RUNNER_TEMP/epoch-control-contract.txt")"
+          git merge-base --is-ancestor "$contract" HEAD || {
+            echo "OMEGA_FEDERATION_CONTROL_ROLLBACK_DETECTED:$contract" >&2
+            exit 66
+          }
+          mapfile -t changed < <(git diff --name-only "$contract"..HEAD)
+          for path in "${changed[@]}"; do
+            [ "$path" = "federation/epochs/current.json" ] && continue
+            [ "$path" = "$immutable" ] && continue
+            echo "OMEGA_FEDERATION_CONTROL_DRIFT_REQUIRES_NEW_EPOCH:$path" >&2
+            exit 67
+          done
+          echo "OMEGA_FEDERATION_CONTROL_CONTRACT_PASS contract=$contract sequence=$sequence"
+
       - id: matrix
         shell: bash
         run: |
@@ -103,6 +142,9 @@ jobs:
           source=os.environ["EPOCH_SOURCE_SHA"]; source_ref=os.environ["EPOCH_SOURCE_REF"]
           epoch_id=os.environ["RELEASE_EPOCH_ID"]; mode=os.environ["SOURCE_BINDING_MODE"]
           baseline=os.environ["BASELINE_SOURCE_SHA"]
+          rel=epoch.get("release_epoch") or {}
+          control_contract=str(rel.get("control_contract_sha") or "")
+          sequence=rel.get("sequence")
           if not re.fullmatch(r"[0-9a-f]{40}",source):
               raise SystemExit("OMEGA_FEDERATION_EXTERNAL_SOURCE_INVALID")
           if not re.fullmatch(r"[0-9a-f]{40}",baseline):
@@ -120,7 +162,6 @@ jobs:
                   raise SystemExit("OMEGA_FEDERATION_RELEASE_EPOCH_ID_INVALID")
               if contract_source!=baseline:
                   raise SystemExit("OMEGA_FEDERATION_PEER_BASELINE_SOURCE_MISMATCH")
-              rel=epoch.get("release_epoch") or {}
               if rel.get("id")!=epoch_id or rel.get("source_binding_mode")!="external_epoch":
                   raise SystemExit("OMEGA_FEDERATION_RELEASE_EPOCH_BINDING_MISMATCH")
               if rel.get("new_deviation_requires_new_epoch") is not True:
@@ -145,6 +186,8 @@ jobs:
               "peer_sha":sha,
               "peer_role":role,
               "peer_contract_source_sha":contract_source,
+              "control_contract_sha":control_contract,
+              "release_epoch_sequence":sequence,
               "peer_repository_mutated":False,
           }
           out=pathlib.Path(os.environ["RUNNER_TEMP"])/"federation-proof"/(role+".json")
@@ -194,6 +237,8 @@ jobs:
           source=epoch["primary"]["source_sha"]
           rel=epoch.get("release_epoch") or {}
           epoch_id=rel.get("id")
+          control_contract=rel.get("control_contract_sha")
+          sequence=rel.get("sequence")
           rows=[]
           for path in pathlib.Path(__import__("os").environ["RUNNER_TEMP"]).joinpath("federation-proofs").glob("*.json"):
               rows.append(json.loads(path.read_text(encoding="utf-8")))
@@ -210,6 +255,8 @@ jobs:
                   raise SystemExit("OMEGA_FEDERATION_PROOF_IDENTITY_INVALID:"+str(repo))
               if row.get("source_sha")!=source or row.get("release_epoch_id")!=(epoch_id or None):
                   raise SystemExit("OMEGA_FEDERATION_PROOF_SOURCE_BINDING_INVALID:"+str(repo))
+              if row.get("control_contract_sha")!=control_contract or row.get("release_epoch_sequence")!=sequence:
+                  raise SystemExit("OMEGA_FEDERATION_PROOF_CONTROL_BINDING_INVALID:"+str(repo))
               if row.get("peer_repository_mutated") is not False:
                   raise SystemExit("OMEGA_FEDERATION_PROOF_MUTATION_FLAG_INVALID:"+str(repo))
           if set(expected)!=seen:
