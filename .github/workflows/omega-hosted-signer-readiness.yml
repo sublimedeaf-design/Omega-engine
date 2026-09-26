@@ -42,7 +42,12 @@ jobs:
           fi
           if [ -z "${OMEGA_ANDROID_KEYSTORE_B64:-}" ]; then
             echo "OMEGA_HOSTED_SIGNER_ESCROW_NOT_CONFIGURED candidate=$candidate" >&2
-            exit 40
+            gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$candidate" \
+              -f state=error \
+              -f context="omega/signer/escrow" \
+              -f description="BLOCKED: hosted canonical signer escrow not configured" >/dev/null 2>&1 || true
+            echo "OMEGA_HOSTED_SIGNER_ESCROW_BLOCKED_STATE candidate=$candidate"
+            exit 0
           fi
           expected="$(gh api "/repos/$PRIVATE_REPOSITORY/contents/android/signing-cert.sha256?ref=$candidate" --jq '.content' | tr -d '\n' | base64 -d | tr -d '[:space:]' | tr -d ':' | tr 'A-F' 'a-f')"
           [[ "$expected" =~ ^[0-9a-f]{64}$ ]] || { echo OMEGA_HOSTED_SIGNER_EXPECTED_FINGERPRINT_INVALID >&2; exit 31; }
@@ -53,4 +58,9 @@ jobs:
           printf '%s' "$OMEGA_ANDROID_KEYSTORE_B64" | base64 -d > "$key" || { echo OMEGA_HOSTED_SIGNER_ESCROW_DECODE_FAILED >&2; exit 32; }
           actual="$(keytool -list -v -keystore "$key" -storepass android -alias androiddebugkey 2>/dev/null | sed -n 's/.*SHA256: //p' | head -1 | tr -d ':' | tr 'A-F' 'a-f')"
           [ "$actual" = "$expected" ] || { echo OMEGA_HOSTED_SIGNER_ESCROW_FINGERPRINT_MISMATCH >&2; exit 33; }
+          gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$candidate" \
+            -f state=success \
+            -f context="omega/signer/escrow" \
+            -f description="hosted canonical signer escrow fingerprint verified" \
+            -f target_url="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" >/dev/null 2>&1 || true
           echo "OMEGA_HOSTED_SIGNER_ESCROW_READY candidate=$candidate"
