@@ -1,0 +1,230 @@
+name: OMEGA Gate Failure Router
+
+on:
+  workflow_run:
+    workflows:
+      - "OMEGA Private PR Hosted Bridge"
+      - "OMEGA Hosted Recovery Failover"
+      - "OMEGA Candidate Evidence Root"
+      - "OMEGA Recovery Evidence Release Stager"
+      - "OMEGA Release Federation Certifier"
+      - "OMEGA Canonical Android Signer"
+      - "OMEGA Android Runtime Cold Start"
+      - "OMEGA Final Release Promoter"
+      - "OMEGA Post Live Verification"
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: omega-gate-failure-router
+  cancel-in-progress: false
+  queue: max
+
+env:
+  PRIVATE_REPOSITORY: sublimedeaf-design/Omega-engines
+
+jobs:
+  classify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: main
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Resolve canonical promotion SHA and proof contract
+        id: pin
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          WORKFLOW_NAME: ${{ github.event.workflow_run.name }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          gate=unknown
+          proof_contexts=""
+          trigger=bootstrap/omega/pr-validation-trigger.txt
+          case "$WORKFLOW_NAME" in
+            "OMEGA Private PR Hosted Bridge")
+              gate=hosted-ci
+              proof_contexts="omega/exact-final-validation"
+              ;;
+            "OMEGA Hosted Recovery Failover")
+              gate=recovery
+              proof_contexts="omega/hosted-recovery,omega/recovery-attestation"
+              trigger=bootstrap/omega/recovery-trigger.txt
+              ;;
+            "OMEGA Candidate Evidence Root")
+              gate=evidence-root
+              proof_contexts="omega/candidate-evidence-root"
+              ;;
+            "OMEGA Recovery Evidence Release Stager")
+              gate=release-stager
+              proof_contexts="omega/release-evidence-staged,omega/android-release-unsigned"
+              ;;
+            "OMEGA Release Federation Certifier")
+              gate=federation
+              proof_contexts="omega/federation-v3-release"
+              ;;
+            "OMEGA Canonical Android Signer")
+              gate=signer
+              proof_contexts="omega/signer/continuity,omega/android-release-signed"
+              ;;
+            "OMEGA Android Runtime Cold Start")
+              gate=android-runtime
+              proof_contexts="omega/android-runtime-coldstart"
+              ;;
+            "OMEGA Final Release Promoter")
+              gate=promotion
+              proof_contexts="omega/main-promotion"
+              ;;
+            "OMEGA Post Live Verification")
+              gate=post-live
+              proof_contexts="omega/post-live-smoke,omega/live-certified"
+              ;;
+          esac
+
+          sha=""
+          if [ -s "$trigger" ]; then
+            read -r marker candidate _ < "$trigger" || true
+            if [[ "${candidate:-}" =~ ^[0-9a-f]{40}$ ]]; then
+              sha="$candidate"
+            fi
+          fi
+          if [ -z "$sha" ]; then
+            sha="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/main" --jq .sha)"
+          fi
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "gate=$gate" >> "$GITHUB_OUTPUT"
+          echo "proof_contexts=$proof_contexts" >> "$GITHUB_OUTPUT"
+
+      - name: Classify exact completed run
+        id: classify
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          SOURCE_SHA: ${{ steps.pin.outputs.sha }}
+          GATE: ${{ steps.pin.outputs.gate }}
+          PROOF_CONTEXTS: ${{ steps.pin.outputs.proof_contexts }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          gh api "/repos/${GITHUB_REPOSITORY}/actions/runs/$RUN_ID/jobs?filter=latest&per_page=100" > "$RUNNER_TEMP/jobs.json"
+          gh run view "$RUN_ID" -R "$GITHUB_REPOSITORY" --log-failed > "$RUNNER_TEMP/failed.log" 2>&1 || true
+          gh api "/repos/$PRIVATE_REPOSITORY/commits/$SOURCE_SHA/status?per_page=100" > "$RUNNER_TEMP/status.json"
+          encoded="$(gh api "/repos/$PRIVATE_REPOSITORY/contents/evidence/execution-envelope.json?ref=$SOURCE_SHA" --jq .content 2>/dev/null || true)"
+          if [ -n "$encoded" ]; then
+            printf '%s' "$encoded" | tr -d '\n' | base64 -d > "$RUNNER_TEMP/execution-envelope.json"
+          else
+            printf '{}\n' > "$RUNNER_TEMP/execution-envelope.json"
+          fi
+
+          python3 - "$RUNNER_TEMP/jobs.json" "$RUNNER_TEMP/failed.log" "$RUNNER_TEMP/status.json" "$RUNNER_TEMP/execution-envelope.json" "$RUNNER_TEMP/payload.json" <<'PY'
+          import json,os,pathlib,re,sys
+          jobs=json.load(open(sys.argv[1],encoding="utf-8")).get("jobs",[])
+          log=pathlib.Path(sys.argv[2]).read_text(encoding="utf-8",errors="replace")
+          statuses=json.load(open(sys.argv[3],encoding="utf-8")).get("statuses",[])
+          try:
+              envelope=json.load(open(sys.argv[4],encoding="utf-8"))
+          except (OSError,ValueError,json.JSONDecodeError):
+              envelope={}
+          latest={}
+          for row in statuses:
+              ctx=str(row.get("context") or "")
+              if ctx and ctx not in latest:
+                  latest[ctx]=row
+          run_id=os.environ["RUN_ID"]
+          contexts=[x for x in os.environ.get("PROOF_CONTEXTS","").split(",") if x]
+          proof_present=bool(contexts)
+          for ctx in contexts:
+              row=latest.get(ctx) or {}
+              target=str(row.get("target_url") or "")
+              if row.get("state")!="success" or not target.endswith("/actions/runs/"+run_id):
+                  proof_present=False
+                  break
+          source=os.environ.get("SOURCE_SHA","")
+          xid=""
+          evidence_root=""
+          if envelope.get("source_sha")==source:
+              candidate_xid=str(envelope.get("omega_execution_id") or "").lower()
+              candidate_root=str(envelope.get("evidence_root") or "").lower()
+              if re.fullmatch(r"[0-9a-f]{64}",candidate_xid):
+                  xid=candidate_xid
+              if re.fullmatch(r"[0-9a-f]{64}",candidate_root):
+                  evidence_root=candidate_root
+          payload={
+              "status":"completed",
+              "conclusion":os.environ.get("CONCLUSION",""),
+              "proof_present":proof_present,
+              "log":log,
+              "jobs":jobs,
+              "gate":os.environ.get("GATE","unknown"),
+              "promotion_sha":source,
+              "omega_execution_id":xid,
+              "evidence_root":evidence_root,
+          }
+          pathlib.Path(sys.argv[5]).write_text(
+              json.dumps(payload,sort_keys=True,allow_nan=False)+"\n",encoding="utf-8")
+          PY
+
+          python3 scripts/omega_gate_classifier.py --input "$RUNNER_TEMP/payload.json" > "$RUNNER_TEMP/classification.json"
+          cat "$RUNNER_TEMP/classification.json"
+          {
+            echo "### OMEGA canonical gate classification"
+            echo '~~~json'
+            cat "$RUNNER_TEMP/classification.json"
+            echo '~~~'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          echo "state=$(jq -r .state "$RUNNER_TEMP/classification.json")" >> "$GITHUB_OUTPUT"
+          echo "failure_class=$(jq -r .failure_class "$RUNNER_TEMP/classification.json")" >> "$GITHUB_OUTPUT"
+          echo "incident_id=$(jq -r .incident_id "$RUNNER_TEMP/classification.json")" >> "$GITHUB_OUTPUT"
+          echo "retryable=$(jq -r .retryable "$RUNNER_TEMP/classification.json")" >> "$GITHUB_OUTPUT"
+          echo "max_attempts=$(jq -r .max_attempts "$RUNNER_TEMP/classification.json")" >> "$GITHUB_OUTPUT"
+          echo "next_action=$(jq -r .next_action "$RUNNER_TEMP/classification.json")" >> "$GITHUB_OUTPUT"
+
+      - name: Publish content-addressed classification
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          SOURCE_SHA: ${{ steps.pin.outputs.sha }}
+          GATE: ${{ steps.pin.outputs.gate }}
+          STATE: ${{ steps.classify.outputs.state }}
+          FAILURE_CLASS: ${{ steps.classify.outputs.failure_class }}
+          INCIDENT_ID: ${{ steps.classify.outputs.incident_id }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          github_state=error
+          case "$STATE" in
+            PASS) github_state=success ;;
+            FAIL) github_state=failure ;;
+            PENDING) github_state=pending ;;
+            BLOCKED|NOT_EXECUTED) github_state=error ;;
+          esac
+          desc="$FAILURE_CLASS incident=${INCIDENT_ID:0:12}"
+          gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$SOURCE_SHA"             -f state="$github_state"             -f context="omega/control-plane/$GATE"             -f description="$desc"             -f target_url="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" >/dev/null
+
+      - name: Bounded infrastructure-only retry
+        if: steps.classify.outputs.retryable == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          MAX_ATTEMPTS: ${{ steps.classify.outputs.max_attempts }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          attempt="${RUN_ATTEMPT:-1}"
+          if [ "$attempt" -lt "$MAX_ATTEMPTS" ]; then
+            gh run rerun "$RUN_ID" -R "$GITHUB_REPOSITORY" --failed
+            echo "OMEGA_GATE_ROUTER_RETRY_DISPATCHED run=$RUN_ID attempt=$attempt max=$MAX_ATTEMPTS"
+          else
+            echo "OMEGA_GATE_ROUTER_RETRY_BUDGET_EXHAUSTED run=$RUN_ID attempt=$attempt max=$MAX_ATTEMPTS"
+          fi

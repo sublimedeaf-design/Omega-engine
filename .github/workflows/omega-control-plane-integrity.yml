@@ -2,6 +2,11 @@ name: OMEGA Control Plane Integrity
 
 on:
   workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/**"
+      - "scripts/verify_control_plane.rb"
+      - "scripts/omega_gate_classifier.py"
   push:
     paths:
       - ".github/workflows/**"
@@ -10,6 +15,7 @@ on:
 
 permissions:
   contents: read
+  statuses: write
 
 concurrency:
   group: omega-control-plane-integrity
@@ -28,3 +34,19 @@ jobs:
         run: |
           ruby scripts/verify_control_plane.rb
           python3 scripts/omega_gate_classifier.py --self-test
+
+      - name: Publish exact-SHA control-plane integrity
+        if: ${{ always() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RESULT: ${{ job.status }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          state=failure
+          [ "$RESULT" = success ] && state=success
+          gh api --method POST "/repos/${{ github.repository }}/statuses/${{ github.sha }}" \
+            -f state="$state" \
+            -f context="omega/control-plane-integrity" \
+            -f description="control-plane syntax, classifier and routing contract: $RESULT" \
+            -f target_url="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" >/dev/null
