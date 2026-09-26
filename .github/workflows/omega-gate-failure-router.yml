@@ -121,7 +121,15 @@ jobs:
           gh api "/repos/$PRIVATE_REPOSITORY/commits/$SOURCE_SHA/status?per_page=100" > "$RUNNER_TEMP/status.json"
           encoded="$(gh api "/repos/$PRIVATE_REPOSITORY/contents/evidence/execution-envelope.json?ref=$SOURCE_SHA" --jq .content 2>/dev/null || true)"
           if [ -n "$encoded" ]; then
-            printf '%s' "$encoded" | tr -d '\n' | base64 -d > "$RUNNER_TEMP/execution-envelope.json"
+            ENCODED="$encoded" python3 - "$RUNNER_TEMP/execution-envelope.json" <<'PY'
+          import base64,binascii,os,pathlib,sys
+          raw="".join(os.environ["ENCODED"].split())
+          try:
+              data=base64.b64decode(raw,validate=True)
+          except (binascii.Error,ValueError) as exc:
+              raise SystemExit(f"OMEGA_GATE_ROUTER_ENVELOPE_BASE64_INVALID:{exc}")
+          pathlib.Path(sys.argv[1]).write_bytes(data)
+          PY
           else
             printf '{}\n' > "$RUNNER_TEMP/execution-envelope.json"
           fi
