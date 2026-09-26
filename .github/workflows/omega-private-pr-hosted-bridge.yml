@@ -90,11 +90,58 @@ jobs:
             echo "found=false" >> "$GITHUB_OUTPUT"
             exit 68
           fi
-          compare="$(gh api "/repos/$PRIVATE_REPOSITORY/compare/$base_sha...$requested_sha")"
+          compare_base="$base_sha"
+          compare="$(gh api "/repos/$PRIVATE_REPOSITORY/compare/$compare_base...$requested_sha")"
           relation="$(printf '%s' "$compare" | jq -r '.status // ""')"
           behind="$(printf '%s' "$compare" | jq -r '.behind_by // 999999')"
+
+          # Release staging is intentionally rooted at the already-certified source SHA,
+          # while private main may advance only to carry the STAGE_EXACT control trigger.
+          # Accept that split history only when the canonical private trigger proves the
+          # exact source/evidence binding and the release branch is one commit above it.
+          if { [ "$relation" != ahead ] || [ "$behind" != 0 ]; } && [[ "$source_ref" == release/recovery-evidence-* ]]; then
+            trigger_encoded="$(gh api "/repos/$PRIVATE_REPOSITORY/contents/bootstrap/omega/private-release-stage-trigger.json?ref=main" --jq '.content // empty' 2>/dev/null || true)"
+            [ -n "$trigger_encoded" ] || { echo "OMEGA_EXACT_STAGE_TRIGGER_UNREADABLE" >&2; exit 66; }
+            trigger_row="$(printf '%s' "$trigger_encoded" | python3 -c '
+import base64,json,re,sys
+raw="".join(sys.stdin.read().split())
+p=json.loads(base64.b64decode(raw,validate=True))
+source=str(p.get("source_sha") or "").lower()
+evidence=str(p.get("evidence_run_id") or "")
+state=str(p.get("state") or "")
+xid=str(p.get("omega_execution_id") or "").lower()
+if not re.fullmatch(r"[0-9a-f]{40}",source): raise SystemExit(1)
+if not re.fullmatch(r"[0-9]+",evidence): raise SystemExit(1)
+if state!="STAGE_EXACT": raise SystemExit(1)
+if not re.fullmatch(r"[0-9a-f]{64}",xid): raise SystemExit(1)
+print(source+"|"+evidence+"|"+xid,end="")
+')" || { echo "OMEGA_EXACT_STAGE_TRIGGER_INVALID" >&2; exit 66; }
+            IFS='|' read -r stage_source stage_evidence stage_xid <<<"$trigger_row"
+            expected_ref="release/recovery-evidence-${stage_source:0:12}-${stage_evidence}"
+            [ "$source_ref" = "$expected_ref" ] || {
+              echo "OMEGA_EXACT_STAGE_REF_BINDING_MISMATCH:ref=$source_ref expected=$expected_ref" >&2
+              exit 66
+            }
+            stage_parent="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/$requested_sha" --jq '.parents[0].sha // empty')"
+            [ "$stage_parent" = "$stage_source" ] || {
+              echo "OMEGA_EXACT_STAGE_PARENT_MISMATCH:parent=$stage_parent source=$stage_source" >&2
+              exit 66
+            }
+            compare_base="$stage_source"
+            compare="$(gh api "/repos/$PRIVATE_REPOSITORY/compare/$compare_base...$requested_sha")"
+            relation="$(printf '%s' "$compare" | jq -r '.status // ""')"
+            behind="$(printf '%s' "$compare" | jq -r '.behind_by // 999999')"
+            ahead="$(printf '%s' "$compare" | jq -r '.ahead_by // 999999')"
+            if [ "$relation" != ahead ] || [ "$behind" != 0 ] || [ "$ahead" != 1 ]; then
+              echo "OMEGA_EXACT_STAGE_NOT_SINGLE_COMMIT:status=$relation behind=$behind ahead=$ahead source=$compare_base head=$requested_sha" >&2
+              exit 66
+            fi
+            base_sha="$compare_base"
+            echo "OMEGA_EXACT_STAGE_CONTROL_AUTHORITY_PASS source=$stage_source evidence_run=$stage_evidence execution=${stage_xid:0:12}"
+          fi
+
           if [ "$relation" != ahead ] || [ "$behind" != 0 ]; then
-            echo "OMEGA_EXACT_TRIGGER_NOT_CURRENT_BASE:status=$relation behind=$behind base=$base_sha head=$requested_sha" >&2
+            echo "OMEGA_EXACT_TRIGGER_NOT_CURRENT_BASE:status=$relation behind=$behind base=$compare_base head=$requested_sha" >&2
             exit 66
           fi
 
