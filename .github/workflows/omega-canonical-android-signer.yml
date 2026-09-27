@@ -40,6 +40,21 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
+          read -r marker promotion_candidate promotion_ref _ < bootstrap/omega/pr-validation-trigger.txt || true
+          promotion_ready=true
+          [ "${marker:-}" = validate-exact-pr ] || promotion_ready=false
+          [[ "${promotion_candidate:-}" =~ ^[0-9a-f]{40}$ ]] || promotion_ready=false
+          [[ "${promotion_ref:-}" =~ ^release/[A-Za-z0-9._/-]+$ ]] || promotion_ready=false
+          if [ "$promotion_ready" != true ]; then
+            if [ "$EVENT_NAME" = workflow_run ] && [ "$EVENT_WORKFLOW_NAME" = "OMEGA Recovery Evidence Release Stager" ]; then
+              echo "OMEGA_SIGNER_PROMOTION_GENERATION_NOT_READY" >&2
+              exit 75
+            fi
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "OMEGA_SIGNER_NO_CURRENT_STAGED_GENERATION"
+            exit 0
+          fi
+          case "$promotion_ref" in *..*|/*|-*) echo "OMEGA_SIGNER_PROMOTION_REF_UNSAFE:$promotion_ref" >&2; exit 64 ;; esac
           if [ "$EVENT_NAME" = workflow_run ] && [ "$EVENT_WORKFLOW_NAME" = "OMEGA Recovery Evidence Release Stager" ]; then
             runs=("$EVENT_RUN_ID")
           else
@@ -49,14 +64,14 @@ jobs:
           for run in "${runs[@]}"; do
             [ -n "$run" ] || continue
             artifacts="$(gh api "/repos/${{ github.repository }}/actions/runs/$run/artifacts?per_page=100")"
-            row="$(python3 - "$artifacts" <<'PY'
-          import json,re,sys
-          p=json.loads(sys.argv[1])
+            row="$(PROMOTION_CANDIDATE="$promotion_candidate" python3 - "$artifacts" <<'PY'
+          import json,os,re,sys
+          p=json.loads(sys.argv[1]); wanted=os.environ["PROMOTION_CANDIDATE"]
           rows=[]
           for a in p.get("artifacts",[]):
               n=str(a.get("name") or "")
               m=re.fullmatch(r"OMEGA-Unsigned-Release-([0-9a-f]{40})",n)
-              if m and not a.get("expired"):
+              if m and m.group(1)==wanted and not a.get("expired"):
                   rows.append((m.group(1),n))
           if len(rows)>1: raise SystemExit("OMEGA_SIGNER_UNSIGNED_ARTIFACT_AMBIGUOUS")
           if rows: print("|".join(rows[0]))
