@@ -1,1 +1,1 @@
-validate-exact-pr 2f6635b66b74b4afc5f26013c73fc8b0db236a6e main current-main-native-signer-actuator
+validate-exact-pr 4fc3d7096103b37295832186716626c9f13b867c fix/phone-forecast-governance-owner-20260928 governance-owner-repair
