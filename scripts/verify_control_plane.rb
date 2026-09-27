@@ -173,6 +173,13 @@ fail!("recovery_helper_must_not_override_qa_model_sha") if recovery.include?("OM
 fail!("recovery_helper_must_not_override_llama_commit") if recovery.include?("OMEGA_LLAMA_CPP_COMMIT:")
 fail!("recovery_model_cache_must_follow_manifest") unless recovery.include?("hashFiles('omega/deploy/hosted/hf-model-manifest.json')")
 
+
+validation_dispatcher = File.read(WORKFLOWS.join("omega-immutable-validation-request-dispatcher.yml"), encoding: "UTF-8")
+fail!("immutable_validation_request_path_missing") unless validation_dispatcher.include?("bootstrap/omega/validation-requests/*.json")
+fail!("immutable_validation_request_actions_write_missing") unless validation_dispatcher.include?("actions: write")
+fail!("immutable_validation_request_exact_path_binding_missing") unless validation_dispatcher.include?("OMEGA_VALIDATION_REQUEST_PATH_MISMATCH")
+fail!("immutable_validation_request_bridge_dispatch_missing") unless validation_dispatcher.include?("gh workflow run omega-private-pr-hosted-bridge.yml") && validation_dispatcher.include?('-f source_sha="$SOURCE_SHA"') && validation_dispatcher.include?('-f source_ref="$SOURCE_REF"')
+fail!("immutable_validation_request_dispatch_marker_missing") unless validation_dispatcher.include?("OMEGA_IMMUTABLE_VALIDATION_DISPATCHED")
 pr_bridge = File.read(WORKFLOWS.join("omega-private-pr-hosted-bridge.yml"), encoding: "UTF-8")
 fail!("pr_bridge_immutable_dispatch_sha_input_missing") unless pr_bridge.include?("source_sha:") && pr_bridge.include?("inputs.source_sha")
 fail!("pr_bridge_immutable_dispatch_ref_input_missing") unless pr_bridge.include?("source_ref:") && pr_bridge.include?("inputs.source_ref")
