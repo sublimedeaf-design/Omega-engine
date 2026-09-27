@@ -116,7 +116,7 @@ jobs:
           publish_failure() {
             rc=$?
             trap - EXIT
-            adb emu kill >/dev/null 2>&1 || true
+            "$ANDROID_HOME/platform-tools/adb" emu kill >/dev/null 2>&1 || true
             if [ "$rc" -ne 0 ]; then
               gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$FINAL_SHA"                 -f state=failure                 -f context="omega/android-runtime-coldstart"                 -f description="signed APK emulator cold-start verification failed"                 -f target_url="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" >/dev/null || true
             fi
@@ -148,10 +148,17 @@ jobs:
           PY
           )"
 
-          sdkmanager --install "platform-tools" "emulator" "build-tools;36.0.0" "system-images;android-35;default;x86_64" >/dev/null
+          sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          avdmanager="$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager"
+          adb="$ANDROID_HOME/platform-tools/adb"
+          test -x "$sdkmanager" || { echo OMEGA_ANDROID_COLDSTART_SDKMANAGER_MISSING >&2; exit 71; }
+          test -x "$avdmanager" || { echo OMEGA_ANDROID_COLDSTART_AVDMANAGER_MISSING >&2; exit 71; }
+          yes | "$sdkmanager" --licenses >/dev/null || true
+          "$sdkmanager" --install "platform-tools" "emulator" "build-tools;36.0.0" "system-images;android-35;default;x86_64" >/dev/null
+          test -x "$adb" || { echo OMEGA_ANDROID_COLDSTART_ADB_MISSING >&2; exit 71; }
           test -e /dev/kvm || { echo OMEGA_ANDROID_COLDSTART_KVM_MISSING >&2; exit 72; }
           sudo chmod 666 /dev/kvm
-          printf 'no\n' | avdmanager create avd --force --name omega-ci --package "system-images;android-35;default;x86_64" >/dev/null
+          printf 'no\n' | "$avdmanager" create avd --force --name omega-ci --package "system-images;android-35;default;x86_64" >/dev/null
 
           out="$("$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$apk")"
           signer="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' <<<"$out" | head -1 | tr -d ':' | tr 'A-F' 'a-f')"
@@ -159,7 +166,7 @@ jobs:
 
           "$ANDROID_HOME/emulator/emulator" @omega-ci             -no-window -no-audio -no-boot-anim -no-snapshot -wipe-data             -gpu swiftshader_indirect -accel on             >"$RUNNER_TEMP/android-coldstart/emulator.log" 2>&1 &
           echo $! > "$RUNNER_TEMP/android-coldstart/emulator.pid"
-          adb wait-for-device
+          "$adb" wait-for-device
           ready=false
           for _ in $(seq 1 90); do
             if [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ]; then
@@ -170,33 +177,33 @@ jobs:
           done
           [ "$ready" = true ] || { echo OMEGA_ANDROID_COLDSTART_EMULATOR_BOOT_TIMEOUT >&2; exit 74; }
 
-          adb install -r "$apk" > "$RUNNER_TEMP/android-coldstart/install.txt"
-          adb logcat -c
-          adb shell am force-stop "$OMEGA_PACKAGE_ID"
-          adb shell pm clear "$OMEGA_PACKAGE_ID" >/dev/null
-          adb shell am start -W -S -n "$OMEGA_PACKAGE_ID/.MainActivity" | tee "$RUNNER_TEMP/android-coldstart/launch.txt"
+          "$adb" install -r "$apk" > "$RUNNER_TEMP/android-coldstart/install.txt"
+          "$adb" logcat -c
+          "$adb" shell am force-stop "$OMEGA_PACKAGE_ID"
+          "$adb" shell pm clear "$OMEGA_PACKAGE_ID" >/dev/null
+          "$adb" shell am start -W -S -n "$OMEGA_PACKAGE_ID/.MainActivity" | tee "$RUNNER_TEMP/android-coldstart/launch.txt"
           grep -Eq 'Status: ok|Complete' "$RUNNER_TEMP/android-coldstart/launch.txt"
           sleep 8
           pid="$(adb shell pidof "$OMEGA_PACKAGE_ID" | tr -d '\r')"
           [ -n "$pid" ] || { echo OMEGA_ANDROID_COLDSTART_PROCESS_NOT_ALIVE >&2; exit 75; }
-          adb shell dumpsys activity activities > "$RUNNER_TEMP/android-coldstart/activities.txt"
+          "$adb" shell dumpsys activity activities > "$RUNNER_TEMP/android-coldstart/activities.txt"
           grep -F "$OMEGA_PACKAGE_ID/.MainActivity" "$RUNNER_TEMP/android-coldstart/activities.txt" >/dev/null
-          adb exec-out screencap -p > "$RUNNER_TEMP/android-coldstart/coldstart.png" || true
-          adb logcat -d > "$RUNNER_TEMP/android-coldstart/logcat.txt"
+          "$adb" exec-out screencap -p > "$RUNNER_TEMP/android-coldstart/coldstart.png" || true
+          "$adb" logcat -d > "$RUNNER_TEMP/android-coldstart/logcat.txt"
           if grep -E 'FATAL EXCEPTION|ANR in com\.sublimedeafdesign\.omegaengine|Process: com\.sublimedeafdesign\.omegaengine, PID:' "$RUNNER_TEMP/android-coldstart/logcat.txt"; then
             echo OMEGA_ANDROID_COLDSTART_FATAL_RUNTIME_SIGNAL >&2
             exit 76
           fi
 
           # A second fresh-data launch catches one-time initialization defects.
-          adb logcat -c
-          adb shell am force-stop "$OMEGA_PACKAGE_ID"
-          adb shell pm clear "$OMEGA_PACKAGE_ID" >/dev/null
-          adb shell am start -W -S -n "$OMEGA_PACKAGE_ID/.MainActivity" | tee "$RUNNER_TEMP/android-coldstart/relaunch.txt"
+          "$adb" logcat -c
+          "$adb" shell am force-stop "$OMEGA_PACKAGE_ID"
+          "$adb" shell pm clear "$OMEGA_PACKAGE_ID" >/dev/null
+          "$adb" shell am start -W -S -n "$OMEGA_PACKAGE_ID/.MainActivity" | tee "$RUNNER_TEMP/android-coldstart/relaunch.txt"
           sleep 5
           pid2="$(adb shell pidof "$OMEGA_PACKAGE_ID" | tr -d '\r')"
           [ -n "$pid2" ] || { echo OMEGA_ANDROID_COLDSTART_RELAUNCH_PROCESS_NOT_ALIVE >&2; exit 77; }
-          adb logcat -d > "$RUNNER_TEMP/android-coldstart/relaunch-logcat.txt"
+          "$adb" logcat -d > "$RUNNER_TEMP/android-coldstart/relaunch-logcat.txt"
           if grep -E 'FATAL EXCEPTION|ANR in com\.sublimedeafdesign\.omegaengine|Process: com\.sublimedeafdesign\.omegaengine, PID:' "$RUNNER_TEMP/android-coldstart/relaunch-logcat.txt"; then
             echo OMEGA_ANDROID_COLDSTART_RELAUNCH_FATAL_RUNTIME_SIGNAL >&2
             exit 78
@@ -204,7 +211,7 @@ jobs:
 
           gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$FINAL_SHA"             -f state=success             -f context="omega/android-runtime-coldstart"             -f description="signed APK installed and survived two clean emulator cold starts"             -f target_url="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" >/dev/null
           trap - EXIT
-          adb emu kill >/dev/null 2>&1 || true
+          "$adb" emu kill >/dev/null 2>&1 || true
           echo "OMEGA_ANDROID_RUNTIME_COLDSTART_PASS sha=$FINAL_SHA apk_sha256=$actual"
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
