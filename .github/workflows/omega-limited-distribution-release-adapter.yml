@@ -270,6 +270,22 @@ jobs:
             -f target_url="$target" >/dev/null
           echo "OMEGA_LD_ADAPTER_HANDOFF_READY source=$FINAL_SHA tag=${{ steps.release.outputs.tag }}"
 
+      - name: Dispatch isolated Samsung runtime certification
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          FINAL_SHA: ${{ inputs.final_sha }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [ -n "${GH_TOKEN:-}" ] || { echo OMEGA_LD_RUNTIME_DISPATCH_AUTH_MISSING >&2; exit 78; }
+          current="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/main" --jq .sha)"
+          [ "$current" = "$FINAL_SHA" ] || { echo "OMEGA_LD_RUNTIME_DISPATCH_STALE:$FINAL_SHA!=$current" >&2; exit 75; }
+          gh workflow run omega-android-runtime-certify.yml \
+            -R "$PRIVATE_REPOSITORY" \
+            --ref main \
+            -f allow_private_self_hosted=true
+          echo "OMEGA_LD_SAMSUNG_RUNTIME_DISPATCHED source=$FINAL_SHA label=omega-android-runtime-v1"
+
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: OMEGA-Limited-Distribution-Adapter-${{ inputs.final_sha }}
