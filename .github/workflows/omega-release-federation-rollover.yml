@@ -1,10 +1,16 @@
 name: OMEGA Release Federation Rollover
 
 on:
-  workflow_run:
-    workflows: ["OMEGA Private PR Hosted Bridge", "OMEGA Recovery Evidence Release Stager"]
-    types: [completed]
   workflow_dispatch:
+    inputs:
+      source_sha:
+        description: "Immutable current private main SHA"
+        required: true
+        type: string
+      source_ref:
+        description: "Immutable release/* ref pinned to source_sha"
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -17,7 +23,6 @@ concurrency:
 
 jobs:
   rollover:
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
@@ -25,29 +30,28 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Resolve exact staged release candidate
+      - name: Resolve exact controller-selected release generation
         id: candidate
         env:
           GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          INPUT_SOURCE_SHA: ${{ inputs.source_sha }}
+          INPUT_SOURCE_REF: ${{ inputs.source_ref }}
         shell: bash
         run: |
           set -Eeuo pipefail
-          read -r marker candidate source_ref _ < bootstrap/omega/pr-validation-trigger.txt
-          if [ "$marker" != validate-exact-pr ] || [[ ! "$candidate" =~ ^[0-9a-f]{40}$ ]] || [[ ! "$source_ref" =~ ^release/[A-Za-z0-9._/-]+$ ]]; then
-            echo "found=false" >> "$GITHUB_OUTPUT"
-            echo "OMEGA_RELEASE_FEDERATION_NO_RELEASE_TRIGGER"
-            exit 0
-          fi
+          candidate="$INPUT_SOURCE_SHA"
+          source_ref="$INPUT_SOURCE_REF"
+          [[ "$candidate" =~ ^[0-9a-f]{40}$ ]] || { echo OMEGA_RELEASE_FEDERATION_INPUT_SHA_INVALID >&2; exit 64; }
+          [[ "$source_ref" =~ ^release/[A-Za-z0-9._/-]+$ ]] || { echo OMEGA_RELEASE_FEDERATION_INPUT_REF_INVALID >&2; exit 64; }
           case "$source_ref" in *..*|/*|-*) echo "OMEGA_RELEASE_FEDERATION_REF_UNSAFE:$source_ref" >&2; exit 64 ;; esac
+          main="$(gh api "/repos/sublimedeaf-design/Omega-engines/commits/main" --jq .sha)"
+          [ "$main" = "$candidate" ] || { echo "OMEGA_RELEASE_FEDERATION_STALE_GENERATION candidate=$candidate main=$main" >&2; exit 68; }
           tip="$(gh api "/repos/sublimedeaf-design/Omega-engines/commits/$source_ref" --jq .sha)"
-          if [ "$tip" != "$candidate" ]; then
-            echo "found=false" >> "$GITHUB_OUTPUT"
-            echo "OMEGA_RELEASE_FEDERATION_STALE_TRIGGER candidate=$candidate tip=$tip"
-            exit 0
-          fi
+          [ "$tip" = "$candidate" ] || { echo "OMEGA_RELEASE_FEDERATION_REF_MOVED:$tip!=$candidate" >&2; exit 68; }
           echo "found=true" >> "$GITHUB_OUTPUT"
           echo "sha=$candidate" >> "$GITHUB_OUTPUT"
           echo "source_ref=$source_ref" >> "$GITHUB_OUTPUT"
+          echo "OMEGA_RELEASE_FEDERATION_GENERATION_PASS source=$candidate ref=$source_ref"
 
       - name: Freeze one immutable release epoch without mutating peers
         if: steps.candidate.outputs.found == 'true'
