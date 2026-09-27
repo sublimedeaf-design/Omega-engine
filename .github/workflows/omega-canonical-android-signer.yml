@@ -76,10 +76,12 @@ jobs:
             fi
           done
 
-          [ -n "$found" ] || {
-            echo "OMEGA_SIGNER_CURRENT_MAIN_UNSIGNED_HANDOFF_MISSING:$final" >&2
-            exit 75
-          }
+          if [ -z "$found" ]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "final_sha=$final" >> "$GITHUB_OUTPUT"
+            echo "OMEGA_SIGNER_CURRENT_MAIN_UNSIGNED_HANDOFF_MISSING:$final"
+            exit 0
+          fi
           IFS='|' read -r run exact artifact <<<"$found"
           [ "$exact" = "$final" ] || { echo OMEGA_SIGNER_HANDOFF_SOURCE_MISMATCH >&2; exit 65; }
           echo "ready=true" >> "$GITHUB_OUTPUT"
