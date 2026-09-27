@@ -497,8 +497,8 @@ fail!("release_orchestrator_private_token_selection_missing") unless orchestrato
 fail!("release_orchestrator_reconcile_must_use_selected_private_authority") unless orchestrator.include?('GH_TOKEN: ${{ env.OMEGA_PRIVATE_RELEASE_TOKEN }}')
 fail!("release_orchestrator_large_state_must_be_file_backed") unless orchestrator.include?('status_file="$RUNNER_TEMP/omega-release-statuses.json"') && orchestrator.include?('epoch_file="$RUNNER_TEMP/omega-release-epoch.json"') && orchestrator.include?('compare_file="$RUNNER_TEMP/omega-release-compare.json"') && orchestrator.include?('python3 - "$epoch_file" "$compare_file" "$status_file"')
 fail!("release_orchestrator_large_state_env_regression") if orchestrator.include?('STATUS_PAYLOAD="$statuses"') || orchestrator.include?('EPOCH="$epoch" COMPARE_PAYLOAD="$compare"')
-fail!("release_orchestrator_missing_authority_wait_state") unless orchestrator.include?("OMEGA_RELEASE_CONTROLLER_AUTHORITY_WAIT") && orchestrator.include?('context="omega/authority/private-actions"') && orchestrator.include?("scoped GitHub App authority required")
-fail!("release_orchestrator_legacy_must_not_create_private_ref") unless orchestrator.include?('if [ "${OMEGA_RELEASE_AUTH_SOURCE:-}" != github-app ]; then')
+fail!("release_orchestrator_missing_authority_wait_state") unless orchestrator.include?("OMEGA_RELEASE_CONTROLLER_AUTHORITY_WAIT") && orchestrator.include?('context="omega/authority/private-actions"') && orchestrator.include?("private contents-write capability unavailable")
+fail!("release_orchestrator_capability_probe_missing") unless orchestrator.include?('if ! gh api --method POST "/repos/$PRIVATE_REPOSITORY/git/refs"') && orchestrator.include?("OMEGA_RELEASE_CONTROLLER_AUTHORITY_WAIT")
 fail!("release_orchestrator_must_not_mutate_epoch") if orchestrator.include?("/contents/federation/epochs/current.json") && orchestrator.include?("--method PUT")
 
 # Supply-chain provenance must survive the unsigned handoff and be verified before
@@ -525,3 +525,4 @@ fail!("federation_fallback_peer_config_guard_missing") unless federation_fallbac
 fail!("federation_fallback_legacy_mesh_source_pin") if federation_fallback.include?('validated_federation_source_pin')
 fail!("federation_fallback_exact_source_binding_missing") unless federation_fallback.include?('source_pin="$SOURCE_SHA"') && federation_fallback.include?('report.get("source_pin")!=source')
 fail!("federation_fallback_verifier_config_reload_missing") unless federation_fallback.scan('cfg=json.loads').length >= 3
+fail!("federation_fallback_external_epoch_delegation_missing") unless federation_fallback.include?("OMEGA_FEDERATION_EXTERNAL_EPOCH_CERTIFIED") && federation_fallback.include?('omega/federation-v3-release') && federation_fallback.include?("source_binding_mode")
