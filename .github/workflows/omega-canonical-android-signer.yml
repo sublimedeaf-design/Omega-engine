@@ -453,6 +453,13 @@ jobs:
           gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$FINAL_SHA"             -f state=pending             -f context="omega/android-release-signing"             -f description="canonical signer runtime unavailable; automatic retry armed"             -f target_url="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" >/dev/null
           echo "OMEGA_CANONICAL_SIGNER_BLOCKED_AUTORETRY sha=$FINAL_SHA"
 
+      - name: Fail closed when no canonical signer backend is available
+        if: steps.gate.outputs.need_sign == 'true' && steps.rescue_sign.outputs.available != 'true' && steps.hosted_sign.outputs.available != 'true' && steps.wake.outputs.runtime_available != 'true'
+        shell: bash
+        run: |
+          echo "OMEGA_CANONICAL_SIGNER_UNAVAILABLE_FAIL_CLOSED" >&2
+          exit 75
+
       - name: Transfer immutable unsigned payload to canonical signer runtime
         if: steps.gate.outputs.need_sign == 'true' && steps.rescue_sign.outputs.available != 'true' && steps.hosted_sign.outputs.available != 'true' && steps.wake.outputs.runtime_available == 'true'
         env:
