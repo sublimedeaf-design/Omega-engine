@@ -169,7 +169,7 @@ jobs:
           "$adb" wait-for-device
           ready=false
           for _ in $(seq 1 90); do
-            if [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ]; then
+            if [ "$("$adb" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ]; then
               ready=true
               break
             fi
@@ -184,7 +184,7 @@ jobs:
           "$adb" shell am start -W -S -n "$OMEGA_PACKAGE_ID/.MainActivity" | tee "$RUNNER_TEMP/android-coldstart/launch.txt"
           grep -Eq 'Status: ok|Complete' "$RUNNER_TEMP/android-coldstart/launch.txt"
           sleep 8
-          pid="$(adb shell pidof "$OMEGA_PACKAGE_ID" | tr -d '\r')"
+          pid="$("$adb" shell pidof "$OMEGA_PACKAGE_ID" | tr -d '\r')"
           [ -n "$pid" ] || { echo OMEGA_ANDROID_COLDSTART_PROCESS_NOT_ALIVE >&2; exit 75; }
           "$adb" shell dumpsys activity activities > "$RUNNER_TEMP/android-coldstart/activities.txt"
           grep -F "$OMEGA_PACKAGE_ID/.MainActivity" "$RUNNER_TEMP/android-coldstart/activities.txt" >/dev/null
@@ -201,7 +201,7 @@ jobs:
           "$adb" shell pm clear "$OMEGA_PACKAGE_ID" >/dev/null
           "$adb" shell am start -W -S -n "$OMEGA_PACKAGE_ID/.MainActivity" | tee "$RUNNER_TEMP/android-coldstart/relaunch.txt"
           sleep 5
-          pid2="$(adb shell pidof "$OMEGA_PACKAGE_ID" | tr -d '\r')"
+          pid2="$("$adb" shell pidof "$OMEGA_PACKAGE_ID" | tr -d '\r')"
           [ -n "$pid2" ] || { echo OMEGA_ANDROID_COLDSTART_RELAUNCH_PROCESS_NOT_ALIVE >&2; exit 77; }
           "$adb" logcat -d > "$RUNNER_TEMP/android-coldstart/relaunch-logcat.txt"
           if grep -E 'FATAL EXCEPTION|ANR in com\.sublimedeafdesign\.omegaengine|Process: com\.sublimedeafdesign\.omegaengine, PID:' "$RUNNER_TEMP/android-coldstart/relaunch-logcat.txt"; then
