@@ -192,6 +192,7 @@ jobs:
         env:
           GH_TOKEN: ${{ env.OMEGA_PRIVATE_RELEASE_TOKEN }}
           FINAL_SHA: ${{ steps.gate.outputs.sha }}
+          AUTH_SOURCE: ${{ env.OMEGA_RELEASE_AUTH_SOURCE }}
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -200,6 +201,10 @@ jobs:
             echo "OMEGA_FINAL_RELEASE_PRIVATE_MUTATION_NOT_REQUIRED main_already_exact=true"
             exit 0
           fi
+          [ "${AUTH_SOURCE:-}" = github-app ] || {
+            echo "OMEGA_FINAL_RELEASE_SCOPED_MUTATION_AUTHORITY_REQUIRED current=$main final=$FINAL_SHA authority=${AUTH_SOURCE:-none}" >&2
+            exit 77
+          }
           probe="omega-final-capability-probe-${GITHUB_RUN_ID}"
           gh api --method POST "/repos/$PRIVATE_REPOSITORY/git/refs" -f ref="refs/heads/$probe" -f sha="$FINAL_SHA" >/dev/null || {
             echo "OMEGA_FINAL_RELEASE_CAPABILITY_MISSING:private_contents_write" >&2
