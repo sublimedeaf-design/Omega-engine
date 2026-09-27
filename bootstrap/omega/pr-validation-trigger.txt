@@ -1,1 +1,1 @@
-validate-exact-pr 183715ede9e3c16dfd4108a118f8e4ec5cf7b7e4 fix/signer-rescue-explicit-dispatch-no-hidden-toggle pr319-integrated-release-hardening-final-v2
+validate-exact-pr 516d366727ea174f5732faccd8cd17062a0debdb fix/signer-rescue-explicit-dispatch-no-hidden-toggle pr319-one-phone-release-final
