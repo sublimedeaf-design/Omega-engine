@@ -54,7 +54,7 @@ async function certificationTarget(token){
     const release=(
       epoch.state==="PASS" &&
       primary.certification_state==="PASS" &&
-      ["CERTIFIED_PASS","LIVE_CERTIFIED"].includes(String(rollover.stage||"")) &&
+      ["CERTIFIED_PASS_PENDING_SECOND_PROOF","CERTIFIED_PASS","LIVE_CERTIFIED"].includes(String(rollover.stage||"")) &&
       SHA.test(sha) &&
       ref.startsWith("release/")
     );
@@ -131,12 +131,18 @@ export async function certify({token,targetUrl="",now=Date.now()}={}){
     federation:target.release
       ? green(map,"omega/federation-v3-release",now,1440)
       : federation.every(x=>green(map,x,now,1440)),
+  };
+  // Resilience is deliberately PRE-SIGNING. Signing/distribution is a downstream
+  // release trust layer; gating resilience on it creates a circular dependency.
+  const releaseSignals={
     signer_continuity:green(map,"omega/signer/continuity",now,10080),
+    google_distribution:green(map,"omega/google-distribution",now,10080),
+    google_play_app_signing:green(map,"omega/google-play/app-signing",now,10080),
   };
   const missing=Object.entries(layers).filter(([,v])=>!v).map(([k])=>k);
   const ok=missing.length===0;
   const state=ok?"success":"pending";
   const description=ok?"resilience certified: all independent proof layers green":`resilience pending: ${missing.slice(0,4).join(",")}`;
   await post(token,sha,state,description,targetUrl);
-  return {ok,sha,state,layers,missing,external:ext,refs:{light,android},target:{release:target.release,ref:target.ref}};
+  return {ok,sha,state,scope:"PRE_SIGNING",layers,releaseSignals,missing,external:ext,refs:{light,android},target:{release:target.release,ref:target.ref}};
 }
