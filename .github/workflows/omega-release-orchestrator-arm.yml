@@ -3,6 +3,10 @@ name: OMEGA Release Orchestrator Arm
 
 on:
   workflow_dispatch:
+  workflow_run:
+    workflows:
+      - "OMEGA Private PR Hosted Bridge"
+    types: [completed]
   schedule:
     - cron: "3,18,33,48 * * * *"
   push:
