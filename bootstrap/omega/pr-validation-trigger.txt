@@ -1,1 +1,1 @@
-validate-exact-pr 9f959c901e0251d9f9945e2536d4aba90d2629d2 fix/phone-forecast-governance-owner-20260928 exact-ci-repair
+validate-exact-pr 696d34781540af5d46da5febb7854b55318fba28 main postmerge-exact-main
