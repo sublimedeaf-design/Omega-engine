@@ -3,6 +3,6 @@
   "source_sha": "9d6c93d83588297c682093cb5ea491920005da7a",
   "source_ref": "main",
   "requested_by": "omega-control-plane",
-  "purpose": "post-merge-content-addressed-code19-build-and-sign",
-  "attempt": 5
+  "purpose": "post-merge-content-addressed-code19-build",
+  "attempt": 6
 }
