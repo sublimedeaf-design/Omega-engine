@@ -1,1 +1,1 @@
-validate-exact-pr 9663354e459d99682d3cd8d8740c276fe597cf0c hardening/hosted-ephemeral-limited-distribution-release hosted-ephemeral-ld-release-v2
+validate-exact-pr cf8582e2517020bf6d960afde01f23ea986d15db release/hosted-ephemeral-signing-v2 hosted-signing-v2
