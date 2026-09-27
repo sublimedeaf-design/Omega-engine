@@ -69,9 +69,13 @@ jobs:
               stamp=str(row.get("updated_at") or row.get("created_at") or "")
               if ctx and (ctx not in latest or stamp > str(latest[ctx].get("_stamp") or "")):
                   latest[ctx]={**row,"_stamp":stamp}
-          row=latest.get("omega/signer/continuity") or {}
-          if row.get("state")!="success": raise SystemExit(1)
-          raw=str(row.get("updated_at") or row.get("created_at") or "")
+          continuity=latest.get("omega/signer/continuity") or {}
+          signed=latest.get("omega/android-release-signed") or {}
+          if continuity.get("state")!="success" or signed.get("state")!="success":
+              raise SystemExit(1)
+          if str(continuity.get("target_url") or "") != str(signed.get("target_url") or ""):
+              raise SystemExit(1)
+          raw=str(signed.get("updated_at") or signed.get("created_at") or "")
           try: at=datetime.datetime.fromisoformat(raw.replace("Z","+00:00"))
           except ValueError: raise SystemExit(1)
           age=(datetime.datetime.now(datetime.timezone.utc)-at).total_seconds()
