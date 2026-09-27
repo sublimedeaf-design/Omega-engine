@@ -221,6 +221,7 @@ jobs:
           STATE: ${{ steps.classify.outputs.state }}
           FAILURE_CLASS: ${{ steps.classify.outputs.failure_class }}
           INCIDENT_ID: ${{ steps.classify.outputs.incident_id }}
+          PROOF_CONTEXTS: ${{ steps.pin.outputs.proof_contexts }}
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -230,7 +231,7 @@ jobs:
             exit 0
           fi
           github_state="${{ steps.classify.outputs.github_state }}"
-          if [ "$github_state" = pending ] && { [ "$FAILURE_CLASS" = SUCCESS_WITHOUT_PROOF ] || [ "$FAILURE_CLASS" = NOT_EXECUTED ]; }; then
+          if [ "$github_state" = pending ] && { [ "$FAILURE_CLASS" = SUCCESS_WITHOUT_PROOF ] || [ "$FAILURE_CLASS" = NOT_EXECUTED ] || [ "$FAILURE_CLASS" = STALE_PROMOTION_SHA ] || [ "$FAILURE_CLASS" = STALE_HANDOFF ]; }; then
             statuses="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/$SOURCE_SHA/status?per_page=100")"
             if STATUS_PAYLOAD="$statuses" PROOF_CONTEXTS="$PROOF_CONTEXTS" python3 <<'PY'
           import json,os

@@ -445,9 +445,10 @@ fail!("signer_public_dispatch_missing") unless signer_arm.include?("OMEGA_SIGNER
 fail!("signer_private_actions_dependency_present") if signer_arm.include?("android-signing-keepalive.yml") || signer_arm.include?("OMEGA_RELEASE_APP_PRIVATE_KEY") || signer_arm.include?("/repos/$PRIVATE_REPOSITORY/actions/workflows/")
 
 hosted_signer = File.read(WORKFLOWS.join("omega-hosted-signer-readiness.yml"), encoding: "UTF-8")
-fail!("signer_key_availability_blocked_state_missing") unless hosted_signer.include?("OMEGA_HOSTED_SIGNER_KEY_AVAILABILITY_BLOCKED")
+fail!("signer_hosted_escrow_optional_state_missing") unless hosted_signer.include?("OMEGA_HOSTED_SIGNER_ESCROW_OPTIONAL") && hosted_signer.include?("alternate signer backends remain eligible")
 fail!("signer_key_availability_context_missing") unless hosted_signer.include?('"omega/signer/key-availability"')
 fail!("signer_escrow_compat_context_missing") unless hosted_signer.include?('"omega/signer/escrow"')
+fail!("signer_hosted_escrow_optional_pending_missing") unless hosted_signer.include?('publish pending "omega/signer/key-availability"') && hosted_signer.include?('publish pending "omega/signer/escrow"')
 fail!("signer_key_availability_ready_status_missing") unless hosted_signer.include?('publish success "omega/signer/key-availability"') && hosted_signer.include?("OMEGA_HOSTED_SIGNER_ESCROW_READY")
 
 identity_anchor = File.read(WORKFLOWS.join("omega-signer-identity-anchor.yml"), encoding: "UTF-8")
