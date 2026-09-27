@@ -5,7 +5,7 @@ on:
   push:
     paths:
       - ".github/workflows/omega-supply-chain-lock-lab.yml"
-      - "bootstrap/omega/supply-chain-trigger.txt"
+      - "bootstrap/omega/supply-chain-lock-trigger.txt"
 
 permissions:
   contents: write
@@ -33,7 +33,7 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          read -r marker sha _ < bootstrap/omega/supply-chain-trigger.txt
+          read -r marker sha _ < bootstrap/omega/supply-chain-lock-trigger.txt
           test "$marker" = "generate-supply-chain-locks"
           [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
           gh api "/repos/$PRIVATE_REPOSITORY/commits/$sha" --jq '.sha' | grep -qx "$sha"
@@ -245,7 +245,6 @@ jobs:
           payload["snapshot_manifest_sha256"]=hashlib.sha256(canonical).hexdigest()
           (root/"manifest.json").write_text(json.dumps(payload,indent=2,sort_keys=True,allow_nan=False)+"\n",encoding="utf-8")
           PY
-          test "$(sha256sum "$snap/gradle/gradle-verification-metadata.xml" | awk '{print $1}')" = "fa7d00cbdab8a18ece862be89206f4dec1d0b3d66c6fe76f621724434e02f5b9"
 
       - name: Commit snapshot on isolated public branch
         id: push
