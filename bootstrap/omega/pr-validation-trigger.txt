@@ -1,1 +1,1 @@
-validate-exact-pr 20a0cdeab230a6af63d2661eced344cf2363d6cc main final-limited-distribution-v1
+validate-exact-pr f034690850798bce84ac087def97a91e78c548d9 hardening/evidence-autosync-live-proof evidence-autosync-live-proof-v1
