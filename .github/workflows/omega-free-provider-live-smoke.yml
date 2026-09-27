@@ -121,10 +121,86 @@ jobs:
           )
           print(json.dumps(payload,indent=2,sort_keys=True))
 
-          if all(row["health"]=="SYSTEMIC_FAILURE" for row in providers.values()):
+          # Diagnose already-known provider alternatives without changing the source candidate.
+          # This mirrors the existing ESPN fallback branch and official per-league endpoint shape.
+          import urllib.request
+          from urllib.parse import urlencode
+
+          headers={"User-Agent":"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/140 Safari/537.36","Accept":"application/json,text/plain,*/*","Referer":"https://www.espn.com/"}
+          dates=[]
+          d=now.date()
+          while d <= (now.replace(hour=0,minute=0,second=0,microsecond=0) + __import__("datetime").timedelta(hours=horizon_hours)).date():
+              dates.append(d.strftime("%Y%m%d"))
+              d += __import__("datetime").timedelta(days=1)
+
+          endpoint_probes={}
+          def get_json(url):
+              req=urllib.request.Request(url,headers=headers)
+              with urllib.request.urlopen(req,timeout=15) as r:
+                  raw=r.read(4_000_001)
+                  return json.loads(raw),getattr(r,"status",200),r.geturl()
+
+          # Existing branch agent/backend_prediction/espn-keyless-fallback used site.web.api.
+          # Public ESPN endpoint catalogs document per-league scoreboards.
+          espn_candidates=[
+              ("site_all","https://site.api.espn.com/apis/site/v2/sports/soccer/all/scoreboard"),
+              ("siteweb_all","https://site.web.api.espn.com/apis/site/v2/sports/soccer/all/scoreboard"),
+          ]
+          for slug in ("eng.1","ger.1","esp.1","ita.1","fra.1","ned.1","por.1","bra.1","arg.1"):
+              espn_candidates.append((f"site_{slug}",f"https://site.api.espn.com/apis/site/v2/sports/soccer/{slug}/scoreboard"))
+
+          raw_fixture_count=0
+          for key,base in espn_candidates:
+              ok=0; events=0; errs=[]
+              for ds in dates:
+                  try:
+                      data,status,final=get_json(base+"?"+urlencode({"dates":ds,"limit":1000}))
+                      ev=data.get("events") if isinstance(data,dict) else None
+                      n=len(ev) if isinstance(ev,list) else 0
+                      ok+=1; events+=n
+                  except Exception as exc:
+                      errs.append(type(exc).__name__+":"+str(exc)[:120])
+              endpoint_probes[key]={"success_days":ok,"events":events,"errors":errs[:2]}
+              raw_fixture_count += events
+
+          # OpenLiga raw season diagnosis: distinguish a healthy empty call from a wrong shortcut/season.
+          openliga_raw={}
+          for shortcut in ("bl1","bl2","la1","pl"):
+              for season in (now.year-1,now.year,now.year+1):
+                  key=f"{shortcut}/{season}"
+                  try:
+                      data,status,final=get_json(f"https://api.openligadb.de/getmatchdata/{shortcut}/{season}")
+                      rows=data if isinstance(data,list) else []
+                      upcoming=0
+                      for row in rows:
+                          if not isinstance(row,dict): continue
+                          raw=row.get("matchDateTimeUTC") or row.get("matchDateTime")
+                          try:
+                              from omega.temporal import parse_utc
+                              ko=parse_utc(str(raw or ""),field="probe")
+                              if now <= ko <= now+__import__("datetime").timedelta(hours=horizon_hours):
+                                  upcoming += 1
+                          except Exception:
+                              pass
+                      openliga_raw[key]={"rows":len(rows),"upcoming_72h":upcoming}
+                      raw_fixture_count += upcoming
+                  except Exception as exc:
+                      openliga_raw[key]={"error":type(exc).__name__+":"+str(exc)[:120]}
+
+          payload["endpoint_probes"]=endpoint_probes
+          payload["openligadb_raw"]=openliga_raw
+          payload["raw_candidate_fixture_count"]=raw_fixture_count
+          Path("../free-provider-live-smoke.json").write_text(
+              json.dumps(payload,indent=2,sort_keys=True)+"\n",encoding="utf-8"
+          )
+          print(json.dumps({"endpoint_probes":endpoint_probes,"openligadb_raw":openliga_raw,"raw_candidate_fixture_count":raw_fixture_count},indent=2,sort_keys=True))
+
+          if all(row["health"]=="SYSTEMIC_FAILURE" for row in providers.values()) and raw_fixture_count==0:
               raise SystemExit("OMEGA_FREE_PROVIDER_ALL_SYSTEMIC_FAILURE")
-          if not all_rows:
+          if not all_rows and raw_fixture_count==0:
               raise SystemExit("OMEGA_FREE_PROVIDER_EMPTY_72H_HORIZON")
+          if not all_rows and raw_fixture_count>0:
+              raise SystemExit("OMEGA_FREE_PROVIDER_IMPLEMENTATION_GAP_RAW_ROUTE_HAS_FIXTURES")
           PY
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
