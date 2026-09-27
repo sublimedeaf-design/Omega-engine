@@ -1,1 +1,1 @@
-validate-exact-pr 9d6c93d83588297c682093cb5ea491920005da7a release/code19-main-9d6c93d8 post-merge-code19-frozen-v1
+validate-exact-pr 6c7dcd5ceac1571f9de80d9b8e74c8b4d8ec8a83 hardening/status-driven-play-signer-20260927 status-driven-play-signer-v1
