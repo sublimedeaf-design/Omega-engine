@@ -1,1 +1,1 @@
-validate-exact-pr 75e988bb398db0391e2ca8910c585a24af14da15 main limited-distribution-main-final
+validate-exact-pr 75e988bb398db0391e2ca8910c585a24af14da15 release/auto-75e988bb398d artifact-first-release
