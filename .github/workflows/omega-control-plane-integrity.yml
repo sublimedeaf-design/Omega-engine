@@ -9,6 +9,7 @@ on:
       - "scripts/omega_gate_classifier.py"
       - "scripts/rollover_release_federation.py"
       - "external_validator/**"
+      - "control-plane/**"
   push:
     paths:
       - ".github/workflows/**"
@@ -18,6 +19,7 @@ on:
       - "scripts/verify_federation_epoch.py"
       - "federation/epochs/**"
       - "external_validator/**"
+      - "control-plane/**"
 
 permissions:
   contents: read
@@ -41,6 +43,9 @@ jobs:
           ruby scripts/verify_control_plane.rb
           python3 scripts/omega_gate_classifier.py --self-test
           python3 -m py_compile scripts/rollover_release_federation.py external_validator/app.py
+          node --check control-plane/certify.mjs
+          node --check control-plane/certify-github.mjs
+          node --check control-plane/reconcile.mjs
 
       - name: Publish exact-SHA control-plane integrity
         if: ${{ always() }}
