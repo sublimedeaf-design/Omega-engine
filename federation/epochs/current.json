@@ -2,15 +2,13 @@
   "schema_version": 1,
   "federation_version": 3,
   "authority_repository": "sublimedeaf-design/Omega-engine",
-  "state": "NOT_EXECUTED",
-  "blockers": [
-    "external read-only exact-SHA peer proof pending"
-  ],
+  "state": "PASS",
+  "blockers": [],
   "primary": {
     "repository": "sublimedeaf-design/Omega-engines",
     "source_sha": "e00ee9b0e8b520ce3f07a66dd279f6e0cf416b01",
     "pull_request": null,
-    "certification_state": "NOT_EXECUTED",
+    "certification_state": "PASS",
     "source_ref": "release/auto-e00ee9b0e8b5"
   },
   "peers": [
@@ -18,33 +16,33 @@
       "repository": "sublimedeaf-design/Omega-recovery",
       "sha": "9fc63d76bf0ac1c7ce6b7d137fee5bdd8f8f2d09",
       "role": "control_recovery",
-      "state": "NOT_EXECUTED",
-      "contract_state": "NOT_EXECUTED",
-      "reason": "external read-only exact-SHA federation proof pending; peer repository is not mutated for release rollover"
+      "state": "PASS",
+      "contract_state": "PASS",
+      "reason": "external GitHub-hosted exact-SHA federation v3 peer contract validation PASS in Omega-engine run 36340909656"
     },
     {
       "repository": "sublimedeaf-design/Omega-agents",
       "sha": "36f0da9b32c2314c3c60341dfd01a80fab2e9ec6",
       "role": "agent_execution",
-      "state": "NOT_EXECUTED",
-      "contract_state": "NOT_EXECUTED",
-      "reason": "external read-only exact-SHA federation proof pending; peer repository is not mutated for release rollover"
+      "state": "PASS",
+      "contract_state": "PASS",
+      "reason": "external GitHub-hosted exact-SHA federation v3 peer contract validation PASS in Omega-engine run 36340909656"
     },
     {
       "repository": "sublimedeaf-design/Omega-validation",
       "sha": "3875d71e9f6a260639f45f61dc0938d55be867a1",
       "role": "independent_validation",
-      "state": "NOT_EXECUTED",
-      "contract_state": "NOT_EXECUTED",
-      "reason": "external read-only exact-SHA federation proof pending; peer repository is not mutated for release rollover"
+      "state": "PASS",
+      "contract_state": "PASS",
+      "reason": "external GitHub-hosted exact-SHA federation v3 peer contract validation PASS in Omega-engine run 36340909656"
     },
     {
       "repository": "sublimedeaf-design/Omega-release",
       "sha": "bfee3d2ba922c05b4d5974105059355fd943d4fa",
       "role": "release_promotion",
-      "state": "NOT_EXECUTED",
-      "contract_state": "NOT_EXECUTED",
-      "reason": "external read-only exact-SHA federation proof pending; peer repository is not mutated for release rollover"
+      "state": "PASS",
+      "contract_state": "PASS",
+      "reason": "external GitHub-hosted exact-SHA federation v3 peer contract validation PASS in Omega-engine run 36340909656"
     }
   ],
   "hf": {
@@ -76,9 +74,10 @@
   },
   "release_rollover": {
     "source_ref": "release/auto-e00ee9b0e8b5",
-    "stage": "IMMUTABLE_EPOCH_STAGED_PENDING_READ_ONLY_PEER_PROOF",
+    "stage": "CERTIFIED_PASS_PENDING_SECOND_PROOF",
     "release_epoch_id": "579095276665f9ee3b106c0fa57c35e7978d2446623d6a477ea2aabb5610f459",
-    "immutable_path": "federation/epochs/releases/e00ee9b0e8b520ce3f07a66dd279f6e0cf416b01-579095276665f9ee.json"
+    "immutable_path": "federation/epochs/releases/e00ee9b0e8b520ce3f07a66dd279f6e0cf416b01-579095276665f9ee.json",
+    "first_peer_bridge_run_id": "36340909656"
   },
   "release_epoch": {
     "contract_version": 2,
