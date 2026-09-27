@@ -22,8 +22,8 @@ MARKERS = (
     ("EVIDENCE_IDENTITY_MISMATCH", "EXECUTION_IDENTITY", "FAIL", "evidence", "evidence-root"),
     ("SOURCE_MISMATCH", "EXECUTION_IDENTITY", "FAIL", "identity", "recovery"),
     ("EXECUTION_ID_MISMATCH", "EXECUTION_IDENTITY", "FAIL", "identity", "recovery"),
-    ("STALE_TRIGGER", "STALE_PROMOTION_SHA", "BLOCKED", "promotion-sha", "hosted-ci"),
-    ("TRIGGER_NOT_CURRENT_BASE", "STALE_PROMOTION_SHA", "BLOCKED", "promotion-sha", "hosted-ci"),
+    ("STALE_TRIGGER", "STALE_PROMOTION_SHA", "NOT_EXECUTED", "promotion-sha", "hosted-ci"),
+    ("TRIGGER_NOT_CURRENT_BASE", "STALE_PROMOTION_SHA", "NOT_EXECUTED", "promotion-sha", "hosted-ci"),
     ("ARTIFACT_HASH_MISMATCH", "ARTIFACT_INTEGRITY", "FAIL", "artifact", "recovery"),
     ("digest-mismatch", "ARTIFACT_INTEGRITY", "FAIL", "artifact", "recovery"),
     ("LEDGER_INTEGRITY_FAILURE", "LEDGER_INTEGRITY", "FAIL", "ledger", "recovery"),
@@ -189,7 +189,21 @@ def classify(payload: dict[str, Any]) -> dict[str, Any]:
         }
         return _decorate(payload, result)
 
-    if conclusion in {"failure", "cancelled"} and _jobs_all_prestep(jobs):
+    # Cancellation is absence of a completed proof, not evidence that the
+    # workload or current generation is bad. A newer reconciler/run may have
+    # superseded this attempt, so keep the gate pending and let monotonic proof
+    # preservation or the next exact attempt decide the state.
+    if status == "completed" and conclusion == "cancelled":
+        result = {
+            "gate": gate,
+            "state": "NOT_EXECUTED",
+            "failure_class": "NOT_EXECUTED",
+            "repair_scope": "orchestration",
+            "reprove_from": gate,
+        }
+        return _decorate(payload, result)
+
+    if conclusion == "failure" and _jobs_all_prestep(jobs):
         result = {
             "gate": gate,
             "state": "BLOCKED",
@@ -234,6 +248,8 @@ def _self_test() -> None:
     cases = [
         ({"status": "completed", "conclusion": "failure", "jobs": [{"steps": []}], "gate": "ci"}, "INFRA_PRESTART"),
         ({"status": "completed", "conclusion": "skipped", "jobs": [{"steps": []}], "gate": "evidence-root"}, "NOT_EXECUTED"),
+        ({"status": "completed", "conclusion": "cancelled", "jobs": [], "gate": "recovery"}, "NOT_EXECUTED"),
+        ({"status": "completed", "conclusion": "failure", "jobs": [{"steps": [{"name":"pin"}]}], "log": "OMEGA_RECOVERY_TRIGGER_NOT_CURRENT_BASE:status=ahead"}, "STALE_PROMOTION_SHA"),
         ({"status": "completed", "conclusion": "failure", "jobs": [{"steps": [{"name": "x"}]}], "log": "OMEGA_RELEASE_STAGE_EVIDENCE_IDENTITY_MISMATCH:latest-24h.json"}, "EXECUTION_IDENTITY"),
         ({"status": "completed", "conclusion": "success", "proof_present": False}, "SUCCESS_WITHOUT_PROOF"),
         ({"status": "completed", "conclusion": "success", "proof_present": True}, "NONE"),
@@ -305,6 +321,8 @@ def _self_test() -> None:
         raise SystemExit("SELF_TEST_FAIL not_executed_must_be_pending")
     if github_state_for("BLOCKED") != "error":
         raise SystemExit("SELF_TEST_FAIL blocked_must_be_error")
+    if github_state_for("NOT_EXECUTED") != "pending":
+        raise SystemExit("SELF_TEST_FAIL cancelled_or_stale_must_not_be_failure")
     if classify({"status":"completed","conclusion":"skipped","jobs":[{"steps":[]}],"gate":"evidence-root"})["github_state"] != "pending":
         raise SystemExit("SELF_TEST_FAIL skipped_not_executed_must_be_pending")
     print("OMEGA_GATE_CLASSIFIER_SELF_TEST_PASS")
