@@ -1,0 +1,214 @@
+name: OMEGA Limited Distribution Public Live Certifier
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: "Exact private source SHA; empty resolves current private main"
+        required: false
+        default: ""
+        type: string
+  schedule:
+    - cron: "7,22,37,52 * * * *"
+
+permissions:
+  contents: read
+
+cache-mode: none
+
+concurrency:
+  group: omega-limited-distribution-public-live-certifier
+  cancel-in-progress: true
+
+env:
+  PRIVATE_REPOSITORY: sublimedeaf-design/Omega-engines
+  EXPECTED_PACKAGE: com.sublimedeafdesign.omegaengine
+  EXPECTED_FINGERPRINT: 0738b245ec8a557edc0600a6961d7bb2586cc22f886ed5273560ce6ab2db447f
+
+jobs:
+  certify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Resolve exact current private generation and mandatory gates
+        id: gate
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          INPUT_SOURCE_SHA: ${{ inputs.source_sha || '' }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          source="$INPUT_SOURCE_SHA"
+          current="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/main" --jq .sha)"
+          [[ "$current" =~ ^[0-9a-f]{40}$ ]] || { echo OMEGA_LD_PUBLIC_MAIN_INVALID >&2; exit 64; }
+          [ -n "$source" ] || source="$current"
+          [[ "$source" =~ ^[0-9a-f]{40}$ ]] || { echo OMEGA_LD_PUBLIC_SOURCE_INVALID >&2; exit 64; }
+          if [ "$source" != "$current" ]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "source_sha=$source" >> "$GITHUB_OUTPUT"
+            echo "OMEGA_LD_PUBLIC_STALE_SOURCE_NOOP source=$source current=$current"
+            exit 0
+          fi
+
+          statuses="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/$source/status?per_page=100")"
+          STATUS_PAYLOAD="$statuses" python3 - <<'PY' > "$RUNNER_TEMP/gates.json"
+          import json,os
+          p=json.loads(os.environ["STATUS_PAYLOAD"]); latest={}
+          for row in p.get("statuses",[]):
+              ctx=str(row.get("context") or "")
+              stamp=str(row.get("updated_at") or row.get("created_at") or "")
+              if ctx and (ctx not in latest or stamp>str(latest[ctx].get("_stamp") or "")):
+                  latest[ctx]={**row,"_stamp":stamp}
+          required=(
+              "omega/exact-final-validation",
+              "omega/federation-v3-release",
+              "omega/hosted-recovery",
+              "omega/recovery-attestation",
+              "omega/resilience-certified",
+              "omega/limited-distribution/apk-signed",
+              "omega/limited-distribution/signer-continuity",
+              "omega/limited-distribution/emulator-coldstart",
+              "omega/limited-distribution/device-install",
+              "omega/limited-distribution/device-coldstart-control",
+              "omega/limited-distribution/android-installed-runtime",
+              "omega/limited-distribution/evidence-autosync-scheduled",
+              "omega/limited-distribution/evidence-autosync-live",
+          )
+          rows={}; missing=[]
+          for ctx in required:
+              row=latest.get(ctx) or {}
+              state=str(row.get("state") or "")
+              rows[ctx]={
+                  "state":state,
+                  "target_url":row.get("target_url"),
+                  "updated_at":row.get("updated_at") or row.get("created_at"),
+              }
+              if state!="success":
+                  missing.append(ctx)
+          print(json.dumps({"required":rows,"missing":missing,"all_green":not missing},sort_keys=True))
+          PY
+          ready="$(python3 -c 'import json; print("true" if json.load(open("'"$RUNNER_TEMP/gates.json"'"))["all_green"] else "false")')"
+          echo "ready=$ready" >> "$GITHUB_OUTPUT"
+          echo "source_sha=$source" >> "$GITHUB_OUTPUT"
+          if [ "$ready" != true ]; then
+            missing="$(python3 -c 'import json; print(",".join(json.load(open("'"$RUNNER_TEMP/gates.json"'"))["missing"][:6]))')"
+            gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$source"               -f state=pending               -f context="omega/limited-distribution/live-certified"               -f description="public live certifier waiting: ${missing:0:100}"               -f target_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
+            echo "OMEGA_LD_PUBLIC_WAITING source=$source missing=$missing"
+          fi
+
+      - name: Resolve unique control-repo Limited Distribution release
+        if: steps.gate.outputs.ready == 'true'
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ steps.gate.outputs.source_sha }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          releases="$(gh api "/repos/$GITHUB_REPOSITORY/releases?per_page=100")"
+          RELEASES="$releases" SOURCE_SHA="$SOURCE_SHA" python3 - <<'PY' > "$RUNNER_TEMP/release-row"
+          import json,os,re
+          source=os.environ["SOURCE_SHA"]
+          rows=[]
+          for r in json.loads(os.environ["RELEASES"]):
+              tag=str(r.get("tag_name") or "")
+              if (
+                  r.get("draft") is False
+                  and r.get("prerelease") is True
+                  and re.fullmatch(r"omega-ld-v.+-code\d+-"+re.escape(source[:12]),tag)
+              ):
+                  rows.append((str(r.get("id")),tag))
+          if len(rows)!=1:
+              raise SystemExit(f"OMEGA_LD_PUBLIC_RELEASE_COUNT:{len(rows)}")
+          print("|".join(rows[0]))
+          PY
+          IFS='|' read -r release_id tag < "$RUNNER_TEMP/release-row"
+          echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Download and verify immutable Limited Distribution evidence
+        if: steps.gate.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ steps.gate.outputs.source_sha }}
+          TAG: ${{ steps.release.outputs.tag }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p live-cert/release
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" -D live-cert/release
+          cd live-cert/release
+          for name in OMEGA-Engine.apk OMEGA-Engine.apk.sha256 OMEGA-Engine.provenance.json OMEGA-Engine.sbom.spdx.json OMEGA-Engine.supply-chain.json release-identity.json; do
+            test -s "$name" || { echo "OMEGA_LD_PUBLIC_ASSET_MISSING:$name" >&2; exit 65; }
+          done
+          actual="$(sha256sum OMEGA-Engine.apk | awk '{print $1}')"
+          recorded="$(awk '{print $1}' OMEGA-Engine.apk.sha256 | tr 'A-F' 'a-f')"
+          [ "$actual" = "$recorded" ] || { echo OMEGA_LD_PUBLIC_APK_DIGEST_MISMATCH >&2; exit 66; }
+          SOURCE_SHA="$SOURCE_SHA" APK_SHA="$actual" python3 - <<'PY'
+          import hashlib,json,os,pathlib,re
+          def load(n): return json.loads(pathlib.Path(n).read_text(encoding="utf-8"))
+          def sha(n): return hashlib.sha256(pathlib.Path(n).read_bytes()).hexdigest()
+          p=load("OMEGA-Engine.provenance.json"); ident=load("release-identity.json")
+          rid=str(ident.get("release_id") or "")
+          checks={
+              "release_id":bool(re.fullmatch(r"[0-9a-f]{64}",rid)) and p.get("release_id")==rid,
+              "class":p.get("classification")=="OMEGA_LIMITED_DISTRIBUTION_SIGNED_CANDIDATE",
+              "source":p.get("source_sha")==os.environ["SOURCE_SHA"],
+              "apk":p.get("apk_sha256")==os.environ["APK_SHA"],
+              "package":p.get("package_id")==os.environ["EXPECTED_PACKAGE"],
+              "signer":str(p.get("signer_certificate_sha256") or "").lower()==os.environ["EXPECTED_FINGERPRINT"],
+              "runtime_required":p.get("requires_runtime_certification") is True,
+              "not_preclaimed":p.get("live_certified") is False,
+              "sbom":p.get("sbom_sha256")==sha("OMEGA-Engine.sbom.spdx.json"),
+              "supply_chain":p.get("supply_chain_report_sha256")==sha("OMEGA-Engine.supply-chain.json"),
+              "identity":p.get("release_identity_sha256")==sha("release-identity.json"),
+          }
+          bad=[k for k,v in checks.items() if not v]
+          if bad: raise SystemExit("OMEGA_LD_PUBLIC_PROVENANCE_MISMATCH:"+",".join(bad))
+          print("OMEGA_LD_PUBLIC_RELEASE_EVIDENCE_PASS release_id="+rid)
+          PY
+
+      - name: Emit ANDROID_LIMITED_CERTIFIED on the exact private source
+        if: steps.gate.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          SOURCE_SHA: ${{ steps.gate.outputs.source_sha }}
+          TAG: ${{ steps.release.outputs.tag }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cp "$RUNNER_TEMP/gates.json" live-cert/gates.json
+          SOURCE_SHA="$SOURCE_SHA" TAG="$TAG" python3 - <<'PY' > live-cert/android-limited-certified.json
+          import datetime,hashlib,json,os,pathlib
+          base=pathlib.Path("live-cert/release")
+          p=json.loads((base/"OMEGA-Engine.provenance.json").read_text(encoding="utf-8"))
+          gates=json.loads(pathlib.Path("live-cert/gates.json").read_text(encoding="utf-8"))
+          def sha(path): return hashlib.sha256(path.read_bytes()).hexdigest()
+          doc={
+              "schema_version":1,
+              "state":"ANDROID_LIMITED_CERTIFIED",
+              "distribution":"android_developer_console_limited_distribution",
+              "source_sha":os.environ["SOURCE_SHA"],
+              "release_tag":os.environ["TAG"],
+              "release_id":p["release_id"],
+              "package_id":p["package_id"],
+              "apk_sha256":sha(base/"OMEGA-Engine.apk"),
+              "signer_certificate_sha256":p["signer_certificate_sha256"],
+              "all_mandatory_gates_green":gates["all_green"],
+              "mandatory_gate_states":gates["required"],
+              "certified_at":datetime.datetime.now(datetime.timezone.utc).isoformat(),
+          }
+          print(json.dumps(doc,indent=2,sort_keys=True))
+          PY
+          for ctx in omega/limited-distribution/post-live-smoke omega/limited-distribution/live-certified; do
+            gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$SOURCE_SHA"               -f state=success -f context="$ctx"               -f description="public verifier ANDROID_LIMITED_CERTIFIED exact release"               -f target_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
+          done
+          echo "OMEGA_LD_PUBLIC_ANDROID_LIMITED_CERTIFIED source=$SOURCE_SHA tag=$TAG"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: OMEGA-LD-Public-Live-Certification-${{ steps.gate.outputs.source_sha || github.sha }}
+          retention-days: 30
+          if-no-files-found: warn
+          path: live-cert
