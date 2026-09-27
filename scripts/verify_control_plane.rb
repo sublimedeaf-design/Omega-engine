@@ -167,7 +167,7 @@ fail!("recovery_must_not_continue_on_error") if recovery.include?("continue-on-e
 fail!("recovery_active_proof_must_not_cancel") unless recovery.include?("cancel-in-progress: false")
 fail!("recovery_single_writer_lane_missing") unless recovery.include?("group: omega-hosted-recovery-v4") && recovery.include?("queue: single")
 fail!("recovery_split_writer_lane_forbidden") if recovery.include?("omega-hosted-recovery-v3-")
-fail!("recovery_watchdog_must_not_supersede") unless recovery.include?("Scheduled watchdogs and routine-main never cancel active recovery")
+fail!("recovery_active_proof_preservation_missing") unless recovery.include?("no schedule or push can cancel evidence already in flight")
 fail!("recovery_helper_must_not_override_model_url") if recovery.include?("OMEGA_LOCAL_BRAIN_MODEL_URL:")
 fail!("recovery_helper_must_not_override_qa_model_url") if recovery.include?("OMEGA_LOCAL_QA_BRAIN_MODEL_URL:")
 fail!("recovery_helper_must_not_override_model_sha") if recovery.include?("OMEGA_LOCAL_BRAIN_MODEL_SHA256:")
