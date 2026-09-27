@@ -4,6 +4,9 @@ on:
   workflow_dispatch:
   schedule:
     - cron: "*/5 * * * *"
+  push:
+    paths:
+      - ".github/workflows/omega-google-one-click-release.yml"
 
 permissions:
   contents: write
@@ -184,8 +187,8 @@ jobs:
           missing=()
           [ -n "$WIF_PROVIDER" ] || missing+=(GOOGLE_WIF_PROVIDER)
           [ -n "$PLAY_SERVICE_ACCOUNT" ] || missing+=(GOOGLE_PLAY_SERVICE_ACCOUNT)
-          [[ "$(printf '%s' "$UPLOAD_CERT_SHA256" | tr -d ':[:space:]' | tr 'A-F' 'a-f')" =~ ^[0-9a-f]{64}$ ]] || missing+=(OMEGA_GOOGLE_UPLOAD_CERT_SHA256)
-          [[ "$(printf '%s' "$PLAY_APP_SIGNING_CERT_SHA256" | tr -d ':[:space:]' | tr 'A-F' 'a-f')" =~ ^[0-9a-f]{64}$ ]] || missing+=(GOOGLE_PLAY_APP_SIGNING_CERT_SHA256)
+          [[ "$(printf '%s' "$UPLOAD_CERT_SHA256" | tr -d '[:space:]:' | tr 'A-F' 'a-f')" =~ ^[0-9a-f]{64}$ ]] || missing+=(OMEGA_GOOGLE_UPLOAD_CERT_SHA256)
+          [[ "$(printf '%s' "$PLAY_APP_SIGNING_CERT_SHA256" | tr -d '[:space:]:' | tr 'A-F' 'a-f')" =~ ^[0-9a-f]{64}$ ]] || missing+=(GOOGLE_PLAY_APP_SIGNING_CERT_SHA256)
           [ -n "$UPLOAD_KEYSTORE_B64" ] || missing+=(OMEGA_GOOGLE_UPLOAD_KEYSTORE_B64)
           [ -n "$UPLOAD_KEY_PASSWORD" ] || missing+=(OMEGA_GOOGLE_UPLOAD_KEY_PASSWORD)
           if [ "${#missing[@]}" -gt 0 ]; then
@@ -292,7 +295,7 @@ jobs:
           key="$RUNNER_TEMP/omega-google-upload.jks"
           printf '%s' "$UPLOAD_KEYSTORE_B64" | base64 -d > "$key"
           chmod 600 "$key"
-          expected="$(printf '%s' "$UPLOAD_CERT_SHA256" | tr -d ':[:space:]' | tr 'A-F' 'a-f')"
+          expected="$(printf '%s' "$UPLOAD_CERT_SHA256" | tr -d '[:space:]:' | tr 'A-F' 'a-f')"
           actual="$(keytool -list -v -keystore "$key" -storepass "$UPLOAD_KEY_PASSWORD" -alias "$UPLOAD_KEY_ALIAS" 2>/dev/null | sed -n 's/.*SHA256: //p' | head -1 | tr -d ':' | tr 'A-F' 'a-f')"
           [ "$actual" = "$expected" ] || { echo OMEGA_GOOGLE_UPLOAD_KEY_FINGERPRINT_MISMATCH >&2; exit 67; }
 
@@ -414,7 +417,7 @@ jobs:
             -X POST "$api/edits/$edit_id:commit?changesInReviewBehavior=ERROR_IF_IN_REVIEW" \
             > dist/google-play/commit.json
 
-          expected="$(printf '%s' "$EXPECTED_APP_SIGNING_CERT" | tr -d ':[:space:]' | tr 'A-F' 'a-f')"
+          expected="$(printf '%s' "$EXPECTED_APP_SIGNING_CERT" | tr -d '[:space:]:' | tr 'A-F' 'a-f')"
           for attempt in 1 2 3 4 5 6; do
             if curl -fsS -H "Authorization: Bearer $ACCESS_TOKEN" "$api/generatedApks/$VERSION_CODE" \
               > dist/google-play/generated-apks.json; then
