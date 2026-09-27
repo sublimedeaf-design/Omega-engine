@@ -1,1 +1,1 @@
-validate-exact-pr e00ee9b0e8b520ce3f07a66dd279f6e0cf416b01 main current-main-release-reconcile
+validate-exact-pr e00ee9b0e8b520ce3f07a66dd279f6e0cf416b01 release/auto-e00ee9b0e8b5 current-main-release-reconcile
