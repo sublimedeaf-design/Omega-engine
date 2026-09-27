@@ -13,7 +13,7 @@ on:
         type: string
 
 permissions:
-  contents: read
+  contents: write
 
 cache-mode: none
 
@@ -41,6 +41,7 @@ jobs:
         id: pin
         env:
           GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          CONTROL_GH_TOKEN: ${{ github.token }}
           FINAL_SHA: ${{ inputs.final_sha }}
           POST_LIVE_RUN_ID: ${{ inputs.post_live_run_id }}
         shell: bash
@@ -90,36 +91,32 @@ jobs:
           exact_url=str(exact.get("target_url") or "")
           m2=re.search(r"/actions/runs/([0-9]+)$",exact_url)
           if not m2: raise SystemExit("OMEGA_LD_ADAPTER_EXACT_FINAL_RUN_BINDING_MISSING")
-          print(json.dumps({"validator_run_id":m2.group(1),"validator_target_url":exact_url}))
+          live_url=str((latest["omega/release-live"]).get("target_url") or "")
+          m3=re.fullmatch(r"https://github\.com/sublimedeaf-design/Omega-engine/releases/tag/([A-Za-z0-9._-]+)",live_url)
+          if not m3: raise SystemExit("OMEGA_LD_ADAPTER_GENERIC_RELEASE_TARGET_INVALID")
+          print(json.dumps({
+              "validator_run_id":m2.group(1),
+              "validator_target_url":exact_url,
+              "generic_tag":m3.group(1),
+              "generic_release_url":live_url,
+          }))
           PY
           echo "validator_run_id=$(jq -r .validator_run_id "$RUNNER_TEMP/ld-adapter-gates.json")" >> "$GITHUB_OUTPUT"
           echo "validator_target_url=$(jq -r .validator_target_url "$RUNNER_TEMP/ld-adapter-gates.json")" >> "$GITHUB_OUTPUT"
-
-          releases="$(gh api "/repos/$PRIVATE_REPOSITORY/releases?per_page=50")"
-          RELEASES="$releases" FINAL_SHA="$FINAL_SHA" python3 - <<'PY' > "$RUNNER_TEMP/ld-generic-release.txt"
-          import json,os
-          rows=[]
-          for r in json.loads(os.environ["RELEASES"]):
-              if (r.get("draft") is False and r.get("prerelease") is False
-                  and str(r.get("target_commitish") or "")==os.environ["FINAL_SHA"]):
-                  rows.append(str(r.get("tag_name") or ""))
-          if len(rows)!=1: raise SystemExit(f"OMEGA_LD_ADAPTER_GENERIC_RELEASE_COUNT:{len(rows)}")
-          print(rows[0])
-          PY
-          tag="$(cat "$RUNNER_TEMP/ld-generic-release.txt")"
+          tag="$(jq -r .generic_tag "$RUNNER_TEMP/ld-adapter-gates.json")"
           [ -n "$tag" ]
           echo "generic_tag=$tag" >> "$GITHUB_OUTPUT"
           echo "OMEGA_LD_ADAPTER_PIN_PASS source=$FINAL_SHA generic_tag=$tag"
 
       - name: Download immutable production release
         env:
-          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
           GENERIC_TAG: ${{ steps.pin.outputs.generic_tag }}
         shell: bash
         run: |
           set -Eeuo pipefail
           mkdir -p dist/generic dist/limited
-          gh release download "$GENERIC_TAG" -R "$PRIVATE_REPOSITORY" -D dist/generic
+          gh release download "$GENERIC_TAG" -R "$CONTROL_REPOSITORY" -D dist/generic
           for name in OMEGA-Engine.apk OMEGA-Engine.apk.sha256 OMEGA-Engine.provenance.json OMEGA-Engine.sbom.spdx.json OMEGA-Engine.supply-chain.json; do
             test -s "dist/generic/$name" || { echo "OMEGA_LD_ADAPTER_ASSET_MISSING:$name" >&2; exit 66; }
           done
@@ -218,7 +215,7 @@ jobs:
       - name: Publish immutable zero-cost Limited Distribution prerelease
         id: release
         env:
-          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
           FINAL_SHA: ${{ inputs.final_sha }}
           VERSION: ${{ steps.evidence.outputs.version }}
           CODE: ${{ steps.evidence.outputs.code }}
@@ -227,18 +224,16 @@ jobs:
         run: |
           set -Eeuo pipefail
           tag="omega-ld-v${VERSION}-code${CODE}-${FINAL_SHA:0:12}"
-          if gh release view "$tag" -R "$PRIVATE_REPOSITORY" >/dev/null 2>&1; then
-            target="$(gh release view "$tag" -R "$PRIVATE_REPOSITORY" --json targetCommitish --jq .targetCommitish)"
-            [ "$target" = "$FINAL_SHA" ] || { echo OMEGA_LD_ADAPTER_RELEASE_TARGET_COLLISION >&2; exit 70; }
+          if gh release view "$tag" -R "$CONTROL_REPOSITORY" >/dev/null 2>&1; then
             mkdir -p "$RUNNER_TEMP/existing-ld"
-            gh release download "$tag" -R "$PRIVATE_REPOSITORY" -D "$RUNNER_TEMP/existing-ld"
+            gh release download "$tag" -R "$CONTROL_REPOSITORY" -D "$RUNNER_TEMP/existing-ld"
             existing="$(sha256sum "$RUNNER_TEMP/existing-ld/OMEGA-Engine.apk" | awk '{print $1}')"
             [ "$existing" = "$APK_SHA" ] || { echo OMEGA_LD_ADAPTER_RELEASE_ARTIFACT_COLLISION >&2; exit 71; }
             echo "OMEGA_LD_ADAPTER_RELEASE_REUSED tag=$tag"
           else
-            gh release create "$tag" -R "$PRIVATE_REPOSITORY" --target "$FINAL_SHA" \
+            gh release create "$tag" -R "$CONTROL_REPOSITORY" --target "$GITHUB_SHA" \
               --title "OMEGA Limited Distribution $VERSION (code $CODE)" \
-              --notes "Zero-cost Android Developer Console Limited Distribution candidate. Exact production artifact re-attested for the authorized-device lane. ANDROID_LIMITED_CERTIFIED remains pending until physical-device cold-start and evidence-sync gates pass." \
+              --notes "Zero-cost Android Developer Console Limited Distribution candidate. Exact private source: $FINAL_SHA. Production artifact re-attested for the authorized-device lane. ANDROID_LIMITED_CERTIFIED remains pending until physical-device cold-start and evidence-sync gates pass." \
               --prerelease \
               dist/limited/OMEGA-Engine.apk \
               dist/limited/OMEGA-Engine.apk.sha256 \
