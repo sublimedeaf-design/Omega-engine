@@ -1,1 +1,1 @@
-validate-exact-pr 28290e1cf295cbefe7ef4be27f20c1a6d1e18b96 unify/bigtech-control-plane-v1 bigtech-private-pr313-v4
+validate-exact-pr 618a01014b444312e275e741efe225fcb9e505ba release/live-618a0101-20260927 unified-single-writer-postmerge-v1
