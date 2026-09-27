@@ -1,1 +1,1 @@
-trigger-external-validator 284249ccbad1d7c7f5a72acff18a2cb13cb49aed
+validate-external 8403405e008135e01452765765e929b937136976 release/auto-8403405e0081 epoch-48
