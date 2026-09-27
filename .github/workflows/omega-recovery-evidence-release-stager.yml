@@ -7,6 +7,7 @@ on:
         description: "Exact successful OMEGA Candidate Evidence Root run id"
         required: true
         type: string
+
 permissions:
   contents: write
   actions: write
@@ -14,7 +15,6 @@ permissions:
 concurrency:
   group: omega-recovery-evidence-release-stager
   cancel-in-progress: false
-  queue: max
 
 env:
   PRIVATE_REPOSITORY: sublimedeaf-design/Omega-engines
@@ -22,22 +22,14 @@ env:
 jobs:
   stage:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-    env:
-      EVIDENCE_RUN_ID: ${{ inputs.evidence_run_id || '' }}
+    timeout-minutes: 12
     steps:
-      - name: Validate explicit evidence handoff
-        env:
-          EVIDENCE_RUN_ID: ${{ inputs.evidence_run_id }}
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          [[ "$EVIDENCE_RUN_ID" =~ ^[0-9]+$ ]] || { echo "OMEGA_RELEASE_STAGER_RUN_ID_INVALID:$EVIDENCE_RUN_ID" >&2; exit 64; }
-          echo "EVIDENCE_RUN_ID=$EVIDENCE_RUN_ID" >> "$GITHUB_ENV"
-          echo "OMEGA_RELEASE_STAGER_EXPLICIT_HANDOFF run=$EVIDENCE_RUN_ID"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
 
-      - name: Detect scoped private release authority configuration
-        id: release_app_config
+      - name: Resolve scoped private release authority
+        id: authority
         env:
           RELEASE_APP_CLIENT_ID: ${{ vars.OMEGA_RELEASE_APP_CLIENT_ID }}
           RELEASE_APP_PRIVATE_KEY: ${{ secrets.OMEGA_RELEASE_APP_PRIVATE_KEY }}
@@ -45,15 +37,12 @@ jobs:
         run: |
           set -Eeuo pipefail
           configured=false
-          if [ -n "${RELEASE_APP_CLIENT_ID:-}" ] && [ -n "${RELEASE_APP_PRIVATE_KEY:-}" ]; then
-            configured=true
-          fi
+          if [ -n "${RELEASE_APP_CLIENT_ID:-}" ] && [ -n "${RELEASE_APP_PRIVATE_KEY:-}" ]; then configured=true; fi
           echo "configured=$configured" >> "$GITHUB_OUTPUT"
-          echo "OMEGA_RELEASE_APP_CONFIG configured=$configured"
 
-      - name: Mint scoped private release authority
+      - name: Mint scoped private release token
         id: release_app
-        if: steps.release_app_config.outputs.configured == 'true'
+        if: steps.authority.outputs.configured == 'true'
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
         with:
           client-id: ${{ vars.OMEGA_RELEASE_APP_CLIENT_ID }}
@@ -63,571 +52,151 @@ jobs:
           permission-contents: write
           permission-statuses: write
 
-      - name: Select private release authority
+      - name: Select private release token
         env:
           APP_TOKEN: ${{ steps.release_app.outputs.token }}
           LEGACY_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
         shell: bash
         run: |
           set -Eeuo pipefail
-          if [ -n "${APP_TOKEN:-}" ]; then
-            token="$APP_TOKEN"
-            source=github-app
-          else
-            token="${LEGACY_TOKEN:-}"
-            source=legacy-bootstrap
-          fi
-          [ -n "$token" ] || { echo "OMEGA_RELEASE_AUTHORITY_MISSING" >&2; exit 77; }
+          token="${APP_TOKEN:-}"
+          [ -n "$token" ] || token="${LEGACY_TOKEN:-}"
+          [ -n "$token" ] || { echo OMEGA_RELEASE_AUTHORITY_MISSING >&2; exit 77; }
           echo "::add-mask::$token"
           echo "OMEGA_PRIVATE_RELEASE_TOKEN=$token" >> "$GITHUB_ENV"
-          echo "OMEGA_RELEASE_AUTH_SOURCE=$source" >> "$GITHUB_ENV"
-          echo "OMEGA_RELEASE_AUTHORITY_SELECTED source=$source"
 
-      - name: Resolve exact proven source from evidence-root artifact
-        id: pin
+      - name: Resolve and verify immutable evidence root
+        id: proof
         env:
           GH_TOKEN: ${{ github.token }}
           PRIVATE_GH_TOKEN: ${{ env.OMEGA_PRIVATE_RELEASE_TOKEN }}
+          EVIDENCE_RUN_ID: ${{ inputs.evidence_run_id }}
         shell: bash
         run: |
           set -Eeuo pipefail
-          json="$(gh api "/repos/${{ github.repository }}/actions/runs/$EVIDENCE_RUN_ID/artifacts?per_page=100")"
-          row="$(python3 - "$json" <<'PY'
-          import json,re,sys
-          p=json.loads(sys.argv[1])
+          [[ "$EVIDENCE_RUN_ID" =~ ^[0-9]+$ ]] || { echo OMEGA_RELEASE_STAGER_RUN_ID_INVALID >&2; exit 64; }
+          run="$(gh api "/repos/$GITHUB_REPOSITORY/actions/runs/$EVIDENCE_RUN_ID")"
+          RUN="$run" python3 - <<'PY'
+          import json,os
+          r=json.loads(os.environ["RUN"])
+          if r.get("name")!="OMEGA Candidate Evidence Root" or r.get("status")!="completed" or r.get("conclusion")!="success":
+              raise SystemExit("OMEGA_RELEASE_STAGER_EVIDENCE_RUN_NOT_SUCCESS")
+          PY
+          artifacts="$(gh api "/repos/$GITHUB_REPOSITORY/actions/runs/$EVIDENCE_RUN_ID/artifacts?per_page=100")"
+          row="$(ARTIFACTS="$artifacts" python3 - <<'PY'
+          import json,os,re
+          p=json.loads(os.environ["ARTIFACTS"])
           rows=[]
           for a in p.get("artifacts",[]):
-              n=str(a.get("name") or "")
-              m=re.fullmatch(r"omega-candidate-evidence-root-([0-9a-f]{40})",n)
-              if m and not a.get("expired"):
-                  rows.append((m.group(1),n,str(a.get("id"))))
-          if len(rows)>1:
-              raise SystemExit(f"OMEGA_RELEASE_STAGE_EVIDENCE_ARTIFACT_AMBIGUOUS:{len(rows)}")
-          if rows:
-              print("|".join(rows[0]))
+              m=re.fullmatch(r"omega-candidate-evidence-root-([0-9a-f]{40})",str(a.get("name") or ""))
+              if m and not a.get("expired"): rows.append((m.group(1),str(a.get("name"))))
+          if len(rows)!=1: raise SystemExit("OMEGA_RELEASE_STAGER_EVIDENCE_ARTIFACT_AMBIGUOUS")
+          print("|".join(rows[0]))
           PY
           )"
-          if [ -z "$row" ]; then
-            echo "OMEGA_RELEASE_STAGE_NOT_EXECUTED_NO_EVIDENCE_ARTIFACT run=$EVIDENCE_RUN_ID" >&2
-            exit 75
-          fi
-          IFS='|' read -r source artifact artifact_id <<<"$row"
-          [[ "$source" =~ ^[0-9a-f]{40}$ ]]
-          [[ "$artifact_id" =~ ^[0-9]+$ ]]
-          echo "source_sha=$source" >> "$GITHUB_OUTPUT"
-          echo "artifact_name=$artifact" >> "$GITHUB_OUTPUT"
-          echo "artifact_id=$artifact_id" >> "$GITHUB_OUTPUT"
-          skip=false
-          encoded="$(GH_TOKEN="$PRIVATE_GH_TOKEN" gh api "/repos/$PRIVATE_REPOSITORY/contents/evidence/release-stage.json?ref=$source" --jq '.content' 2>/dev/null || true)"
-          if [ -n "$encoded" ]; then
-            stage_status="$(printf '%s' "$encoded" | tr -d '\n' | base64 -d 2>/dev/null | python3 -c 'import json,sys; print((json.load(sys.stdin).get("status") or ""))' 2>/dev/null || true)"
-            if [ "$stage_status" = "T60_EVIDENCE_FINALIZED" ]; then
-              skip=true
-              echo "OMEGA_RELEASE_STAGE_ALREADY_FINALIZED source=$source"
-            fi
-          fi
-          echo "skip=$skip" >> "$GITHUB_OUTPUT"
-
-      - name: Preflight private release mutation capability
-        if: steps.pin.outputs.skip != 'true'
-        id: private_write
-        env:
-          GH_TOKEN: ${{ env.OMEGA_PRIVATE_RELEASE_TOKEN }}
-          SOURCE_SHA: ${{ steps.pin.outputs.source_sha }}
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          probe="omega-capability-probe-${GITHUB_RUN_ID}"
-          if ! gh api --method POST "/repos/$PRIVATE_REPOSITORY/git/refs" -f ref="refs/heads/$probe" -f sha="$SOURCE_SHA" >/dev/null 2>&1; then
-            echo "OMEGA_RELEASE_CAPABILITY_MISSING:private_contents_write" >&2
-            echo "available=false" >> "$GITHUB_OUTPUT"
-            echo "OMEGA_RELEASE_CAPABILITY_FALLBACK:artifact_first_private_write_unavailable"
-            exit 0
-          fi
-          gh api --method DELETE "/repos/$PRIVATE_REPOSITORY/git/refs/heads/$probe" >/dev/null || {
-            echo "OMEGA_RELEASE_CAPABILITY_CLEANUP_FAILED:$probe" >&2
-            exit 78
-          }
-          echo "available=true" >> "$GITHUB_OUTPUT"
-          echo "OMEGA_RELEASE_CAPABILITY_PASS:private_contents_write"
-
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
-        if: steps.pin.outputs.skip != 'true'
-        with:
-          name: ${{ steps.pin.outputs.artifact_name }}
-          path: ${{ runner.temp }}/candidate-root
-          github-token: ${{ github.token }}
-          run-id: ${{ env.EVIDENCE_RUN_ID }}
-
-      - name: Verify evidence root and resolve recovery run
-        if: steps.pin.outputs.skip != 'true'
-        id: root
-        env:
-          SOURCE_SHA: ${{ steps.pin.outputs.source_sha }}
-          EVIDENCE_RUN_ID: ${{ env.EVIDENCE_RUN_ID }}
-          GH_TOKEN: ${{ env.OMEGA_PRIVATE_RELEASE_TOKEN }}
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          root_file="$(find "$RUNNER_TEMP/candidate-root" -type f -name candidate-evidence-root.json -print -quit)"
-          att_file="$(find "$RUNNER_TEMP/candidate-root" -type f -name recovery-attestation.json -print -quit)"
-          test -s "$root_file"
-          test -s "$att_file"
-          python3 - "$root_file" "$att_file" "$SOURCE_SHA" "$EVIDENCE_RUN_ID" <<'PY' > "$RUNNER_TEMP/release-stage-pin.txt"
+          IFS='|' read -r source artifact <<<"$row"
+          mkdir -p "$RUNNER_TEMP/root"
+          gh run download "$EVIDENCE_RUN_ID" -R "$GITHUB_REPOSITORY" -n "$artifact" -D "$RUNNER_TEMP/root"
+          root="$(find "$RUNNER_TEMP/root" -type f -name candidate-evidence-root.json -print -quit)"
+          att="$(find "$RUNNER_TEMP/root" -type f -name recovery-attestation.json -print -quit)"
+          test -s "$root"; test -s "$att"
+          proof="$(python3 - "$root" "$att" "$source" <<'PY'
           import json,re,sys
           root=json.load(open(sys.argv[1],encoding="utf-8"))
           att=json.load(open(sys.argv[2],encoding="utf-8"))
-          source=sys.argv[3]; evidence_run=sys.argv[4]
+          source=sys.argv[3]
           if root.get("state")!="PASS" or root.get("source_sha")!=source:
-              raise SystemExit("OMEGA_RELEASE_STAGE_ROOT_NOT_PASS")
-          materials=root.get("materials") or {}
-          recovery_run=str(materials.get("recovery_run_id") or "")
-          if not re.fullmatch(r"[0-9]+",recovery_run):
-              raise SystemExit("OMEGA_RELEASE_STAGE_RECOVERY_RUN_INVALID")
+              raise SystemExit("OMEGA_RELEASE_STAGER_ROOT_NOT_PASS")
           pred=att.get("predicate") or {}
-          if att.get("_type")!="https://in-toto.io/Statement/v1" or pred.get("result")!="PASS":
-              raise SystemExit("OMEGA_RELEASE_STAGE_RECOVERY_ATTESTATION_NOT_PASS")
-          if pred.get("source_sha")!=source:
-              raise SystemExit("OMEGA_RELEASE_STAGE_ATTESTATION_SOURCE_MISMATCH")
+          if att.get("_type")!="https://in-toto.io/Statement/v1" or pred.get("result")!="PASS" or pred.get("source_sha")!=source:
+              raise SystemExit("OMEGA_RELEASE_STAGER_RECOVERY_ATTESTATION_NOT_PASS")
+          recovery=str((root.get("materials") or {}).get("recovery_run_id") or "")
           xid=str(root.get("omega_execution_id") or "")
+          if not re.fullmatch(r"[0-9]+",recovery): raise SystemExit("OMEGA_RELEASE_STAGER_RECOVERY_RUN_INVALID")
           if not re.fullmatch(r"[0-9a-f]{64}",xid) or pred.get("omega_execution_id")!=xid:
-              raise SystemExit("OMEGA_RELEASE_STAGE_EXECUTION_ID_MISMATCH")
-          print(recovery_run)
-          print(xid)
+              raise SystemExit("OMEGA_RELEASE_STAGER_EXECUTION_ID_MISMATCH")
+          print(recovery+"|"+xid)
           PY
-          recovery_run="$(sed -n '1p' "$RUNNER_TEMP/release-stage-pin.txt")"
-          xid="$(sed -n '2p' "$RUNNER_TEMP/release-stage-pin.txt")"
-          statuses="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/$SOURCE_SHA/status?per_page=100")"
-          STATUS_PAYLOAD="$statuses" EVIDENCE_RUN_ID="$EVIDENCE_RUN_ID" RECOVERY_RUN_ID="$recovery_run" python3 <<'PY'
+          )"
+          IFS='|' read -r recovery xid <<<"$proof"
+          statuses="$(GH_TOKEN="$PRIVATE_GH_TOKEN" gh api "/repos/$PRIVATE_REPOSITORY/commits/$source/status?per_page=100")"
+          STATUS="$statuses" RECOVERY="$recovery" EVIDENCE="$EVIDENCE_RUN_ID" python3 - <<'PY'
           import json,os
-          p=json.loads(os.environ["STATUS_PAYLOAD"])
-          latest={}
+          p=json.loads(os.environ["STATUS"]); latest={}
           for row in p.get("statuses",[]):
               ctx=str(row.get("context") or "")
               stamp=str(row.get("updated_at") or row.get("created_at") or "")
-              if ctx and (ctx not in latest or stamp > str(latest[ctx].get("_omega_stamp") or "")):
-                  latest[ctx]={**row,"_omega_stamp":stamp}
-          required=("omega/hosted-recovery","omega/recovery-attestation","omega/candidate-evidence-root")
+              if ctx and (ctx not in latest or stamp>str(latest[ctx].get("_stamp") or "")): latest[ctx]={**row,"_stamp":stamp}
+          required=("omega/hosted-ci/python311","omega/hosted-ci/python313","omega/hosted-ci/python314",
+                    "omega/hosted-ci/storage","omega/hosted-governance","omega/hosted-android",
+                    "omega/hosted-recovery","omega/recovery-attestation","omega/candidate-evidence-root")
           bad=[x for x in required if (latest.get(x) or {}).get("state")!="success"]
-          if bad:
-              raise SystemExit("OMEGA_RELEASE_STAGE_REQUIRED_STATUS_NOT_PASS:"+",".join(bad))
-          er=str((latest["omega/candidate-evidence-root"].get("target_url") or ""))
-          rr=str((latest["omega/hosted-recovery"].get("target_url") or ""))
-          ra=str((latest["omega/recovery-attestation"].get("target_url") or ""))
-          if not er.endswith("/actions/runs/"+os.environ["EVIDENCE_RUN_ID"]):
-              raise SystemExit("OMEGA_RELEASE_STAGE_EVIDENCE_RUN_BINDING_MISMATCH")
-          if not rr.endswith("/actions/runs/"+os.environ["RECOVERY_RUN_ID"]) or not ra.endswith("/actions/runs/"+os.environ["RECOVERY_RUN_ID"]):
-              raise SystemExit("OMEGA_RELEASE_STAGE_RECOVERY_RUN_BINDING_MISMATCH")
+          if bad: raise SystemExit("OMEGA_RELEASE_STAGER_REQUIRED_STATUS_NOT_PASS:"+",".join(bad))
+          for ctx in ("omega/hosted-recovery","omega/recovery-attestation"):
+              if not str((latest.get(ctx) or {}).get("target_url") or "").endswith("/actions/runs/"+os.environ["RECOVERY"]):
+                  raise SystemExit("OMEGA_RELEASE_STAGER_RECOVERY_RUN_BINDING_MISMATCH:"+ctx)
+          if not str((latest.get("omega/candidate-evidence-root") or {}).get("target_url") or "").endswith("/actions/runs/"+os.environ["EVIDENCE"]):
+              raise SystemExit("OMEGA_RELEASE_STAGER_EVIDENCE_RUN_BINDING_MISMATCH")
           PY
-          echo "recovery_run_id=$recovery_run" >> "$GITHUB_OUTPUT"
+          echo "source_sha=$source" >> "$GITHUB_OUTPUT"
+          echo "recovery_run_id=$recovery" >> "$GITHUB_OUTPUT"
           echo "omega_execution_id=$xid" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
-        if: steps.pin.outputs.skip != 'true'
-        with:
-          name: omega-hosted-recovery-${{ steps.pin.outputs.source_sha }}
-          path: ${{ runner.temp }}/recovery-package
-          github-token: ${{ github.token }}
-          run-id: ${{ steps.root.outputs.recovery_run_id }}
-
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        if: steps.pin.outputs.skip != 'true'
-        with:
-          repository: ${{ env.PRIVATE_REPOSITORY }}
-          ref: ${{ steps.pin.outputs.source_sha }}
-          token: ${{ env.OMEGA_PRIVATE_RELEASE_TOKEN }}
-          persist-credentials: true
-          fetch-depth: 0
-          path: omega
-
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
-        if: steps.pin.outputs.skip != 'true'
-        with:
-          python-version: "3.13"
-
-      - name: Verify recovery package and extract only bounded evidence
-        if: steps.pin.outputs.skip != 'true'
+      - name: Create immutable release ref at exact proven source
+        id: ref
         env:
-          SOURCE_SHA: ${{ steps.pin.outputs.source_sha }}
-          OMEGA_EXECUTION_ID: ${{ steps.root.outputs.omega_execution_id }}
+          GH_TOKEN: ${{ env.OMEGA_PRIVATE_RELEASE_TOKEN }}
+          SOURCE_SHA: ${{ steps.proof.outputs.source_sha }}
         shell: bash
         run: |
           set -Eeuo pipefail
-          package="$RUNNER_TEMP/recovery-package/omega-recovery-state.tgz"
-          checksum="$RUNNER_TEMP/recovery-package/omega-recovery-state.tgz.sha256"
-          att_file="$(find "$RUNNER_TEMP/candidate-root" -type f -name recovery-attestation.json -print -quit)"
-          test -s "$package"; test -s "$checksum"; test -s "$att_file"
-          expected="$(python3 - "$att_file" <<'PY'
-          import json,sys
-          print((json.load(open(sys.argv[1],encoding="utf-8")).get("predicate") or {}).get("recovery_package_sha256") or "")
-          PY
-          )"
-          [[ "$expected" =~ ^[0-9a-f]{64}$ ]]
-          recorded="$(awk '{print $1}' "$checksum")"
-          actual="$(sha256sum "$package" | awk '{print $1}')"
-          [ "$recorded" = "$expected" ]
-          [ "$actual" = "$expected" ]
-          mkdir -p "$RUNNER_TEMP/recovered"
-          python3 - "$package" "$RUNNER_TEMP/recovered" <<'PY'
-          import pathlib,sys,tarfile
-          archive=pathlib.Path(sys.argv[1]); dest=pathlib.Path(sys.argv[2])
-          with tarfile.open(archive,"r:gz") as tf:
-              members=tf.getmembers()
-              if not members: raise SystemExit("OMEGA_RELEASE_STAGE_ARCHIVE_EMPTY")
-              for m in members:
-                  p=pathlib.PurePosixPath(m.name)
-                  if p.is_absolute() or ".." in p.parts:
-                      raise SystemExit("OMEGA_RELEASE_STAGE_ARCHIVE_PATH_UNSAFE:"+m.name)
-                  if not p.parts or p.parts[0] not in {"evidence","logs"}:
-                      raise SystemExit("OMEGA_RELEASE_STAGE_ARCHIVE_SCOPE_INVALID:"+m.name)
-                  if m.issym() or m.islnk() or m.isdev():
-                      raise SystemExit("OMEGA_RELEASE_STAGE_ARCHIVE_SPECIAL_FILE:"+m.name)
-              tf.extractall(dest,members=members,filter="data")
-          PY
-          ev="$RUNNER_TEMP/recovered/evidence"
-          for name in execution-envelope.json t24-binding.json t60-binding.json qa-binding.json latest-24h.json latest-t60.json coverage-gaps.json acceptance-agents.json latest-agent-promotion.json repo-audit-after-agents.json; do
-            test -s "$ev/$name" || { echo "OMEGA_RELEASE_STAGE_EVIDENCE_MISSING:$name" >&2; exit 52; }
-          done
-          for name in forecast-ledger.jsonl shadow-ledger.jsonl prematch-intelligence.jsonl; do
-            test -e "$ev/$name" || { echo "OMEGA_RELEASE_STAGE_LEDGER_MISSING:$name" >&2; exit 52; }
-          done
-          PYTHONPATH="$PWD/omega/src" python3 - "$ev" <<'PY'
-          import pathlib,sys
-          from omega.live.ledger import verify_ledger
-          ev=pathlib.Path(sys.argv[1])
-          for name in ("forecast-ledger.jsonl","shadow-ledger.jsonl","prematch-intelligence.jsonl"):
-              path=ev/name
-              if not verify_ledger(path):
-                  raise SystemExit("OMEGA_RELEASE_STAGE_LEDGER_INTEGRITY_FAILURE:"+name)
-          PY
-          python3 - "$ev" "$SOURCE_SHA" "$OMEGA_EXECUTION_ID" <<'PY'
-          import json,pathlib,sys
-          ev=pathlib.Path(sys.argv[1]); source=sys.argv[2]; xid=sys.argv[3]
-          envelope=json.loads((ev/"execution-envelope.json").read_text(encoding="utf-8"))
-          if envelope.get("source_sha")!=source or envelope.get("omega_execution_id")!=xid:
-              raise SystemExit("OMEGA_RELEASE_STAGE_ENVELOPE_IDENTITY_MISMATCH")
-          for name in ("latest-24h.json","latest-t60.json"):
-              row=json.loads((ev/name).read_text(encoding="utf-8"))
-              if row.get("git_commit")!=source or row.get("omega_execution_id")!=xid:
-                  raise SystemExit("OMEGA_RELEASE_STAGE_EVIDENCE_IDENTITY_MISMATCH:"+name)
-
-          t24=json.loads((ev/"latest-24h.json").read_text(encoding="utf-8"))
-          coverage=json.loads((ev/"coverage-gaps.json").read_text(encoding="utf-8"))
-          fresh_observed=sum(
-              int(row.get("observed_fixture_count") or 0)
-              for row in (coverage.get("coverage_matrix") or [])
-              if row.get("history_fresh") is True
-          )
-          model_count=int(t24.get("model_predicted_count") or 0)
-          independent_rate=t24.get("independent_model_coverage_rate")
-          if fresh_observed>0 and model_count<=0:
-              raise SystemExit(
-                  f"OMEGA_RELEASE_INDEPENDENT_MODEL_COVERAGE_MISSING:"
-                  f"fresh_observed={fresh_observed}:model_predicted_count={model_count}"
-              )
-          if model_count>0:
-              try:
-                  rate=float(independent_rate)
-              except (TypeError,ValueError):
-                  raise SystemExit("OMEGA_RELEASE_INDEPENDENT_MODEL_COVERAGE_RATE_INVALID")
-              if not (0.0 < rate <= 1.0):
-                  raise SystemExit(
-                      f"OMEGA_RELEASE_INDEPENDENT_MODEL_COVERAGE_RATE_INVALID:{independent_rate}"
-                  )
-          elif fresh_observed==0:
-              print("OMEGA_RELEASE_NO_BET_VALID_NO_FRESH_HISTORY_FIXTURES")
-          PY
-
-      - name: Stage immutable recovery evidence and Android versionCode
-        if: steps.pin.outputs.skip != 'true'
-        working-directory: omega
-        env:
-          SOURCE_SHA: ${{ steps.pin.outputs.source_sha }}
-          OMEGA_EXECUTION_ID: ${{ steps.root.outputs.omega_execution_id }}
-          EVIDENCE_RUN_ID: ${{ env.EVIDENCE_RUN_ID }}
-          RECOVERY_RUN_ID: ${{ steps.root.outputs.recovery_run_id }}
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
-          ev="$RUNNER_TEMP/recovered/evidence"
-          mkdir -p evidence
-          for name in execution-envelope.json execution-runtime.json federation-epoch.json federation-epoch.authority.json t24-binding.json t60-binding.json qa-binding.json settlement-binding.json latest-24h.json latest-t60.json latest-settlement.json coverage-gaps.json intelligence-refresh-t24.json intelligence-refresh-t60.json acceptance-agents.json latest-agent-promotion.json repo-audit-after-agents.json; do
-            test -s "$ev/$name" || { echo "OMEGA_RELEASE_STAGE_REQUIRED_EVIDENCE_MISSING:$name" >&2; exit 52; }
-            cp "$ev/$name" "evidence/$name"
-          done
-          for name in forecast-ledger.jsonl shadow-ledger.jsonl prematch-intelligence.jsonl; do
-            test -e "$ev/$name" || { echo "OMEGA_RELEASE_STAGE_REQUIRED_LEDGER_MISSING:$name" >&2; exit 52; }
-            cp "$ev/$name" "evidence/$name"
-          done
-          python3 scripts/evidence_identity.py verify             --envelope evidence/execution-envelope.json             --binding evidence/t24-binding.json             --binding evidence/t60-binding.json             --binding evidence/qa-binding.json             --json-file evidence/latest-24h.json             --json-file evidence/latest-t60.json
-          python3 - <<'PY'
-          import datetime,json,os,re,tomllib
-          from pathlib import Path
-          source=os.environ["SOURCE_SHA"]; xid=os.environ["OMEGA_EXECUTION_ID"]
-          project=tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
-          engine=str(project["project"]["version"])
-          gradle_path=Path("android/app/build.gradle.kts")
-          gradle=gradle_path.read_text(encoding="utf-8")
-          vm=re.search(r'versionName\s*=\s*"([^"]+)"',gradle)
-          vc=re.search(r'versionCode\s*=\s*(\d+)',gradle)
-          if not vm or not vc: raise SystemExit("ANDROID_VERSION_METADATA_MISSING")
-          if not re.fullmatch(re.escape(engine)+r"-live\.\d+",vm.group(1)):
-              raise SystemExit("ANDROID_ENGINE_VERSION_MISMATCH")
-          base=int(vc.group(1)); target=base+1
-          envelope=json.loads(Path("evidence/execution-envelope.json").read_text(encoding="utf-8"))
-          if envelope.get("source_sha")!=source or envelope.get("omega_execution_id")!=xid:
-              raise SystemExit("OMEGA_RELEASE_STAGE_ENVELOPE_MISMATCH")
-          t24=json.loads(Path("evidence/latest-24h.json").read_text(encoding="utf-8"))
-          t60=json.loads(Path("evidence/latest-t60.json").read_text(encoding="utf-8"))
-          if t24.get("git_commit")!=source or t60.get("git_commit")!=source:
-              raise SystemExit("OMEGA_RELEASE_STAGE_SOURCE_PROVENANCE_MISMATCH")
-          if t24.get("omega_execution_id")!=xid or t60.get("omega_execution_id")!=xid:
-              raise SystemExit("OMEGA_RELEASE_STAGE_EXECUTION_PROVENANCE_MISMATCH")
-          now=datetime.datetime.now(datetime.timezone.utc).isoformat()
-          stage={
-              "schema_version":2,
-              "omega_execution_id":xid,
-              "execution_certification_state":envelope.get("certification_state","BLOCKED"),
-              "status":"T60_EVIDENCE_FINALIZED",
-              "code_source_sha":source,
-              "android_version":vm.group(1),
-              "base_version_code":base,
-              "target_version_code":target,
-              "t24_git_commit":source,
-              "t60_source_sha":source,
-              "candidate_evidence_root_run_id":os.environ["EVIDENCE_RUN_ID"],
-              "recovery_run_id":os.environ["RECOVERY_RUN_ID"],
-              "created_at":now,
-              "finalized_at":now,
-          }
-          Path("evidence/release-stage.json").write_text(json.dumps(stage,indent=2,sort_keys=True)+"\n",encoding="utf-8")
-          gradle=gradle[:vc.start(1)] + str(target) + gradle[vc.end(1):]
-          gradle_path.write_text(gradle,encoding="utf-8")
-          PY
-          python3 scripts/evidence_identity.py stamp-json             --envelope evidence/execution-envelope.json evidence/release-stage.json
-          python3 scripts/evidence_identity.py verify             --envelope evidence/execution-envelope.json             --binding evidence/t24-binding.json             --binding evidence/t60-binding.json             --binding evidence/qa-binding.json             --json-file evidence/latest-24h.json             --json-file evidence/latest-t60.json             --json-file evidence/release-stage.json
-          illegal="$(git status --porcelain | awk '{print $2}' | grep -Ev '^(evidence/|android/app/build.gradle.kts$)' || true)"
-          [ -z "$illegal" ] || { echo "OMEGA_RELEASE_STAGE_ILLEGAL_DELTA:$illegal" >&2; exit 61; }
-          if [ "${{ steps.private_write.outputs.available }}" = "true" ]; then
-            git config user.name omega-release-bot
-            git config user.email omega-release-bot@users.noreply.github.com
-            branch="release/recovery-evidence-${SOURCE_SHA:0:12}-${EVIDENCE_RUN_ID}"
-            git checkout -b "$branch"
-            git add evidence android/app/build.gradle.kts
-            git commit -m "release: finalize attested recovery evidence and Android versionCode"
-            final="$(git rev-parse HEAD)"
-            parent="$(git rev-parse HEAD^)"
-            [ "$parent" = "$SOURCE_SHA" ] || { echo "OMEGA_RELEASE_STAGE_PARENT_MISMATCH:$parent!=$SOURCE_SHA" >&2; exit 62; }
-            git push origin "HEAD:refs/heads/$branch"
-            mode=private-branch
-          else
-            final="$SOURCE_SHA"
-            branch="artifact-first/$SOURCE_SHA"
-            mode=artifact-first
-            test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
-            echo "OMEGA_RELEASE_STAGE_ARTIFACT_FIRST source=$SOURCE_SHA evidence_run=$EVIDENCE_RUN_ID"
+          release_ref="release/code19-${SOURCE_SHA:0:8}"
+          current="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/$release_ref" --jq .sha 2>/dev/null || true)"
+          if [ -z "$current" ]; then
+            gh api --method POST "/repos/$PRIVATE_REPOSITORY/git/refs" -f ref="refs/heads/$release_ref" -f sha="$SOURCE_SHA" >/dev/null
+          elif [ "$current" != "$SOURCE_SHA" ]; then
+            echo "OMEGA_RELEASE_STAGER_REF_COLLISION:$release_ref:$current!=$SOURCE_SHA" >&2
+            exit 66
           fi
-          echo "FINAL_SHA=$final" >> "$GITHUB_ENV"
-          echo "RELEASE_BRANCH=$branch" >> "$GITHUB_ENV"
-          echo "STAGING_MODE=$mode" >> "$GITHUB_ENV"
-          echo "OMEGA_RELEASE_EVIDENCE_STAGED source=$SOURCE_SHA final=$final branch=$branch mode=$mode"
+          test "$(gh api "/repos/$PRIVATE_REPOSITORY/commits/$release_ref" --jq .sha)" = "$SOURCE_SHA"
+          echo "source_ref=$release_ref" >> "$GITHUB_OUTPUT"
+          echo "OMEGA_RELEASE_STAGED_READ_ONLY source=$SOURCE_SHA ref=$release_ref"
 
-      - name: Dispatch exact final-SHA hosted validation
-        if: steps.pin.outputs.skip != 'true' && steps.private_write.outputs.available == 'true'
+      - name: Publish promotion-only evidence status
+        env:
+          GH_TOKEN: ${{ env.OMEGA_PRIVATE_RELEASE_TOKEN }}
+          SOURCE_SHA: ${{ steps.proof.outputs.source_sha }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$SOURCE_SHA" \
+            -f state=success -f context="omega/release-evidence-staged" \
+            -f description="STAGED_READ_ONLY: exact evidence promoted without source or artifact rebuild" \
+            -f target_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
+
+      - name: Pin validation and recovery to the same immutable SHA
         env:
           GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ steps.proof.outputs.source_sha }}
+          SOURCE_REF: ${{ steps.ref.outputs.source_ref }}
         shell: bash
         run: |
           set -Eeuo pipefail
-          payload="validate-exact-pr $FINAL_SHA $RELEASE_BRANCH recovery-evidence-release-stager"
-          path="bootstrap/omega/pr-validation-trigger.txt"
-          current="$(gh api "/repos/${{ github.repository }}/contents/$path" --jq '.sha')"
-          encoded="$(printf '%s\n' "$payload" | base64 -w0)"
-          gh api --method PUT "/repos/${{ github.repository }}/contents/$path" \
-            -f message="Validation: prove exact staged Android release SHA" \
-            -f content="$encoded" -f sha="$current" -f branch=main >/dev/null
-
-          recovery_payload="recover-exact $FINAL_SHA $RELEASE_BRANCH staged-final-recovery"
-          recovery_path="bootstrap/omega/recovery-trigger.txt"
-          recovery_current="$(gh api "/repos/${{ github.repository }}/contents/$recovery_path" --jq '.sha')"
-          recovery_encoded="$(printf '%s\n' "$recovery_payload" | base64 -w0)"
-          gh api --method PUT "/repos/${{ github.repository }}/contents/$recovery_path" \
-            -f message="Recovery: prove exact staged final release SHA" \
-            -f content="$recovery_encoded" -f sha="$recovery_current" -f branch=main >/dev/null
-
-          # GITHUB_TOKEN-authored content writes do not recursively trigger the
-          # push listeners below, so both exact gates must be dispatched explicitly.
-          gh workflow run omega-private-pr-hosted-bridge.yml \
-            -R "$GITHUB_REPOSITORY" --ref main
-          gh workflow run omega-hosted-recovery-failover.yml \
-            -R "$GITHUB_REPOSITORY" --ref main
-
-          echo "OMEGA_FINAL_SHA_VALIDATION_DISPATCHED sha=$FINAL_SHA branch=$RELEASE_BRANCH"
-          echo "OMEGA_FINAL_SHA_RECOVERY_DISPATCHED sha=$FINAL_SHA branch=$RELEASE_BRANCH"
-
-      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6
-        if: steps.pin.outputs.skip != 'true'
-        with:
-          distribution: temurin
-          java-version: "17"
-
-      - name: Install Android SDK 36 for unsigned canonical build
-        if: steps.pin.outputs.skip != 'true'
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "platforms;android-36" "build-tools;36.0.0" >/dev/null
-
-      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb
-        if: steps.pin.outputs.skip != 'true'
-        with:
-          gradle-version: "8.13"
-          cache-read-only: true
-
-      - name: Build exact final release payload without rotating signer
-        if: steps.pin.outputs.skip != 'true'
-        id: unsigned
-        working-directory: omega
-        shell: bash
-        env:
-          OMEGA_SOURCE_SHA: ${{ env.FINAL_SHA }}
-          OMEGA_CONTROL_WORKFLOW_SHA: ${{ github.workflow_sha }}
-          OMEGA_CONTROL_WORKFLOW_REF: ${{ github.workflow_ref }}
-          OMEGA_RUN_ID: ${{ github.run_id }}
-          OMEGA_CONTROL_REPOSITORY: ${{ github.repository }}
-        run: |
-          set -Eeuo pipefail
-          test "$(git rev-parse HEAD)" = "$FINAL_SHA"
-          python3 scripts/install_locked_ci_deps.py
-          python3 scripts/materialize_gradle_verification.py
-          python3 scripts/validate_supply_chain_locks.py --out reports/release-stage-supply-chain.json
-          python3 scripts/generate_omega_sbom.py --out reports/omega-sbom.spdx.json
-          mkdir -p android/app/src/main/assets/evidence
-          for name in latest-24h.json latest-t60.json coverage-gaps.json release-stage.json execution-envelope.json t24-binding.json t60-binding.json qa-binding.json; do
-            test -s "evidence/$name"
-            cp "evidence/$name" "android/app/src/main/assets/evidence/$name"
-          done
-          # Never generate or rotate signing material. Build the exact release payload
-          # unsigned, then canonical signing can be a separate cryptographic operation.
-          sed -i '/signingConfig = signingConfigs.getByName("omegaPersonal")/d' android/app/build.gradle.kts
-          (cd android && gradle --no-daemon --dependency-verification strict --stacktrace lintRelease assembleRelease)
-          apk="$(find android/app/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' -print -quit)"
-          test -s "$apk" || { echo "OMEGA_UNSIGNED_RELEASE_APK_MISSING" >&2; exit 71; }
-          if "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify "$apk" >/dev/null 2>&1; then
-            echo "OMEGA_UNSIGNED_RELEASE_UNEXPECTEDLY_SIGNED" >&2
-            exit 72
-          fi
-          mkdir -p dist
-          "$ANDROID_HOME/build-tools/36.0.0/zipalign" -f -P 16 4 "$apk" dist/OMEGA-Engine-unsigned.apk
-          "$ANDROID_HOME/build-tools/36.0.0/zipalign" -c -P 16 -v 4 dist/OMEGA-Engine-unsigned.apk >/dev/null
-          sha256sum dist/OMEGA-Engine-unsigned.apk > dist/OMEGA-Engine-unsigned.apk.sha256
-          python3 - <<'PY'
-          import hashlib,json,os,pathlib,re
-          apk=pathlib.Path("dist/OMEGA-Engine-unsigned.apk")
-          digest=hashlib.sha256(apk.read_bytes()).hexdigest()
-          recorded=pathlib.Path("dist/OMEGA-Engine-unsigned.apk.sha256").read_text().split()[0]
-          if digest!=recorded: raise SystemExit("OMEGA_UNSIGNED_RELEASE_SHA_MISMATCH")
-          source=os.environ["FINAL_SHA"]
-          code_source=json.loads(pathlib.Path("evidence/release-stage.json").read_text())["code_source_sha"]
-          if not re.fullmatch(r"[0-9a-f]{40}",source) or not re.fullmatch(r"[0-9a-f]{40}",code_source):
-              raise SystemExit("OMEGA_UNSIGNED_RELEASE_SOURCE_INVALID")
-          release_stage_path=pathlib.Path("evidence/release-stage.json")
-          stage=json.loads(release_stage_path.read_text())
-          release_stage_sha=hashlib.sha256(release_stage_path.read_bytes()).hexdigest()
-          payload={
-              "schema_version":2,
-              "classification":"PRODUCTION_RELEASE_PAYLOAD_UNSIGNED",
-              "production_final":False,
-              "source_commit":source,
-              "code_source_sha":code_source,
-              "omega_execution_id":stage.get("omega_execution_id"),
-              "candidate_evidence_root_run_id":stage.get("candidate_evidence_root_run_id"),
-              "recovery_run_id":stage.get("recovery_run_id"),
-              "release_stage_sha256":release_stage_sha,
-              "signer_state":"PENDING_CANONICAL_SIGNER",
-              "expected_signer_certificate_sha256":pathlib.Path("android/signing-cert.sha256").read_text().strip().lower(),
-              "apk_sha256":digest,
-              "artifact":"OMEGA-Engine-unsigned.apk",
+          update() {
+            local path="$1" payload="$2" message="$3"
+            local meta sha encoded
+            meta="$(gh api "/repos/$GITHUB_REPOSITORY/contents/$path?ref=main")"
+            sha="$(printf '%s' "$meta" | jq -r .sha)"
+            encoded="$(printf '%s\n' "$payload" | base64 -w0)"
+            gh api --method PUT "/repos/$GITHUB_REPOSITORY/contents/$path" \
+              -f message="$message" -f content="$encoded" -f sha="$sha" -f branch=main >/dev/null
           }
-          pathlib.Path("dist/OMEGA-Engine-unsigned.provenance.json").write_text(
-              json.dumps(payload,indent=2,sort_keys=True)+"\n",encoding="utf-8")
-          workflow_sha=os.environ["OMEGA_CONTROL_WORKFLOW_SHA"]
-          workflow_ref=os.environ["OMEGA_CONTROL_WORKFLOW_REF"]
-          run_id=os.environ["OMEGA_RUN_ID"]
-          control_repo=os.environ["OMEGA_CONTROL_REPOSITORY"]
-          if not re.fullmatch(r"[0-9a-f]{40}",workflow_sha):
-              raise SystemExit("OMEGA_UNSIGNED_RELEASE_WORKFLOW_SHA_INVALID")
-          def file_digest(path):
-              return hashlib.sha256(pathlib.Path(path).read_bytes()).hexdigest()
-          statement={
-              "_type":"https://in-toto.io/Statement/v1",
-              "subject":[{"name":"OMEGA-Engine-unsigned.apk","digest":{"sha256":digest}}],
-              "predicateType":"https://slsa.dev/provenance/v1",
-              "predicate":{
-                  "buildDefinition":{
-                      "buildType":"https://github.com/sublimedeaf-design/Omega-engine/.github/workflows/omega-recovery-evidence-release-stager.yml@v1",
-                      "externalParameters":{
-                          "source_commit":source,
-                          "code_source_sha":code_source,
-                          "workflow_ref":workflow_ref,
-                          "expected_signer_certificate_sha256":payload["expected_signer_certificate_sha256"],
-                      },
-                      "resolvedDependencies":[
-                          {"uri":"git+https://github.com/sublimedeaf-design/Omega-engines@"+source,
-                           "digest":{"gitCommit":source}},
-                          {"uri":"file:reports/omega-sbom.spdx.json",
-                           "digest":{"sha256":file_digest("reports/omega-sbom.spdx.json")}},
-                          {"uri":"file:reports/release-stage-supply-chain.json",
-                           "digest":{"sha256":file_digest("reports/release-stage-supply-chain.json")}},
-                      ],
-                  },
-                  "runDetails":{
-                      "builder":{"id":"https://github.com/"+control_repo+"/.github/workflows/omega-recovery-evidence-release-stager.yml@"+workflow_sha},
-                      "metadata":{"invocationId":"https://github.com/"+control_repo+"/actions/runs/"+run_id},
-                  },
-              },
-          }
-          pathlib.Path("dist/OMEGA-Engine-unsigned.intoto.jsonl").write_text(
-              json.dumps(statement,sort_keys=True,separators=(",",":"))+"\n",encoding="utf-8")
-          PY
-          echo "apk_sha256=$(awk '{print $1}' dist/OMEGA-Engine-unsigned.apk.sha256)" >> "$GITHUB_OUTPUT"
-
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-        if: steps.pin.outputs.skip != 'true'
-        with:
-          name: OMEGA-Unsigned-Release-${{ env.FINAL_SHA }}
-          retention-days: 7
-          if-no-files-found: error
-          path: |
-            omega/dist/OMEGA-Engine-unsigned.apk
-            omega/dist/OMEGA-Engine-unsigned.apk.sha256
-            omega/dist/OMEGA-Engine-unsigned.provenance.json
-            omega/dist/OMEGA-Engine-unsigned.intoto.jsonl
-            omega/reports/omega-sbom.spdx.json
-            omega/reports/release-stage-supply-chain.json
-
-      - name: Publish unsigned release payload status
-        if: steps.pin.outputs.skip != 'true'
-        env:
-          GH_TOKEN: ${{ env.OMEGA_PRIVATE_RELEASE_TOKEN }}
-          APK_SHA256: ${{ steps.unsigned.outputs.apk_sha256 }}
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          desc="exact release payload built; canonical signer pending"
-          [ -n "$APK_SHA256" ] && desc="$desc sha256=${APK_SHA256:0:12}"
-          gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$FINAL_SHA" \
-            -f state=success \
-            -f context="omega/android-release-unsigned" \
-            -f description="$desc" \
-            -f target_url="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" >/dev/null
-
-      - name: Publish staged release evidence status
-        if: steps.pin.outputs.skip != 'true'
-        env:
-          GH_TOKEN: ${{ env.OMEGA_PRIVATE_RELEASE_TOKEN }}
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$FINAL_SHA"             -f state=success             -f context="omega/release-evidence-staged"             -f description="attested recovery evidence promoted; canonical signer still required"             -f target_url="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" >/dev/null
+          update bootstrap/omega/pr-validation-trigger.txt \
+            "validate-exact-pr $SOURCE_SHA $SOURCE_REF immutable-release-stager" \
+            "Validation: pin immutable code19 release"
+          update bootstrap/omega/recovery-trigger.txt \
+            "recover-exact $SOURCE_SHA $SOURCE_REF immutable-release-stager" \
+            "Recovery: pin immutable code19 release"
+          gh workflow run omega-private-pr-hosted-bridge.yml -R "$GITHUB_REPOSITORY" --ref main
+          gh workflow run omega-hosted-recovery-failover.yml -R "$GITHUB_REPOSITORY" --ref main
+          echo "OMEGA_RELEASE_IMMUTABLE_GATES_DISPATCHED source=$SOURCE_SHA ref=$SOURCE_REF"
