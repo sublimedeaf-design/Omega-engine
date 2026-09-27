@@ -1,1 +1,1 @@
-validate-exact-pr 6e52df660e98170235b0db9e97f60673c5e57586 main post-merge-limited-distribution-v1
+validate-exact-pr 1c56527503901f89335aef8b84832dd56f9fcb11 release/limited-distribution-canonical-apk limited-distribution-release-v1
