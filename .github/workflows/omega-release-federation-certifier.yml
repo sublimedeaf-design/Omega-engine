@@ -132,6 +132,7 @@ jobs:
           PY
 
       - name: Promote staged authority to PASS only after external 4-of-4 proof
+        id: promote
         if: steps.epoch.outputs.release_epoch == 'true' && steps.epoch.outputs.state == 'NOT_EXECUTED'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -160,20 +161,25 @@ jobs:
           print(json.dumps(d,indent=2,ensure_ascii=False))
           PY
           encoded="$(base64 -w0 "$RUNNER_TEMP/epoch-pass.json")"
-          gh api --method PUT "/repos/$CONTROL_REPOSITORY/contents/federation/epochs/current.json" \
+          response="$(gh api --method PUT "/repos/$CONTROL_REPOSITORY/contents/federation/epochs/current.json" \
             -f message="Federation v3: certify exact release epoch ${SOURCE_SHA:0:12} PASS" \
-            -f content="$encoded" -f sha="$blob_sha" -f branch=main >/dev/null
-          echo "OMEGA_RELEASE_FEDERATION_AUTHORITY_PROMOTED_PASS source=$SOURCE_SHA"
+            -f content="$encoded" -f sha="$blob_sha" -f branch=main)"
+          promoted_head_sha="$(printf '%s' "$response" | jq -r '.commit.sha // empty')"
+          [[ "$promoted_head_sha" =~ ^[0-9a-f]{40}$ ]] || { echo OMEGA_RELEASE_FEDERATION_PROMOTED_SHA_INVALID >&2; exit 66; }
+          echo "promoted_head_sha=$promoted_head_sha" >> "$GITHUB_OUTPUT"
+          echo "OMEGA_RELEASE_FEDERATION_AUTHORITY_PROMOTED_PASS source=$SOURCE_SHA control_sha=$promoted_head_sha"
 
       - name: Explicitly dispatch second independent peer proof
         if: steps.epoch.outputs.release_epoch == 'true' && steps.epoch.outputs.state == 'NOT_EXECUTED'
         env:
           GH_TOKEN: ${{ github.token }}
+          PROMOTED_HEAD_SHA: ${{ steps.promote.outputs.promoted_head_sha }}
         shell: bash
         run: |
           set -Eeuo pipefail
-          gh workflow run omega-federation-v3-peer-bridge.yml -R "$CONTROL_REPOSITORY" --ref main
-          echo "OMEGA_RELEASE_FEDERATION_SECOND_PROOF_DISPATCHED"
+          [[ "$PROMOTED_HEAD_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo OMEGA_RELEASE_FEDERATION_SECOND_PROOF_REF_INVALID >&2; exit 66; }
+          gh workflow run omega-federation-v3-peer-bridge.yml -R "$CONTROL_REPOSITORY" --ref "$PROMOTED_HEAD_SHA"
+          echo "OMEGA_RELEASE_FEDERATION_SECOND_PROOF_DISPATCHED control_sha=$PROMOTED_HEAD_SHA"
 
       - name: Trigger exact final-SHA recovery after second PASS bridge
         if: steps.epoch.outputs.release_epoch == 'true' && steps.epoch.outputs.state == 'PASS' && steps.epoch.outputs.stage == 'CERTIFIED_PASS_PENDING_SECOND_PROOF'
