@@ -23,9 +23,10 @@ concurrency:
   # watchdog and routine-main probes may resolve different targets, but they
   # publish the same canonical recovery contexts and therefore must never run
   # concurrently. The pin job generation-fences stale queued work.
-  group: omega-hosted-recovery-v4
-  # Clean recovery is a long-lived certification proof. New intent waits behind
-  # the active proof; no schedule or push can cancel evidence already in flight.
+  # Emergency generation-isolated lane: do not let a stale in-flight proof
+  # for an older private SHA block recovery evidence for the current immutable
+  # release generation. This branch is intentionally not merged into main.
+  group: omega-hosted-recovery-expedite-2b9c0131c364
   cancel-in-progress: false
   queue: single
 
