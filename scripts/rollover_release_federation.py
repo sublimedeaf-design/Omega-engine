@@ -147,6 +147,12 @@ tip = private_api(
 if tip != TARGET:
     raise SystemExit(f"OMEGA_RELEASE_FEDERATION_REF_MOVED:{tip}!={TARGET}")
 
+current_private_main = latest_main(CORE)
+if current_private_main != TARGET:
+    raise SystemExit(
+        f"OMEGA_RELEASE_FEDERATION_STALE_GENERATION:{TARGET}!={current_private_main}"
+    )
+
 status = private_api("GET", f"/repos/{CORE}/commits/{TARGET}/status?per_page=100")
 latest = {}
 for row in status.get("statuses", []):
@@ -193,9 +199,12 @@ live_certified = (latest.get("omega/live-certified") or {}).get("state") == "suc
 safe_unfinished_supersede = (
     prior_state == "NOT_EXECUTED"
     and prior_certification == "NOT_EXECUTED"
-    and same_target
-    and same_ref
-    and control_deviation
+    and TARGET == current_private_main
+    and (
+        control_deviation
+        or not same_target
+        or not same_ref
+    )
 )
 safe_certified_pre_live_supersede = (
     authority_pass
@@ -285,6 +294,8 @@ seed_core = {
         "one_staged_child_sha_per_epoch": True,
         "monotonic_epoch_sequence": True,
         "supersedes_unfinished_epoch_on_control_deviation": True,
+        "supersedes_unfinished_epoch_on_new_private_generation": True,
+        "current_private_main_is_generation_fence": True,
         "supersedes_certified_pre_live_epoch_on_control_deviation": True,
         "live_certified_epoch_is_immutable": True,
     },
@@ -381,6 +392,8 @@ projection["release_epoch"] = {
     "old_evidence_runs_are_never_mutated": True,
     "monotonic_epoch_sequence": True,
     "supersedes_unfinished_epoch_on_control_deviation": True,
+    "supersedes_unfinished_epoch_on_new_private_generation": True,
+    "current_private_main_is_generation_fence": True,
     "supersedes_certified_pre_live_epoch_on_control_deviation": True,
     "live_certified_epoch_is_immutable": True,
 }
