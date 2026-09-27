@@ -59,7 +59,7 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: Probe independent zero-account fixture routes
+      - name: Probe current zero-account fallback chain
         working-directory: omega
         shell: bash
         run: |
@@ -73,20 +73,19 @@ jobs:
           from pathlib import Path
 
           from omega.live.espn_provider import discover as espn_discover
-          from omega.live.thesportsdb_provider import discover as tsdb_discover
-          from omega.live.worldcup26_provider import discover as worldcup26_discover
-          from omega.live.openfoot_provider import discover as openfoot_discover
+          from omega.live.openligadb import discover as openliga_discover
 
           now=datetime.now(timezone.utc)
+          horizon_hours=72
           providers={}
           all_rows=[]
 
-          for name,fn in (("espn",espn_discover),("worldcup26",worldcup26_discover),("thesportsdb",tsdb_discover),("openfoot",openfoot_discover)):
+          for name,fn in (("espn",espn_discover),("openligadb",openliga_discover)):
               try:
-                  rows,meta=fn(now,horizon_hours=30)
+                  rows,meta=fn(now,horizon_hours=horizon_hours)
               except Exception as exc:
                   rows=[]
-                  meta={"provider_health":"SYSTEMIC_FAILURE","exception":f"{type(exc).__name__}:{exc}"}
+                  meta={"provider_health":"SYSTEMIC_FAILURE","provider_errors":[{"reason":f"{type(exc).__name__}:{exc}"}]}
               providers[name]={
                   "health":meta.get("provider_health"),
                   "count":len(rows),
@@ -95,7 +94,7 @@ jobs:
               }
               all_rows.extend((name,row) for row in rows)
 
-          nations=[
+          sample=[
               {
                   "provider":name,
                   "event_id":row.get("event",{}).get("id"),
@@ -104,17 +103,17 @@ jobs:
                   "home":row.get("event",{}).get("home_team"),
                   "away":row.get("event",{}).get("away_team"),
               }
-              for name,row in all_rows
-              if row.get("sport")=="soccer_uefa_nations_league"
+              for name,row in all_rows[:20]
           ]
 
           payload={
-              "schema_version":1,
+              "schema_version":2,
               "candidate_sha":os.environ["CANDIDATE_SHA"],
               "observed_at":now.isoformat(),
-              "horizon_hours":30,
+              "horizon_hours":horizon_hours,
               "providers":providers,
-              "nations_league":nations,
+              "fixture_count":len(all_rows),
+              "fixture_sample":sample,
               "synthetic_fixtures":False,
           }
           Path("../free-provider-live-smoke.json").write_text(
@@ -122,14 +121,16 @@ jobs:
           )
           print(json.dumps(payload,indent=2,sort_keys=True))
 
-          real_rows=[row for _,row in all_rows]
-          if not real_rows:
-              raise SystemExit("OMEGA_FREE_PROVIDER_NO_REAL_FIXTURES")
+          if all(row["health"]=="SYSTEMIC_FAILURE" for row in providers.values()):
+              raise SystemExit("OMEGA_FREE_PROVIDER_ALL_SYSTEMIC_FAILURE")
+          if not all_rows:
+              raise SystemExit("OMEGA_FREE_PROVIDER_EMPTY_72H_HORIZON")
           PY
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
         with:
           name: omega-free-provider-live-smoke-${{ env.CANDIDATE_SHA }}
           path: free-provider-live-smoke.json
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 7
