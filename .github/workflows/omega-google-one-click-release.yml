@@ -9,7 +9,7 @@ on:
       - ".github/workflows/omega-google-one-click-release.yml"
 
 permissions:
-  contents: write
+  contents: read
   id-token: write
   actions: read
 
@@ -20,7 +20,6 @@ concurrency:
 env:
   PRIVATE_REPOSITORY: sublimedeaf-design/Omega-engines
   PACKAGE_ID: com.sublimedeafdesign.omegaengine
-  TRIGGER_PATH: bootstrap/omega/google-one-click-release.json
 
 jobs:
   release:
@@ -32,72 +31,45 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Arm or load immutable source
+      - name: Resolve and arm exact private source without mutating control code
         id: trigger
         env:
           EVENT_NAME: ${{ github.event_name }}
-          CONTROL_TOKEN: ${{ github.token }}
           OMEGA_BOOTSTRAP_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
         shell: bash
         run: |
           set -Eeuo pipefail
           set +x
+          source="$(GH_TOKEN="$OMEGA_BOOTSTRAP_TOKEN" gh api "/repos/$PRIVATE_REPOSITORY/commits/main" --jq .sha)"
+          [[ "$source" =~ ^[0-9a-f]{40}$ ]] || { echo OMEGA_GOOGLE_SOURCE_INVALID >&2; exit 64; }
           active=false
-          source=""
           if [ "$EVENT_NAME" = workflow_dispatch ]; then
-            source="$(GH_TOKEN="$OMEGA_BOOTSTRAP_TOKEN" gh api "/repos/$PRIVATE_REPOSITORY/commits/main" --jq .sha)"
-            [[ "$source" =~ ^[0-9a-f]{40}$ ]]
-            payload="$(SOURCE="$source" python3 - <<'PY'
-          import datetime,json,os
-          print(json.dumps({
-            "schema_version":1,
-            "state":"ARMED",
-            "source_sha":os.environ["SOURCE"],
-            "package_id":"com.sublimedeafdesign.omegaengine",
-            "armed_at":datetime.datetime.now(datetime.timezone.utc).isoformat()
-          },indent=2,sort_keys=True))
+            GH_TOKEN="$OMEGA_BOOTSTRAP_TOKEN" gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$source" \
+              -f state=pending -f context="omega/google-one-click" \
+              -f description="unified exact-SHA release armed; reconciling mandatory gates" \
+              -f target_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
+            active=true
+          elif [ "$EVENT_NAME" = schedule ]; then
+            statuses="$(GH_TOKEN="$OMEGA_BOOTSTRAP_TOKEN" gh api "/repos/$PRIVATE_REPOSITORY/commits/$source/status?per_page=100")"
+            state="$(STATUS_PAYLOAD="$statuses" python3 - <<'PY'
+          import json,os
+          rows=json.loads(os.environ["STATUS_PAYLOAD"]).get("statuses",[])
+          matches=[r for r in rows if str(r.get("context") or "")=="omega/google-one-click"]
+          matches.sort(key=lambda r:str(r.get("updated_at") or r.get("created_at") or ""),reverse=True)
+          print(str((matches[0] if matches else {}).get("state") or ""))
           PY
             )"
-            meta="$(GH_TOKEN="$CONTROL_TOKEN" gh api "/repos/$GITHUB_REPOSITORY/contents/$TRIGGER_PATH?ref=main" 2>/dev/null || true)"
-            encoded="$(printf '%s\n' "$payload" | base64 -w0)"
-            if [ -n "$meta" ]; then
-              blob="$(printf '%s' "$meta" | jq -r .sha)"
-              GH_TOKEN="$CONTROL_TOKEN" gh api --method PUT "/repos/$GITHUB_REPOSITORY/contents/$TRIGGER_PATH" \
-                -f message="Google one-click: arm exact source $source" \
-                -f content="$encoded" -f sha="$blob" -f branch=main >/dev/null
-            else
-              GH_TOKEN="$CONTROL_TOKEN" gh api --method PUT "/repos/$GITHUB_REPOSITORY/contents/$TRIGGER_PATH" \
-                -f message="Google one-click: arm exact source $source" \
-                -f content="$encoded" -f branch=main >/dev/null
-            fi
-            active=true
-          elif [ -s "$TRIGGER_PATH" ]; then
-            readarray -t f < <(python3 - "$TRIGGER_PATH" <<'PY'
-          import json,re,sys
-          d=json.load(open(sys.argv[1],encoding="utf-8"))
-          state=str(d.get("state") or "")
-          source=str(d.get("source_sha") or "").lower()
-          active=state in {"ARMED","WAITING"}
-          if active and not re.fullmatch(r"[0-9a-f]{40}",source):
-            raise SystemExit("OMEGA_GOOGLE_TRIGGER_SOURCE_INVALID")
-          print("true" if active else "false")
-          print(source)
-          print(state)
-          PY
-            )
-            active="${f[0]}"
-            source="${f[1]}"
-            echo "OMEGA_GOOGLE_TRIGGER_LOAD state=${f[2]} source=$source active=$active"
+            [ "$state" = pending ] && active=true || true
           fi
           echo "active=$active" >> "$GITHUB_OUTPUT"
           echo "source_sha=$source" >> "$GITHUB_OUTPUT"
+          echo "OMEGA_GOOGLE_RECONCILE source=$source active=$active event=$EVENT_NAME"
 
       - name: Require immutable current main and pre-Google gates
         id: gate
         if: steps.trigger.outputs.active == 'true'
         env:
           SOURCE_SHA: ${{ steps.trigger.outputs.source_sha }}
-          CONTROL_TOKEN: ${{ github.token }}
           OMEGA_BOOTSTRAP_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
         shell: bash
         run: |
@@ -148,25 +120,11 @@ jobs:
             missing="$(python3 -c 'import json,os; print(",".join(json.load(open(os.environ["RUNNER_TEMP"]+"/google-gates.json"))["missing"][:6]))')"
             GH_TOKEN="$OMEGA_BOOTSTRAP_TOKEN" gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$SOURCE_SHA" \
               -f state=pending -f context="omega/google-one-click" \
-              -f description="waiting for pre-Google gates: $missing" \
+              -f description="waiting for exact-SHA gates: ${missing:0:95}" \
               -f target_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
-            python3 - "$SOURCE_SHA" "$missing" <<'PY' > "$RUNNER_TEMP/trigger-next.json"
-          import datetime,json,sys
-          print(json.dumps({
-            "schema_version":1,
-            "state":"WAITING",
-            "source_sha":sys.argv[1],
-            "package_id":"com.sublimedeafdesign.omegaengine",
-            "waiting_for":[x for x in sys.argv[2].split(",") if x],
-            "updated_at":datetime.datetime.now(datetime.timezone.utc).isoformat()
-          },indent=2,sort_keys=True))
-          PY
-            meta="$(GH_TOKEN="$CONTROL_TOKEN" gh api "/repos/$GITHUB_REPOSITORY/contents/$TRIGGER_PATH?ref=main")"
-            blob="$(printf '%s' "$meta" | jq -r .sha)"
-            encoded="$(base64 -w0 "$RUNNER_TEMP/trigger-next.json")"
-            GH_TOKEN="$CONTROL_TOKEN" gh api --method PUT "/repos/$GITHUB_REPOSITORY/contents/$TRIGGER_PATH" \
-              -f message="Google one-click: waiting for release gates" \
-              -f content="$encoded" -f sha="$blob" -f branch=main >/dev/null
+            echo "OMEGA_GOOGLE_WAITING source=$SOURCE_SHA missing=$missing"
+          else
+            echo "OMEGA_GOOGLE_PRE_GATES_PASS source=$SOURCE_SHA"
           fi
 
       - name: Check one-time Google trust configuration
@@ -468,16 +426,14 @@ jobs:
             omega/reports/google-supply-chain.json
             omega/dist/google-play
 
-      - name: Publish distribution proof and close trigger
+      - name: Publish exact-SHA Google distribution proof
         if: steps.config.outputs.configured == 'true'
         env:
           SOURCE_SHA: ${{ steps.trigger.outputs.source_sha }}
-          AAB_SHA256: ${{ steps.build.outputs.aab_sha256 }}
           RELEASE_ID: ${{ steps.build.outputs.release_id }}
           PLAY_OUTCOME: ${{ steps.play.outcome }}
           INTERNAL_SHARING_OUTCOME: ${{ steps.internal_sharing.outcome }}
           OMEGA_BOOTSTRAP_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
-          CONTROL_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -485,46 +441,26 @@ jobs:
           mode=""
           if [ "$PLAY_OUTCOME" = success ]; then
             mode=play_internal_testing
-            for ctx in omega/google-distribution omega/google-play/internal omega/google-play/app-signing; do
+            for ctx in omega/google-distribution omega/google-play/internal omega/google-play/app-signing omega/google-one-click; do
               GH_TOKEN="$OMEGA_BOOTSTRAP_TOKEN" gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$SOURCE_SHA" \
-                -f state=success -f context="$ctx" -f description="Google exact-SHA distribution PASS" \
+                -f state=success -f context="$ctx" -f description="Google exact-SHA distribution PASS ($mode)" \
                 -f target_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
             done
           elif [ "$INTERNAL_SHARING_OUTCOME" = success ]; then
             mode=play_internal_app_sharing
-            for ctx in omega/google-distribution omega/google-play/internal-app-sharing; do
+            for ctx in omega/google-distribution omega/google-play/internal-app-sharing omega/google-one-click; do
               GH_TOKEN="$OMEGA_BOOTSTRAP_TOKEN" gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$SOURCE_SHA" \
-                -f state=success -f context="$ctx" -f description="Google exact-SHA fallback distribution PASS" \
+                -f state=success -f context="$ctx" -f description="Google exact-SHA fallback distribution PASS ($mode)" \
                 -f target_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
             done
           else
-            GH_TOKEN="$OMEGA_BOOTSTRAP_TOKEN" gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$SOURCE_SHA" \
-              -f state=failure -f context="omega/google-distribution" \
-              -f description="Google Play and Internal App Sharing both failed" \
-              -f target_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
+            for ctx in omega/google-distribution omega/google-one-click; do
+              GH_TOKEN="$OMEGA_BOOTSTRAP_TOKEN" gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$SOURCE_SHA" \
+                -f state=failure -f context="$ctx" -f description="Google distribution failed after bounded fallback" \
+                -f target_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
+            done
             exit 74
           fi
-
-          python3 - "$SOURCE_SHA" "$RELEASE_ID" "$AAB_SHA256" "$mode" "$GITHUB_RUN_ID" <<'PY' > "$RUNNER_TEMP/trigger-done.json"
-          import datetime,json,sys
-          print(json.dumps({
-            "schema_version":1,
-            "state":"DISTRIBUTED",
-            "source_sha":sys.argv[1],
-            "package_id":"com.sublimedeafdesign.omegaengine",
-            "release_id":sys.argv[2],
-            "aab_sha256":sys.argv[3],
-            "distribution_mode":sys.argv[4],
-            "workflow_run_id":sys.argv[5],
-            "completed_at":datetime.datetime.now(datetime.timezone.utc).isoformat()
-          },indent=2,sort_keys=True))
-          PY
-          meta="$(GH_TOKEN="$CONTROL_TOKEN" gh api "/repos/$GITHUB_REPOSITORY/contents/$TRIGGER_PATH?ref=main")"
-          blob="$(printf '%s' "$meta" | jq -r .sha)"
-          encoded="$(base64 -w0 "$RUNNER_TEMP/trigger-done.json")"
-          GH_TOKEN="$CONTROL_TOKEN" gh api --method PUT "/repos/$GITHUB_REPOSITORY/contents/$TRIGGER_PATH" \
-            -f message="Google one-click: distribution complete for $SOURCE_SHA" \
-            -f content="$encoded" -f sha="$blob" -f branch=main >/dev/null
           echo "OMEGA_GOOGLE_ONE_CLICK_DISTRIBUTED source=$SOURCE_SHA mode=$mode release_id=$RELEASE_ID"
 
       - name: Remove ephemeral signing material
