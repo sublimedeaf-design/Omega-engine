@@ -1,1 +1,1 @@
-validate-exact-pr 7a326d4398071108b20116327123ef3a4aa5d78f hardening/status-signer-concurrency-20260927 signer-public-artifact-transport-v1
+validate-exact-pr bea9f9ee1c4187e03f6b82499d340e8f2477b497 release/android-limited-distribution-package limited-distribution-package-v1
