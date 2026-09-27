@@ -1,1 +1,1 @@
-validate-exact-pr 4b11e6f5e6be618ee5cad5d1981fb53543b93cc0 infra/play-canonical-signer-service-20260927 play-canonical-signer-infra
+validate-exact-pr 584472d9397e2dfc8769baaad7dfd9a6cb8285e5 hardening/content-addressed-release-state-machine-20260927 release-identity-state-machine-v6
