@@ -1,1 +1,1 @@
-validate-exact-pr 4999e7c7fdf8dab90a759ab3290e636b1008b64e hardening/hosted-limited-distribution-coldstart hosted-coldstart-v1
+validate-exact-pr 2c884a2bb5fac8898790fa6400fabd721d853199 hardening/limited-distribution-live-certifier limited-distribution-live-certifier-v1
