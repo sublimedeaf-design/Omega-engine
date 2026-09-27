@@ -17,6 +17,7 @@ on:
   push:
     paths:
       - ".github/workflows/omega-hosted-runtime-fallback.yml"
+      - "bootstrap/omega/runtime-refresh-trigger.txt"
 
 permissions:
   contents: read
