@@ -341,7 +341,7 @@ fail!("release_stager_capability_preflight_missing") unless stager_text.include?
 fail!("release_stager_missing_artifact_must_fail") unless stager_text.include?("OMEGA_RELEASE_STAGE_NOT_EXECUTED_NO_EVIDENCE_ARTIFACT") && stager_text.include?("exit 75")
 fail!("release_stager_rerun_source_fence_missing") unless stager_text.include?("OMEGA_RELEASE_STAGE_EVIDENCE_SOURCE_AMBIGUOUS") && stager_text.include?("newest immutable artifact deterministically")
 fail!("release_stager_artifact_id_binding_missing") unless stager_text.include?('artifact-ids: ${{ steps.pin.outputs.artifact_id }}')
-fail!("signer_workflow_handoff_must_fail") unless signer.include?("OMEGA_SIGNER_NO_UNSIGNED_HANDOFF upstream_run=") && signer.include?("exit 75")
+fail!("signer_workflow_handoff_must_fail") unless signer.include?("OMEGA_SIGNER_CURRENT_MAIN_UNSIGNED_HANDOFF_MISSING") && signer.include?("exit 75")
 postlive = File.read(WORKFLOWS.join("omega-post-live-verification.yml"), encoding: "UTF-8")
 fail!("postlive_must_not_use_workflow_run") if postlive.include?("workflow_run:")
 fail!("postlive_exact_dispatch_inputs_missing") unless postlive.include?("final_sha:") && postlive.include?("promoter_run_id:")
