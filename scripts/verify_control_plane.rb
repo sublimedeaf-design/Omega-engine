@@ -217,6 +217,11 @@ fail!("google_one_click_must_not_write_control_contents") if google_one_click.in
 fail!("google_one_click_status_reconciler_missing") unless google_one_click.include?('context="omega/google-one-click"') && google_one_click.include?("workflow_dispatch:") && google_one_click.include?("schedule:")
 fail!("google_one_click_oidc_missing") unless google_one_click.include?("id-token: write") && google_one_click.include?("google-github-actions/auth@")
 fail!("google_one_click_exact_source_missing") unless google_one_click.include?('commits/main" --jq .sha') && google_one_click.include?("OMEGA_GOOGLE_PRE_GATES_PASS")
+play_builder = File.read(WORKFLOWS.join("omega-play-content-addressed-builder.yml"), encoding: "UTF-8")
+fail!("legacy_play_builder_wrong_package_identity") if play_builder.include?("com.omega.app")
+fail!("legacy_play_builder_must_not_autostart") if play_builder.include?("push:")
+fail!("legacy_play_builder_must_not_publish_primary_signer_trigger") if play_builder.include?('context="omega/play-aab-build-unsigned"')
+fail!("legacy_play_builder_current_package_missing") unless play_builder.include?("com.sublimedeafdesign.omegaengine")
 
 %w[
   incident_id
