@@ -7,7 +7,7 @@ on:
       - "bootstrap/omega/play-release-trigger.json"
 
 permissions:
-  contents: read
+  contents: write
   id-token: write
   attestations: write
 
@@ -189,6 +189,43 @@ jobs:
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6
         with:
           subject-path: omega/dist/OMEGA-Engine-code19-unsigned.aab
+
+      - name: Publish content-addressed public release handoff
+        working-directory: omega
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          tag="omega-play-unsigned-$RELEASE_ID"
+          aab="dist/OMEGA-Engine-code19-unsigned.aab"
+          expected="$UNSIGNED_AAB_SHA"
+          if gh release view "$tag" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            tmp="$RUNNER_TEMP/existing-play-release"
+            rm -rf "$tmp"; mkdir -p "$tmp"
+            gh release download "$tag" -R "$GITHUB_REPOSITORY" -p "OMEGA-Engine-code19-unsigned.aab" -D "$tmp"
+            actual="$(sha256sum "$tmp/OMEGA-Engine-code19-unsigned.aab" | awk '{print $1}')"
+            test "$actual" = "$expected" || { echo "OMEGA_PLAY_PUBLIC_RELEASE_DIGEST_MISMATCH:$actual!=$expected" >&2; exit 69; }
+            echo "OMEGA_PLAY_PUBLIC_RELEASE_REUSED tag=$tag sha256=$actual"
+          else
+            gh release create "$tag" -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --draft \
+              --title "OMEGA unsigned Play handoff $RELEASE_ID" \
+              --notes "Content-addressed unsigned code19 handoff for private source $SOURCE_SHA. Canonical private signing is required before Play upload."
+            gh release upload "$tag" -R "$GITHUB_REPOSITORY" \
+              "$aab" \
+              "dist/OMEGA-Engine-code19-unsigned.aab.sha256" \
+              "dist/OMEGA-Play.unsigned.provenance.json" \
+              "dist/release-identity.json" \
+              "reports/omega-sbom.spdx.json"
+            gh release edit "$tag" -R "$GITHUB_REPOSITORY" --draft=false --prerelease
+            tmp="$RUNNER_TEMP/published-play-release"
+            rm -rf "$tmp"; mkdir -p "$tmp"
+            gh release download "$tag" -R "$GITHUB_REPOSITORY" -p "OMEGA-Engine-code19-unsigned.aab" -D "$tmp"
+            actual="$(sha256sum "$tmp/OMEGA-Engine-code19-unsigned.aab" | awk '{print $1}')"
+            test "$actual" = "$expected" || { echo "OMEGA_PLAY_PUBLIC_RELEASE_POSTPUBLISH_DIGEST_MISMATCH:$actual!=$expected" >&2; exit 69; }
+            echo "OMEGA_PLAY_PUBLIC_RELEASE_PUBLISHED tag=$tag sha256=$actual"
+          fi
+          echo "PUBLIC_RELEASE_TAG=$tag" >> "$GITHUB_ENV"
 
       - name: Upload immutable unsigned Play handoff
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
