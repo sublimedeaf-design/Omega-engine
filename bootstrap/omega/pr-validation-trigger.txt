@@ -1,1 +1,1 @@
-validate-exact-pr 27993f9e6e821c526966c96ce9cc0108a56c3a03 release/limited-distribution-canonical-apk limited-distribution-release-v3
+validate-exact-pr dabd81da880f7abcb6cf7932e4042904fd0f40f8 hardening/limited-distribution-installed-runtime limited-distribution-installed-runtime-v1
