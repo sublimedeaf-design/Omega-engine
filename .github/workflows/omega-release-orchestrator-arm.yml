@@ -3,6 +3,9 @@ name: OMEGA Release Orchestrator Arm
 
 on:
   workflow_dispatch:
+  workflow_run:
+    workflows: ["OMEGA Private PR Hosted Bridge"]
+    types: [completed]
   schedule:
     - cron: "3,18,33,48 * * * *"
   push:
@@ -33,6 +36,7 @@ env:
 
 jobs:
   arm:
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
