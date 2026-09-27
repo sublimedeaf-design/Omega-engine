@@ -225,7 +225,8 @@ fail!("legacy_play_builder_current_package_missing") unless play_builder.include
 
 resilience_certifier = File.read(ROOT.join("control-plane", "certify.mjs"), encoding: "UTF-8")
 fail!("resilience_scope_must_be_pre_signing") unless resilience_certifier.include?('scope:"PRE_SIGNING"') && resilience_certifier.include?("const releaseSignals=")
-fail!("resilience_must_not_gate_on_signer") if resilience_certifier.match?(/const layers=\{.*signer_continuity:/m)
+resilience_required_segment = resilience_certifier.split("const layers={", 2)[1].to_s.split("const releaseSignals=", 2)[0]
+fail!("resilience_must_not_gate_on_signer") if resilience_required_segment.include?("signer_continuity:")
 
 %w[
   incident_id
