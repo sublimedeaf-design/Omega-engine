@@ -1,1 +1,1 @@
-validate-exact-pr 75e988bb398db0391e2ca8910c585a24af14da15 release/auto-75e988bb398d artifact-first-release
+validate-exact-pr dad7f70329f7619b3d83fe4edea14801141dd744 hardening/current-generation-isolated-signer-v3 signer-generation-v3
