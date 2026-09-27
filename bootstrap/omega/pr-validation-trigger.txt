@@ -1,1 +1,1 @@
-validate-exact-pr 1f61dc3c22d656d5c85522bfb933ee1762a3d03b fix/signer-rescue-explicit-dispatch-no-hidden-toggle pr319-exact-source-runtime-handoff-final
+validate-exact-pr 3e49120d14c16ddf98cf5c6fc9d4c32a4067a69d fix/signer-rescue-explicit-dispatch-no-hidden-toggle pr319-runtime-concurrency-contract-final
