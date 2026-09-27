@@ -1,4 +1,4 @@
-name: OMEGA Google One-Click Release
+name: OMEGA Unified Autopilot
 
 on:
   workflow_dispatch:
@@ -44,10 +44,12 @@ jobs:
           [[ "$source" =~ ^[0-9a-f]{40}$ ]] || { echo OMEGA_GOOGLE_SOURCE_INVALID >&2; exit 64; }
           active=false
           if [ "$EVENT_NAME" = workflow_dispatch ]; then
-            GH_TOKEN="$OMEGA_BOOTSTRAP_TOKEN" gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$source" \
-              -f state=pending -f context="omega/google-one-click" \
-              -f description="unified exact-SHA release armed; reconciling mandatory gates" \
-              -f target_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
+            for ctx in omega/google-one-click omega/system-health; do
+              GH_TOKEN="$OMEGA_BOOTSTRAP_TOKEN" gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$source" \
+                -f state=pending -f context="$ctx" \
+                -f description="unified exact-SHA release armed; reconciling mandatory gates" \
+                -f target_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
+            done
             active=true
           elif [ "$EVENT_NAME" = schedule ]; then
             statuses="$(GH_TOKEN="$OMEGA_BOOTSTRAP_TOKEN" gh api "/repos/$PRIVATE_REPOSITORY/commits/$source/status?per_page=100")"
@@ -118,11 +120,13 @@ jobs:
           echo "ready=$ready" >> "$GITHUB_OUTPUT"
           if [ "$ready" != true ]; then
             missing="$(python3 -c 'import json,os; print(",".join(json.load(open(os.environ["RUNNER_TEMP"]+"/google-gates.json"))["missing"][:6]))')"
-            GH_TOKEN="$OMEGA_BOOTSTRAP_TOKEN" gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$SOURCE_SHA" \
-              -f state=pending -f context="omega/google-one-click" \
-              -f description="waiting for exact-SHA gates: ${missing:0:95}" \
-              -f target_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
-            echo "OMEGA_GOOGLE_WAITING source=$SOURCE_SHA missing=$missing"
+            for ctx in omega/google-one-click omega/system-health; do
+              GH_TOKEN="$OMEGA_BOOTSTRAP_TOKEN" gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$SOURCE_SHA" \
+                -f state=pending -f context="$ctx" \
+                -f description="waiting for exact-SHA gates: ${missing:0:95}" \
+                -f target_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
+            done
+            echo "OMEGA_UNIFIED_WAITING source=$SOURCE_SHA missing=$missing"
           else
             echo "OMEGA_GOOGLE_PRE_GATES_PASS source=$SOURCE_SHA"
           fi
@@ -152,10 +156,12 @@ jobs:
           if [ "${#missing[@]}" -gt 0 ]; then
             list="$(IFS=,; echo "${missing[*]}")"
             echo "configured=false" >> "$GITHUB_OUTPUT"
-            GH_TOKEN="$OMEGA_BOOTSTRAP_TOKEN" gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$SOURCE_SHA" \
-              -f state=pending -f context="omega/google-one-click" \
-              -f description="one-time Google setup required: $list" \
-              -f target_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
+            for ctx in omega/google-one-click omega/system-health; do
+              GH_TOKEN="$OMEGA_BOOTSTRAP_TOKEN" gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$SOURCE_SHA" \
+                -f state=pending -f context="$ctx" \
+                -f description="one-time Google trust setup required: ${list:0:92}" \
+                -f target_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
+            done
             echo "OMEGA_GOOGLE_SETUP_REQUIRED missing=$list"
             exit 0
           fi
@@ -441,20 +447,20 @@ jobs:
           mode=""
           if [ "$PLAY_OUTCOME" = success ]; then
             mode=play_internal_testing
-            for ctx in omega/google-distribution omega/google-play/internal omega/google-play/app-signing omega/google-one-click; do
+            for ctx in omega/google-distribution omega/google-play/internal omega/google-play/app-signing omega/google-one-click omega/system-health; do
               GH_TOKEN="$OMEGA_BOOTSTRAP_TOKEN" gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$SOURCE_SHA" \
                 -f state=success -f context="$ctx" -f description="Google exact-SHA distribution PASS ($mode)" \
                 -f target_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
             done
           elif [ "$INTERNAL_SHARING_OUTCOME" = success ]; then
             mode=play_internal_app_sharing
-            for ctx in omega/google-distribution omega/google-play/internal-app-sharing omega/google-one-click; do
+            for ctx in omega/google-distribution omega/google-play/internal-app-sharing omega/google-one-click omega/system-health; do
               GH_TOKEN="$OMEGA_BOOTSTRAP_TOKEN" gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$SOURCE_SHA" \
                 -f state=success -f context="$ctx" -f description="Google exact-SHA fallback distribution PASS ($mode)" \
                 -f target_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
             done
           else
-            for ctx in omega/google-distribution omega/google-one-click; do
+            for ctx in omega/google-distribution omega/google-one-click omega/system-health; do
               GH_TOKEN="$OMEGA_BOOTSTRAP_TOKEN" gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$SOURCE_SHA" \
                 -f state=failure -f context="$ctx" -f description="Google distribution failed after bounded fallback" \
                 -f target_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
