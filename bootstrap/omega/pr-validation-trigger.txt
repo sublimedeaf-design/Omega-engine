@@ -1,1 +1,1 @@
-validate-exact-pr 0706d54c36342ccc05b93dbcdfeeef3d4ed23bcb hardening/content-addressed-release-state-machine-20260927 release-identity-state-machine-v5
+validate-exact-pr 4b11e6f5e6be618ee5cad5d1981fb53543b93cc0 infra/play-canonical-signer-service-20260927 play-canonical-signer-infra
