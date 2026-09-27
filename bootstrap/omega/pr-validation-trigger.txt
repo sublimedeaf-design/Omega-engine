@@ -1,1 +1,1 @@
-validate-exact-pr 1c028c885246ab1d8dba417a30eba1d85c12b888 main current-main-release-reconcile
+validate-exact-pr 173751fc750f6836e8f62a79406d96246fead367 fix/arm64-runtime-tooling-20260927 pr-326-arm64-runtime-tooling
