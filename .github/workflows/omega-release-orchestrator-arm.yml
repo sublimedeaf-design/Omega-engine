@@ -155,11 +155,19 @@ jobs:
             [[ "$existing" =~ ^[0-9a-f]{40}$ ]] || { echo "OMEGA_RELEASE_CONTROLLER_REF_RESPONSE_INVALID:$source_ref" >&2; exit 68; }
           fi
           if [ -z "$existing" ]; then
-            # Capability-based authorization: prefer the scoped GitHub App, but
-            # allow the encrypted bootstrap authority when it can actually create
-            # this single immutable release ref. Fail closed on a denied probe.
-            if ! gh api --method POST "/repos/$PRIVATE_REPOSITORY/git/refs" \
-              -f ref="refs/heads/$source_ref" -f sha="$candidate" >/dev/null 2>&1; then
+            # Least privilege: only a scoped GitHub App may mutate the private
+            # repository cross-repo. Legacy bootstrap credentials are read/dispatch
+            # authority only and always delegate the write to the repo-local actuator.
+            direct_created=false
+            if [ "${OMEGA_RELEASE_AUTH_SOURCE:-}" = github-app ]; then
+              if gh api --method POST "/repos/$PRIVATE_REPOSITORY/git/refs" \
+                -f ref="refs/heads/$source_ref" -f sha="$candidate" >/dev/null 2>&1; then
+                direct_created=true
+                existing="$candidate"
+                echo "OMEGA_RELEASE_CONTROLLER_REF_CREATED ref=$source_ref source=$candidate authority=github-app"
+              fi
+            fi
+            if [ "$direct_created" != true ]; then
               # Preferred zero-trust fallback: ask the private repository to
               # perform its own create-only mutation with its repo-local
               # GITHUB_TOKEN. The helper never receives or exports that token.
@@ -200,9 +208,6 @@ jobs:
                 echo "OMEGA_RELEASE_CONTROLLER_AUTHORITY_WAIT source=$candidate ref=$source_ref authority=repo-local-actuator"
                 exit 0
               fi
-            else
-              existing="$candidate"
-              echo "OMEGA_RELEASE_CONTROLLER_REF_CREATED ref=$source_ref source=$candidate authority=${OMEGA_RELEASE_AUTH_SOURCE:-unknown}"
             fi
           fi
           [ "$existing" = "$candidate" ] || { echo "OMEGA_RELEASE_CONTROLLER_REF_COLLISION:$source_ref:$existing!=$candidate" >&2; exit 68; }
