@@ -8,17 +8,19 @@ on:
     branches: [main]
     paths:
       - ".github/workflows/omega-signer-continuity-arm.yml"
+      - ".github/workflows/omega-canonical-android-signer.yml"
 
 permissions:
   contents: read
+  actions: write
 
 concurrency:
   group: omega-signer-continuity-arm
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 env:
   PRIVATE_REPOSITORY: sublimedeaf-design/Omega-engines
-  SIGNER_WORKFLOW: android-signing-keepalive.yml
+  SIGNER_WORKFLOW: omega-canonical-android-signer.yml
   MAX_AGE_MINUTES: "10080"
 
 jobs:
@@ -26,131 +28,115 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Detect scoped private release authority configuration
-        id: release_app_config
-        env:
-          RELEASE_APP_CLIENT_ID: ${{ vars.OMEGA_RELEASE_APP_CLIENT_ID }}
-          RELEASE_APP_PRIVATE_KEY: ${{ secrets.OMEGA_RELEASE_APP_PRIVATE_KEY }}
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          configured=false
-          if [ -n "${RELEASE_APP_CLIENT_ID:-}" ] && [ -n "${RELEASE_APP_PRIVATE_KEY:-}" ]; then
-            configured=true
-          fi
-          echo "configured=$configured" >> "$GITHUB_OUTPUT"
-          echo "OMEGA_RELEASE_APP_CONFIG configured=$configured"
-
-      - name: Mint scoped signer Actions authority
-        id: release_app
-        if: steps.release_app_config.outputs.configured == 'true'
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          client-id: ${{ vars.OMEGA_RELEASE_APP_CLIENT_ID }}
-          private-key: ${{ secrets.OMEGA_RELEASE_APP_PRIVATE_KEY }}
-          owner: sublimedeaf-design
-          repositories: Omega-engines
-          permission-actions: write
-          permission-contents: read
-          permission-statuses: write
+          persist-credentials: false
+          fetch-depth: 1
 
-      - name: Select signer Actions authority
+      - name: Verify canonical hosted signer and exact upstream handoff
+        id: gate
         env:
-          APP_TOKEN: ${{ steps.release_app.outputs.token }}
-          LEGACY_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          if [ -n "${APP_TOKEN:-}" ]; then
-            token="$APP_TOKEN"
-            source=github-app
-          else
-            token="${LEGACY_TOKEN:-}"
-            source=legacy-bootstrap
-          fi
-          [ -n "$token" ] || { echo "OMEGA_SIGNER_AUTHORITY_MISSING" >&2; exit 77; }
-          echo "::add-mask::$token"
-          echo "OMEGA_PRIVATE_SIGNER_TOKEN=$token" >> "$GITHUB_ENV"
-          echo "OMEGA_SIGNER_AUTH_SOURCE=$source" >> "$GITHUB_ENV"
-          echo "OMEGA_SIGNER_AUTHORITY_SELECTED source=$source"
-
-      - name: Dispatch canonical private signer proof only when needed
-        env:
-          GH_TOKEN: ${{ env.OMEGA_PRIVATE_SIGNER_TOKEN }}
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          OMEGA_ANDROID_KEYSTORE_B64: ${{ secrets.OMEGA_ANDROID_KEYSTORE_B64 }}
         shell: bash
         run: |
           set -Eeuo pipefail
           set +x
-
           sha="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/main" --jq '.sha')"
-          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || {
-            echo "OMEGA_SIGNER_ARM_MAIN_SHA_INVALID" >&2
-            exit 64
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo OMEGA_SIGNER_ARM_MAIN_SHA_INVALID >&2; exit 64; }
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+          publish() {
+            local state="$1" context="$2" description="$3"
+            gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$sha"               -f state="$state" -f context="$context" -f description="$description"               -f target_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
           }
 
           statuses="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/$sha/status?per_page=100")"
           if STATUS_PAYLOAD="$statuses" MAX_AGE_MINUTES="$MAX_AGE_MINUTES" python3 <<'PY'
           import datetime,json,os
-          payload=json.loads(os.environ["STATUS_PAYLOAD"])
-          now=datetime.datetime.now(datetime.timezone.utc)
-          max_age=int(os.environ["MAX_AGE_MINUTES"])
-          rows=[r for r in payload.get("statuses",[]) if r.get("context")=="omega/signer/continuity"]
-          rows.sort(key=lambda r:str(r.get("updated_at") or r.get("created_at") or ""),reverse=True)
-          if not rows or rows[0].get("state")!="success":
-              raise SystemExit(1)
-          raw=str(rows[0].get("updated_at") or rows[0].get("created_at") or "")
-          try:
-              at=datetime.datetime.fromisoformat(raw.replace("Z","+00:00"))
-          except ValueError:
-              raise SystemExit(1)
-          age=(now-at).total_seconds()
-          raise SystemExit(0 if -300 <= age <= max_age*60 else 1)
+          p=json.loads(os.environ["STATUS_PAYLOAD"])
+          latest={}
+          for row in p.get("statuses",[]):
+              ctx=str(row.get("context") or "")
+              stamp=str(row.get("updated_at") or row.get("created_at") or "")
+              if ctx and (ctx not in latest or stamp > str(latest[ctx].get("_stamp") or "")):
+                  latest[ctx]={**row,"_stamp":stamp}
+          row=latest.get("omega/signer/continuity") or {}
+          if row.get("state")!="success": raise SystemExit(1)
+          raw=str(row.get("updated_at") or row.get("created_at") or "")
+          try: at=datetime.datetime.fromisoformat(raw.replace("Z","+00:00"))
+          except ValueError: raise SystemExit(1)
+          age=(datetime.datetime.now(datetime.timezone.utc)-at).total_seconds()
+          raise SystemExit(0 if -300 <= age <= int(os.environ["MAX_AGE_MINUTES"])*60 else 1)
           PY
           then
+            echo "dispatch=false" >> "$GITHUB_OUTPUT"
             echo "OMEGA_SIGNER_ARM_CURRENT sha=$sha"
             exit 0
           fi
 
-          actions_payload=""
-          actions_err="$(mktemp)"
-          if ! actions_payload="$(gh api "/repos/$PRIVATE_REPOSITORY/actions/workflows/$SIGNER_WORKFLOW/runs?branch=main&per_page=20" 2>"$actions_err")"; then
-            echo "OMEGA_SIGNER_ARM_PERMISSION_BLOCKED sha=$sha required=private-actions-read-write" >&2
-            sed -n '1,3p' "$actions_err" >&2 || true
-            rm -f "$actions_err"
-            gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$sha" \
-              -f state=pending \
-              -f context="omega/signer/key-availability" \
-              -f description="BLOCKED: private Actions authority unavailable; signer identity remains separately attested" >/dev/null 2>&1 || true
-            gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$sha" \
-              -f state=error \
-              -f context="omega/authority/private-actions" \
-              -f description="BLOCKED: scoped private Actions authority unavailable" >/dev/null 2>&1 || true
-            echo "OMEGA_SIGNER_AUTHORITY_BLOCKED_STATE sha=$sha phase=actions-read"
-            exit 0
-          fi
-          rm -f "$actions_err"
-
-          active="$(printf '%s' "$actions_payload" | jq '[.workflow_runs[] | select(.status=="queued" or .status=="in_progress" or .status=="pending")] | length')"
-          if [ "$active" != 0 ]; then
-            echo "OMEGA_SIGNER_ARM_ACTIVE sha=$sha active=$active"
+          if [ -z "${OMEGA_ANDROID_KEYSTORE_B64:-}" ]; then
+            publish pending "omega/signer/key-availability" "canonical signer escrow not configured; signing waits fail-closed"
+            publish error "omega/signer/escrow" "canonical signer escrow missing"
+            echo "dispatch=false" >> "$GITHUB_OUTPUT"
+            echo "OMEGA_HOSTED_SIGNER_ESCROW_NOT_CONFIGURED sha=$sha"
             exit 0
           fi
 
-          dispatch_err="$(mktemp)"
-          if ! gh api --method POST             "/repos/$PRIVATE_REPOSITORY/actions/workflows/$SIGNER_WORKFLOW/dispatches"             -f ref=main >/dev/null 2>"$dispatch_err"; then
-            echo "OMEGA_SIGNER_ARM_PERMISSION_BLOCKED sha=$sha required=private-actions-read-write" >&2
-            sed -n '1,3p' "$dispatch_err" >&2 || true
-            rm -f "$dispatch_err"
-            gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$sha" \
-              -f state=pending \
-              -f context="omega/signer/key-availability" \
-              -f description="BLOCKED: private Actions dispatch unavailable; signer identity remains separately attested" >/dev/null 2>&1 || true
-            gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$sha" \
-              -f state=error \
-              -f context="omega/authority/private-actions" \
-              -f description="BLOCKED: scoped private Actions authority unavailable" >/dev/null 2>&1 || true
-            echo "OMEGA_SIGNER_AUTHORITY_BLOCKED_STATE sha=$sha phase=actions-dispatch"
+          expected="$(gh api "/repos/$PRIVATE_REPOSITORY/contents/android/signing-cert.sha256?ref=$sha" --jq '.content'             | tr -d '\n' | base64 -d | tr -d '[:space:]' | tr -d ':' | tr 'A-F' 'a-f')"
+          [[ "$expected" =~ ^[0-9a-f]{64}$ ]] || { echo OMEGA_SIGNER_EXPECTED_FINGERPRINT_INVALID >&2; exit 31; }
+          key="$(mktemp)"
+          trap 'rm -f "$key"' EXIT
+          umask 077
+          printf '%s' "$OMEGA_ANDROID_KEYSTORE_B64" | base64 -d > "$key" || { echo OMEGA_SIGNER_ESCROW_DECODE_FAILED >&2; exit 32; }
+          actual="$(keytool -list -v -keystore "$key" -storepass android -alias androiddebugkey 2>/dev/null             | sed -n 's/.*SHA256: //p' | head -1 | tr -d ':' | tr 'A-F' 'a-f')"
+          [ "$actual" = "$expected" ] || { echo OMEGA_SIGNER_ESCROW_FINGERPRINT_MISMATCH >&2; exit 33; }
+          publish success "omega/signer/key-availability" "canonical private key available and fingerprint verified"
+          publish success "omega/signer/escrow" "hosted canonical signer escrow fingerprint verified"
+
+          ready="$(STATUS_PAYLOAD="$statuses" python3 - <<'PY'
+          import json,os
+          p=json.loads(os.environ["STATUS_PAYLOAD"]); latest={}
+          for row in p.get("statuses",[]):
+              ctx=str(row.get("context") or "")
+              stamp=str(row.get("updated_at") or row.get("created_at") or "")
+              if ctx and (ctx not in latest or stamp > str(latest[ctx].get("_stamp") or "")):
+                  latest[ctx]={**row,"_stamp":stamp}
+          required=(
+              "omega/exact-final-validation",
+              "omega/federation-v3-release",
+              "omega/hosted-recovery",
+              "omega/recovery-attestation",
+              "omega/candidate-evidence-root",
+              "omega/release-evidence-staged",
+              "omega/android-release-unsigned",
+          )
+          print("true" if all((latest.get(x) or {}).get("state")=="success" for x in required) else "false")
+          PY
+          )"
+          echo "dispatch=$ready" >> "$GITHUB_OUTPUT"
+          if [ "$ready" = true ]; then
+            echo "OMEGA_SIGNER_ARM_UPSTREAM_READY sha=$sha"
+          else
+            echo "OMEGA_SIGNER_ARM_WAIT_UPSTREAM sha=$sha"
+          fi
+
+      - name: Dispatch public canonical signer exactly once
+        if: steps.gate.outputs.dispatch == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          active="$(
+            {
+              gh api "/repos/$GITHUB_REPOSITORY/actions/workflows/$SIGNER_WORKFLOW/runs?status=queued&per_page=20" --jq '.total_count'
+              gh api "/repos/$GITHUB_REPOSITORY/actions/workflows/$SIGNER_WORKFLOW/runs?status=in_progress&per_page=20" --jq '.total_count'
+            } | awk '{s+=$1} END{print s+0}'
+          )"
+          if [ "$active" -gt 0 ]; then
+            echo "OMEGA_SIGNER_ARM_PUBLIC_SIGNER_ALREADY_ACTIVE count=$active"
             exit 0
           fi
-          rm -f "$dispatch_err"
-          echo "OMEGA_SIGNER_ARM_DISPATCHED sha=$sha workflow=$SIGNER_WORKFLOW"
+          gh workflow run "$SIGNER_WORKFLOW" -R "$GITHUB_REPOSITORY" --ref main
+          echo "OMEGA_SIGNER_ARM_PUBLIC_SIGNER_DISPATCHED sha=${{ steps.gate.outputs.sha }}"
