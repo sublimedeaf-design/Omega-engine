@@ -131,6 +131,21 @@ jobs:
             [[ "$existing" =~ ^[0-9a-f]{40}$ ]] || { echo "OMEGA_RELEASE_CONTROLLER_REF_RESPONSE_INVALID:$source_ref" >&2; exit 68; }
           fi
           if [ -z "$existing" ]; then
+            if [ "${OMEGA_RELEASE_AUTH_SOURCE:-}" != github-app ]; then
+              echo "dispatch=false" >> "$GITHUB_OUTPUT"
+              echo "source_sha=$candidate" >> "$GITHUB_OUTPUT"
+              echo "source_ref=$source_ref" >> "$GITHUB_OUTPUT"
+              gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$candidate" \
+                -f state=pending -f context="omega/authority/private-actions" \
+                -f description="scoped GitHub App authority required to create immutable release ref" \
+                -f target_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
+              gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$candidate" \
+                -f state=pending -f context="omega/control-plane/release-controller" \
+                -f description="waiting for immutable release ref authority gen=${candidate:0:12}" \
+                -f target_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
+              echo "OMEGA_RELEASE_CONTROLLER_AUTHORITY_WAIT source=$candidate ref=$source_ref"
+              exit 0
+            fi
             gh api --method POST "/repos/$PRIVATE_REPOSITORY/git/refs" \
               -f ref="refs/heads/$source_ref" -f sha="$candidate" >/dev/null
             existing="$candidate"
