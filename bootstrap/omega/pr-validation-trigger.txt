@@ -1,1 +1,1 @@
-validate-exact-pr 4215c8a4622a53fe7e947d2cd77c7743c2e97229 release/live-4215c8a4-20260927 final-bigtech-unified-release-v1
+validate-exact-pr 3fd42e9b8ddf7b7f5b638abb467ad1eceb647122 release/limited-distribution-zero-cost-v2 limited-distribution-zero-cost-v2
