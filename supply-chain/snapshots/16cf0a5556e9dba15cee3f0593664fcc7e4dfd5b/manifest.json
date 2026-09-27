@@ -1,0 +1,37 @@
+{
+  "files": [
+    {
+      "bytes": 141150,
+      "path": "gradle/gradle-verification-metadata.xml",
+      "sha256": "f62644da35acaf3ec1913a646551e9f4899163cdb91d86c577988f3439b786ae"
+    },
+    {
+      "bytes": 1022,
+      "path": "python/requirements-ci-py311-linux-x86_64.lock",
+      "sha256": "84c2b98a79c6163f1446308259a93685eb7273c00a2dccbd178ad41ebe967c5e"
+    },
+    {
+      "bytes": 1022,
+      "path": "python/requirements-ci-py312-linux-x86_64.lock",
+      "sha256": "33fdb105dcbdda4624c187aa16706fadde73d80c28cc73591210774ad165d224"
+    },
+    {
+      "bytes": 1022,
+      "path": "python/requirements-ci-py313-linux-x86_64.lock",
+      "sha256": "37fc3343039c9c870f0d417e9b0c4433f47f9d914bf16b39a6b0ef2d262cebe9"
+    },
+    {
+      "bytes": 1022,
+      "path": "python/requirements-ci-py314-linux-x86_64.lock",
+      "sha256": "1feb9afa5342bdef4df28105396755dc9d341c24744fec3d91a5075b18db5991"
+    }
+  ],
+  "generator_repository": "sublimedeaf-design/Omega-engine",
+  "private_source_sha": "16cf0a5556e9dba15cee3f0593664fcc7e4dfd5b",
+  "schema_version": 1,
+  "snapshot_manifest_sha256": "8d4b66db80077a749f526553e830fb1addcf4288445234d9b8e55fe9685996d4",
+  "state": "IMMUTABLE_GENERATED_SNAPSHOT",
+  "workflow": "OMEGA Supply Chain Lock Lab",
+  "workflow_run_attempt": 1,
+  "workflow_run_id": 36322023781
+}
