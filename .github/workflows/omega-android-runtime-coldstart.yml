@@ -172,32 +172,32 @@ jobs:
 
           adb install -r "$apk" > "$RUNNER_TEMP/android-coldstart/install.txt"
           adb logcat -c
-          adb shell am force-stop $OMEGA_PACKAGE_ID
-          adb shell pm clear $OMEGA_PACKAGE_ID >/dev/null
-          adb shell am start -W -S -n $OMEGA_PACKAGE_ID/.MainActivity | tee "$RUNNER_TEMP/android-coldstart/launch.txt"
+          adb shell am force-stop "$OMEGA_PACKAGE_ID"
+          adb shell pm clear "$OMEGA_PACKAGE_ID" >/dev/null
+          adb shell am start -W -S -n "$OMEGA_PACKAGE_ID/.MainActivity" | tee "$RUNNER_TEMP/android-coldstart/launch.txt"
           grep -Eq 'Status: ok|Complete' "$RUNNER_TEMP/android-coldstart/launch.txt"
           sleep 8
-          pid="$(adb shell pidof $OMEGA_PACKAGE_ID | tr -d '\r')"
+          pid="$(adb shell pidof "$OMEGA_PACKAGE_ID" | tr -d '\r')"
           [ -n "$pid" ] || { echo OMEGA_ANDROID_COLDSTART_PROCESS_NOT_ALIVE >&2; exit 75; }
           adb shell dumpsys activity activities > "$RUNNER_TEMP/android-coldstart/activities.txt"
           grep -F "$OMEGA_PACKAGE_ID/.MainActivity" "$RUNNER_TEMP/android-coldstart/activities.txt" >/dev/null
           adb exec-out screencap -p > "$RUNNER_TEMP/android-coldstart/coldstart.png" || true
           adb logcat -d > "$RUNNER_TEMP/android-coldstart/logcat.txt"
-          if grep -E 'FATAL EXCEPTION|ANR in com\.omega\.app|Process: com\.omega\.app, PID:' "$RUNNER_TEMP/android-coldstart/logcat.txt"; then
+          if grep -E 'FATAL EXCEPTION|ANR in com\.sublimedeafdesign\.omegaengine|Process: com\.sublimedeafdesign\.omegaengine, PID:' "$RUNNER_TEMP/android-coldstart/logcat.txt"; then
             echo OMEGA_ANDROID_COLDSTART_FATAL_RUNTIME_SIGNAL >&2
             exit 76
           fi
 
           # A second fresh-data launch catches one-time initialization defects.
           adb logcat -c
-          adb shell am force-stop $OMEGA_PACKAGE_ID
-          adb shell pm clear $OMEGA_PACKAGE_ID >/dev/null
-          adb shell am start -W -S -n $OMEGA_PACKAGE_ID/.MainActivity | tee "$RUNNER_TEMP/android-coldstart/relaunch.txt"
+          adb shell am force-stop "$OMEGA_PACKAGE_ID"
+          adb shell pm clear "$OMEGA_PACKAGE_ID" >/dev/null
+          adb shell am start -W -S -n "$OMEGA_PACKAGE_ID/.MainActivity" | tee "$RUNNER_TEMP/android-coldstart/relaunch.txt"
           sleep 5
-          pid2="$(adb shell pidof $OMEGA_PACKAGE_ID | tr -d '\r')"
+          pid2="$(adb shell pidof "$OMEGA_PACKAGE_ID" | tr -d '\r')"
           [ -n "$pid2" ] || { echo OMEGA_ANDROID_COLDSTART_RELAUNCH_PROCESS_NOT_ALIVE >&2; exit 77; }
           adb logcat -d > "$RUNNER_TEMP/android-coldstart/relaunch-logcat.txt"
-          if grep -E 'FATAL EXCEPTION|ANR in com\.omega\.app|Process: com\.omega\.app, PID:' "$RUNNER_TEMP/android-coldstart/relaunch-logcat.txt"; then
+          if grep -E 'FATAL EXCEPTION|ANR in com\.sublimedeafdesign\.omegaengine|Process: com\.sublimedeafdesign\.omegaengine, PID:' "$RUNNER_TEMP/android-coldstart/relaunch-logcat.txt"; then
             echo OMEGA_ANDROID_COLDSTART_RELAUNCH_FATAL_RUNTIME_SIGNAL >&2
             exit 78
           fi
