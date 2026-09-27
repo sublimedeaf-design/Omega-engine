@@ -21,6 +21,7 @@ permissions:
 concurrency:
   group: omega-gate-failure-router
   cancel-in-progress: false
+  queue: max
 
 env:
   PRIVATE_REPOSITORY: sublimedeaf-design/Omega-engines
