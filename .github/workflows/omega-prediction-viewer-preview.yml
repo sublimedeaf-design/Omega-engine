@@ -151,22 +151,22 @@ jobs:
           import sys
           p=Path(sys.argv[1])
           s=p.read_text(encoding="utf-8")
-          old='''        if (github.canSync()) {
-              sync(false);
-          } else {
-              status.setText("Eerste veilige GitHub-koppeling voorbereiden…");
-              startAutomaticConnection();
-          }'''
-          new='''        if (github.canSync()) {
-              sync(false);
-          } else {
-              status.setText("Actuele ingebouwde voorspellingen geladen · GitHub-koppeling optioneel");
-          }'''
-          if old not in s:
-              raise SystemExit("OMEGA_VIEWER_AUTOLINK_BLOCK_NOT_FOUND")
-          p.write_text(s.replace(old,new,1),encoding="utf-8")
+          old_status='status.setText("Eerste veilige GitHub-koppeling voorbereiden…");'
+          old_start='startAutomaticConnection();'
+          if old_status not in s:
+              raise SystemExit("OMEGA_VIEWER_STATUS_LINE_NOT_FOUND")
+          if old_start not in s:
+              raise SystemExit("OMEGA_VIEWER_AUTOLINK_CALL_NOT_FOUND")
+          s=s.replace(
+              old_status,
+              'status.setText("Actuele ingebouwde voorspellingen geladen · GitHub-koppeling optioneel");',
+              1,
+          )
+          s=s.replace(old_start,'/* preview: optional GitHub linking disabled at startup */',1)
+          p.write_text(s,encoding="utf-8")
           PY
           grep -Fq 'Actuele ingebouwde voorspellingen geladen' "$file"
+          ! grep -Fq 'startAutomaticConnection();' "$file"
 
       - name: Install Android SDK 36
         shell: bash
