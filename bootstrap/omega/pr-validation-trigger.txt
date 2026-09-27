@@ -1,1 +1,1 @@
-validate-exact-pr e6f39442deaa3584b4e9cf469f007df2108c97dc main final-main-reattest-v1
+validate-exact-pr e6f39442deaa3584b4e9cf469f007df2108c97dc release/live-e6f39442-20260927 final-release-federation-v1
