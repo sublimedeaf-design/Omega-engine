@@ -494,6 +494,8 @@ fail!("release_orchestrator_404_stdout_collision_regression") if orchestrator.in
 fail!("release_orchestrator_scoped_app_authority_missing") unless orchestrator.include?("actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1") && orchestrator.include?("repositories: Omega-engines") && orchestrator.include?("permission-contents: write") && orchestrator.include?("permission-statuses: write")
 fail!("release_orchestrator_private_token_selection_missing") unless orchestrator.include?("OMEGA_PRIVATE_RELEASE_TOKEN") && orchestrator.include?("OMEGA_RELEASE_AUTHORITY_SELECTED")
 fail!("release_orchestrator_reconcile_must_use_selected_private_authority") unless orchestrator.include?('GH_TOKEN: ${{ env.OMEGA_PRIVATE_RELEASE_TOKEN }}')
+fail!("release_orchestrator_missing_authority_wait_state") unless orchestrator.include?("OMEGA_RELEASE_CONTROLLER_AUTHORITY_WAIT") && orchestrator.include?('context="omega/authority/private-actions"') && orchestrator.include?("scoped GitHub App authority required")
+fail!("release_orchestrator_legacy_must_not_create_private_ref") unless orchestrator.include?('if [ "${OMEGA_RELEASE_AUTH_SOURCE:-}" != github-app ]; then')
 fail!("release_orchestrator_must_not_mutate_epoch") if orchestrator.include?("/contents/federation/epochs/current.json") && orchestrator.include?("--method PUT")
 
 # Supply-chain provenance must survive the unsigned handoff and be verified before
