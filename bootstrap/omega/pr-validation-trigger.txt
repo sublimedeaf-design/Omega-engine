@@ -1,1 +1,1 @@
-validate-exact-pr a8fdd6b31203bb5240ed7256d122756e0f2acece release/code19-main-a8fdd6b3 post-merge-status-driven-signer-v1
+validate-exact-pr a8fdd6b31203bb5240ed7256d122756e0f2acece release/code19-final-a8fdd6b3 final-code19-live-v1
