@@ -22,35 +22,50 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 18
     steps:
-      - name: Resolve exact private main and latest hosted evidence
+      - name: Resolve newest same-source hosted T24/T60 evidence pair
         id: source
         env:
-          PRIVATE_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
           PUBLIC_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -Eeuo pipefail
           set +x
-          private_sha="$(GH_TOKEN="$PRIVATE_TOKEN" gh api "/repos/$PRIVATE_REPOSITORY/commits/main" --jq '.sha')"
-          [[ "$private_sha" =~ ^[0-9a-f]{40}$ ]] || exit 64
-
           artifacts="$(GH_TOKEN="$PUBLIC_TOKEN" gh api "/repos/$GITHUB_REPOSITORY/actions/artifacts?per_page=100")"
-          pick() {
-            local mode="$1"
-            printf '%s' "$artifacts" | python3 -c '
-          import json,sys
-          mode=sys.argv[1]
-          p=json.load(sys.stdin)
-          prefix=f"omega-runtime-handoff-{mode}-"
-          rows=[x for x in p.get("artifacts",[]) if not x.get("expired") and str(x.get("name") or "").startswith(prefix)]
-          rows.sort(key=lambda x:str(x.get("created_at") or ""), reverse=True)
-          print(rows[0].get("id","") if rows else "")
-          ' "$mode"
-          }
-          t24_id="$(pick t24)"
-          t60_id="$(pick t60)"
-          [ -n "$t24_id" ] || { echo "OMEGA_VIEWER_T24_ARTIFACT_MISSING" >&2; exit 65; }
-          [ -n "$t60_id" ] || { echo "OMEGA_VIEWER_T60_ARTIFACT_MISSING" >&2; exit 66; }
+          ARTIFACTS="$artifacts" python3 - <<'PY' > "$RUNNER_TEMP/viewer-source.txt"
+          import json,os,re
+          p=json.loads(os.environ["ARTIFACTS"])
+          by={}
+          rx=re.compile(r"^omega-runtime-handoff-(t24|t60)-([0-9a-f]{40})$")
+          for a in p.get("artifacts",[]):
+              if a.get("expired"):
+                  continue
+              m=rx.fullmatch(str(a.get("name") or ""))
+              if not m:
+                  continue
+              mode,sha=m.groups()
+              row=by.setdefault(sha,{})
+              cur=row.get(mode)
+              if cur is None or str(a.get("created_at") or "") > str(cur.get("created_at") or ""):
+                  row[mode]=a
+          pairs=[]
+          for sha,row in by.items():
+              if "t24" in row and "t60" in row:
+                  stamp=max(str(row["t24"].get("created_at") or ""),str(row["t60"].get("created_at") or ""))
+                  pairs.append((stamp,sha,row["t24"],row["t60"]))
+          if not pairs:
+              raise SystemExit("OMEGA_VIEWER_SAME_SOURCE_PAIR_MISSING")
+          pairs.sort(reverse=True,key=lambda x:x[0])
+          _,sha,t24,t60=pairs[0]
+          print(sha)
+          print(t24["id"])
+          print(t60["id"])
+          PY
+          private_sha="$(sed -n '1p' "$RUNNER_TEMP/viewer-source.txt")"
+          t24_id="$(sed -n '2p' "$RUNNER_TEMP/viewer-source.txt")"
+          t60_id="$(sed -n '3p' "$RUNNER_TEMP/viewer-source.txt")"
+          [[ "$private_sha" =~ ^[0-9a-f]{40}$ ]] || { echo OMEGA_VIEWER_SOURCE_INVALID >&2; exit 64; }
+          [ -n "$t24_id" ] || { echo OMEGA_VIEWER_T24_ARTIFACT_MISSING >&2; exit 65; }
+          [ -n "$t60_id" ] || { echo OMEGA_VIEWER_T60_ARTIFACT_MISSING >&2; exit 66; }
           {
             echo "private_sha=$private_sha"
             echo "t24_id=$t24_id"
@@ -110,15 +125,18 @@ jobs:
             echo "OMEGA_VIEWER_CANONICAL_T24_FALLBACK rows=$canonical_rows"
           fi
 
-          python3 - <<'PY'
-          import json
+          SOURCE_SHA="${{ steps.source.outputs.private_sha }}" python3 - <<'PY'
+          import json,os
           from pathlib import Path
           root=Path("omega/android/app/src/main/assets/evidence")
+          source=os.environ["SOURCE_SHA"]
           for name in ("latest-24h.json","latest-t60.json","coverage-gaps.json"):
               p=root/name
               data=json.loads(p.read_text(encoding="utf-8"),parse_constant=lambda x: (_ for _ in ()).throw(ValueError(x)))
               if not isinstance(data,dict):
                   raise SystemExit(f"OMEGA_VIEWER_EVIDENCE_NOT_OBJECT:{name}")
+              if name in {"latest-24h.json","latest-t60.json"} and data.get("git_commit")!=source:
+                  raise SystemExit(f"OMEGA_VIEWER_EVIDENCE_SOURCE_MISMATCH:{name}:{data.get('git_commit')}!={source}")
               print(name,data.get("generated_at"),data.get("engine_health"),len(data.get("results") or []))
           PY
 
@@ -126,10 +144,29 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          file=omega/android/app/src/main/java/com/omega/app/MainActivity.java
-          grep -Fq 'if (github.canSync()) sync(false); else startAutomaticConnection();' "$file"
-          sed -i 's/if (github.canSync()) sync(false); else startAutomaticConnection();/if (github.canSync()) sync(false);/' "$file"
-          grep -Fq 'if (github.canSync()) sync(false);' "$file"
+          file=omega/android/app/src/main/java/com/sublimedeafdesign/omegaengine/MainActivity.java
+          test -s "$file"
+          python3 - "$file" <<'PY'
+          from pathlib import Path
+          import sys
+          p=Path(sys.argv[1])
+          s=p.read_text(encoding="utf-8")
+          old='''        if (github.canSync()) {
+              sync(false);
+          } else {
+              status.setText("Eerste veilige GitHub-koppeling voorbereiden…");
+              startAutomaticConnection();
+          }'''
+          new='''        if (github.canSync()) {
+              sync(false);
+          } else {
+              status.setText("Actuele ingebouwde voorspellingen geladen · GitHub-koppeling optioneel");
+          }'''
+          if old not in s:
+              raise SystemExit("OMEGA_VIEWER_AUTOLINK_BLOCK_NOT_FOUND")
+          p.write_text(s.replace(old,new,1),encoding="utf-8")
+          PY
+          grep -Fq 'Actuele ingebouwde voorspellingen geladen' "$file"
 
       - name: Install Android SDK 36
         shell: bash
