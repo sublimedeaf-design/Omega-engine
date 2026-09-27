@@ -229,7 +229,7 @@ jobs:
           issuer="https://token.actions.githubusercontent.com"
           cosign verify-blob OMEGA-Engine.apk             --bundle OMEGA-Engine.apk.sigstore.json             --certificate-identity "$identity"             --certificate-oidc-issuer "$issuer" >/dev/null
           cosign verify-blob OMEGA-Engine.provenance.json             --bundle OMEGA-Engine.provenance.sigstore.json             --certificate-identity "$identity"             --certificate-oidc-issuer "$issuer" >/dev/null
-          FINAL_SHA="$FINAL_SHA" python3 <<'PY' > "$RUNNER_TEMP/post-live/report/live-certified.json"
+          FINAL_SHA="$FINAL_SHA" python3 <<'PY' > "$RUNNER_TEMP/post-live/report/release-certified.json"
           import datetime,hashlib,json,os,pathlib
           def sha(name):
               return hashlib.sha256(pathlib.Path(name).read_bytes()).hexdigest()
