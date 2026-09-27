@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "source_sha": "9d6c93d83588297c682093cb5ea491920005da7a",
-  "source_ref": "main",
+  "source_ref": "release/code19-main-9d6c93d8",
   "requested_by": "omega-control-plane",
   "purpose": "post-merge-content-addressed-code19-build",
   "attempt": 6
