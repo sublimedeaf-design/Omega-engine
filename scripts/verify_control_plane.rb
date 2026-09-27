@@ -147,7 +147,7 @@ recovery = File.read(recovery_path, encoding: "UTF-8")
 {
   "stale_ref_tip_reconciled" => "OMEGA_RECOVERY_TRIGGER_ADVANCED",
   "stale_ref_tip_base_guard" => "OMEGA_RECOVERY_TRIGGER_NOT_CURRENT_BASE",
-  "serialized_recovery_explicit_supersede" => "cancel-in-progress: ${{ github.event_name == 'push' }}",
+  "serialized_recovery_explicit_supersede" => "OMEGA_RECOVERY_TRIGGER_QUEUED_SUPERSEDE",
   "bounded_recovery_queue" => "queue: single",
   "dynamic_evidence_root_packaging" => 'source=(pathlib.Path(os.environ["OMEGA_STATE"])/"evidence").resolve()',
   "artifact_checksum_verify" => "sha256sum -c",
@@ -164,6 +164,7 @@ recovery = File.read(recovery_path, encoding: "UTF-8")
   fail!("recovery_contract_missing:#{name}") unless recovery.include?(needle)
 end
 fail!("recovery_must_not_continue_on_error") if recovery.include?("continue-on-error: true")
+fail!("recovery_active_proof_must_not_cancel") unless recovery.include?("cancel-in-progress: false")
 fail!("recovery_watchdog_must_not_supersede") unless recovery.include?("Scheduled watchdogs and routine-main never cancel active recovery")
 fail!("recovery_helper_must_not_override_model_url") if recovery.include?("OMEGA_LOCAL_BRAIN_MODEL_URL:")
 fail!("recovery_helper_must_not_override_qa_model_url") if recovery.include?("OMEGA_LOCAL_QA_BRAIN_MODEL_URL:")
@@ -320,7 +321,7 @@ fail!("federation_rollover_integrity_compile_missing") unless integrity_workflow
 fail!("federation_certifier_release_ref_guard_missing") unless File.read(WORKFLOWS.join("omega-release-federation-certifier.yml"), encoding: "UTF-8").include?('re.fullmatch(r"release/[A-Za-z0-9._/-]+",ref)')
 certifier = File.read(WORKFLOWS.join("omega-release-federation-certifier.yml"), encoding: "UTF-8")
 fail!("federation_certifier_actions_write_missing") unless certifier.include?("actions: write")
-fail!("federation_second_proof_dispatch_missing") unless certifier.include?('gh workflow run omega-federation-v3-peer-bridge.yml -R "$CONTROL_REPOSITORY" --ref main') && certifier.include?("OMEGA_RELEASE_FEDERATION_SECOND_PROOF_DISPATCHED")
+fail!("federation_second_proof_exact_sha_dispatch_missing") unless certifier.include?('gh workflow run omega-federation-v3-peer-bridge.yml -R "$CONTROL_REPOSITORY" --ref "$PROMOTED_HEAD_SHA"') && certifier.include?("OMEGA_RELEASE_FEDERATION_SECOND_PROOF_DISPATCHED") && certifier.include?("OMEGA_RELEASE_FEDERATION_SECOND_PROOF_REF_INVALID")
 fail!("federation_recovery_dispatch_missing") unless certifier.include?('gh workflow run omega-hosted-recovery-failover.yml -R "$CONTROL_REPOSITORY" --ref main') && certifier.include?("OMEGA_RELEASE_FINAL_RECOVERY_DISPATCHED")
 fail!("promoter_must_not_trigger_from_signer") if promoter.include?('workflows:\n      - "OMEGA Canonical Android Signer"')
 fail!("promoter_must_not_trigger_from_private_bridge") if promoter.include?('workflows:\n      - "OMEGA Private PR Hosted Bridge"')
