@@ -32,6 +32,8 @@ MARKERS = (
     ("NO_UNSIGNED_HANDOFF", "NOT_EXECUTED", "NOT_EXECUTED", "handoff", "release-stager"),
     ("NO_EVIDENCE_ARTIFACT", "NOT_EXECUTED", "NOT_EXECUTED", "handoff", "evidence-root"),
     ("INDEPENDENT_MODEL_COVERAGE_MISSING", "MODEL_COVERAGE", "BLOCKED", "model-evidence", "t24"),
+    ("OMEGA_SIGNER_STALE_HANDOFF", "STALE_HANDOFF", "NOT_EXECUTED", "handoff", "release-stager"),
+    ("OMEGA_SIGNER_PROMOTION_REF_MOVED", "STALE_HANDOFF", "NOT_EXECUTED", "handoff", "release-stager"),
     ("SIGNER_", "SIGNER_CONTINUITY", "BLOCKED", "signer", "signer"),
     ("APKSIGNER", "ANDROID_SIGNING", "FAIL", "android", "signer"),
     ("COLD_START", "ANDROID_RUNTIME", "FAIL", "android", "android-runtime"),
@@ -46,6 +48,7 @@ POLICIES = {
     "INFRA_PRESTART": (True, 2, "rerun_failed_jobs"),
     "SUCCESS_WITHOUT_PROOF": (False, 1, "reprove_same_gate"),
     "STALE_PROMOTION_SHA": (False, 1, "discard_stale_and_follow_canonical_sha"),
+    "STALE_HANDOFF": (False, 1, "rebuild_unsigned_handoff_then_reprove_signer"),
     "NOT_EXECUTED": (False, 1, "wait_for_upstream_proof"),
     "EXECUTION_IDENTITY": (False, 1, "rebuild_from_identity_boundary"),
     "ARTIFACT_INTEGRITY": (False, 1, "regenerate_artifact_from_reprove_boundary"),
@@ -236,6 +239,7 @@ def _self_test() -> None:
         ({"status": "completed", "conclusion": "success", "proof_present": True}, "NONE"),
         ({"status": "completed", "conclusion": "failure", "log": "FAILED tests/test_x.py::test_y\nshort test summary"}, "CODE_TEST"),
         ({"status": "completed", "conclusion": "failure", "log": "OMEGA_CANONICAL_SIGNER_BLOCKED_AUTORETRY"}, "SIGNER_CONTINUITY"),
+        ({"status": "completed", "conclusion": "failure", "jobs": [{"steps": [{"name": "handoff"}]}], "log": "OMEGA_SIGNER_STALE_HANDOFF:abc!=def"}, "STALE_HANDOFF"),
         ({"status": "completed", "conclusion": "failure", "jobs": [{"steps": [{"name": "capability"}]}], "log": "OMEGA_RELEASE_CAPABILITY_MISSING:private_contents_write"}, "AUTHORIZATION"),
     ]
     for payload, expected in cases:
