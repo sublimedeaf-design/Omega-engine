@@ -489,6 +489,8 @@ fail!("release_orchestrator_trigger_file_authority_forbidden") if orchestrator.i
 fail!("release_orchestrator_generation_inputs_missing") unless orchestrator.include?('-f source_sha="$SOURCE_SHA" -f source_ref="$SOURCE_REF"')
 fail!("release_orchestrator_state_only_drift_missing") unless orchestrator.include?("state-only-control-head-advance") && orchestrator.include?('path.startswith("federation/epochs/")') && orchestrator.include?("bootstrap/omega/")
 fail!("release_orchestrator_compare_guard_missing") unless orchestrator.include?("/compare/$contract...$control_main") && orchestrator.include?("control-diff-too-large") && orchestrator.include?("control-history-")
+fail!("release_orchestrator_missing_ref_json_guard") unless orchestrator.include?('if ref_json="$(gh api "/repos/$PRIVATE_REPOSITORY/git/ref/heads/$source_ref" 2>/dev/null)"; then') && orchestrator.include?("OMEGA_RELEASE_CONTROLLER_REF_RESPONSE_INVALID")
+fail!("release_orchestrator_404_stdout_collision_regression") if orchestrator.include?('--jq .object.sha 2>/dev/null || true')
 fail!("release_orchestrator_must_not_mutate_epoch") if orchestrator.include?("/contents/federation/epochs/current.json") && orchestrator.include?("--method PUT")
 
 # Supply-chain provenance must survive the unsigned handoff and be verified before
