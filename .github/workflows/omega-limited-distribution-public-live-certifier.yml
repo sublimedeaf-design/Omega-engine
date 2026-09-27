@@ -65,6 +65,7 @@ jobs:
               "omega/hosted-recovery",
               "omega/recovery-attestation",
               "omega/resilience-certified",
+              "omega/live-data-ready",
               "omega/limited-distribution/apk-signed",
               "omega/limited-distribution/signer-continuity",
               "omega/limited-distribution/emulator-coldstart",
