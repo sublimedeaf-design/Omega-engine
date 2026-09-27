@@ -340,6 +340,8 @@ fail!("release_stager_actions_write_missing") unless stager_text.include?("actio
 fail!("release_stager_signer_dispatch_missing") unless stager_text.include?("OMEGA_RELEASE_STAGER_SIGNER_DISPATCHED") && stager_text.include?('gh workflow run "$SIGNER_WORKFLOW"') && stager_text.include?("OMEGA_RELEASE_STAGER_SIGNER_ALREADY_ACTIVE")
 fail!("stager_explicit_final_dispatch_missing") unless stager_text.include?('gh workflow run omega-private-pr-hosted-bridge.yml') && stager_text.include?('gh workflow run omega-hosted-recovery-failover.yml') && stager_text.include?('-R "$GITHUB_REPOSITORY" --ref main')
 fail!("release_stager_capability_preflight_missing") unless stager_text.include?("OMEGA_RELEASE_CAPABILITY_PASS:private_contents_write") && stager_text.include?("OMEGA_RELEASE_CAPABILITY_MISSING:private_contents_write")
+fail!("release_stager_legacy_write_forbidden") unless stager_text.include?("OMEGA_RELEASE_CAPABILITY_ARTIFACT_FIRST_REQUIRED") && stager_text.include?('AUTH_SOURCE: ${{ env.OMEGA_RELEASE_AUTH_SOURCE }}') && stager_text.include?('if [ "${AUTH_SOURCE:-}" != github-app ]')
+fail!("release_stager_artifact_first_mode_missing") unless stager_text.include?("mode=artifact-first") && stager_text.include?('final="$SOURCE_SHA"')
 fail!("release_stager_missing_artifact_must_fail") unless stager_text.include?("OMEGA_RELEASE_STAGE_NOT_EXECUTED_NO_EVIDENCE_ARTIFACT") && stager_text.include?("exit 75")
 fail!("release_stager_rerun_source_fence_missing") unless stager_text.include?("OMEGA_RELEASE_STAGE_EVIDENCE_SOURCE_AMBIGUOUS") && stager_text.include?("newest immutable artifact deterministically")
 fail!("release_stager_artifact_id_binding_missing") unless stager_text.include?('artifact-ids: ${{ steps.pin.outputs.artifact_id }}')
@@ -429,6 +431,7 @@ release_app_action = "actions/create-github-app-token@bcd2ba49218906704ab6c1aa79
 end
 fail!("release_app_stager_fail_fast_missing") unless stager_text.index("Preflight private release mutation capability").to_i < stager_text.index("actions/download-artifact@").to_i
 fail!("release_app_promoter_preflight_missing") unless promoter.include?("OMEGA_FINAL_RELEASE_CAPABILITY_PASS:private_contents_write")
+fail!("promoter_legacy_private_main_write_forbidden") unless promoter.include?("OMEGA_FINAL_RELEASE_SCOPED_MUTATION_AUTHORITY_REQUIRED") && promoter.include?('AUTH_SOURCE: ${{ env.OMEGA_RELEASE_AUTH_SOURCE }}') && promoter.include?('[ "${AUTH_SOURCE:-}" = github-app ]')
 
 # GITHUB_TOKEN-authored pushes intentionally do not recurse into new workflow
 # runs. Every immutable epoch projection therefore needs an explicit dispatch.
@@ -528,9 +531,11 @@ fail!("release_orchestrator_reconcile_must_use_selected_private_authority") unle
 fail!("release_orchestrator_large_state_must_be_file_backed") unless orchestrator.include?('status_file="$RUNNER_TEMP/omega-release-statuses.json"') && orchestrator.include?('epoch_file="$RUNNER_TEMP/omega-release-epoch.json"') && orchestrator.include?('compare_file="$RUNNER_TEMP/omega-release-compare.json"') && orchestrator.include?('python3 - "$epoch_file" "$compare_file" "$status_file"')
 fail!("release_orchestrator_large_state_env_regression") if orchestrator.include?('STATUS_PAYLOAD="$statuses"') || orchestrator.include?('EPOCH="$epoch" COMPARE_PAYLOAD="$compare"')
 fail!("release_orchestrator_missing_authority_wait_state") unless orchestrator.include?("OMEGA_RELEASE_CONTROLLER_AUTHORITY_WAIT") && orchestrator.include?('context="omega/authority/private-actions"') && orchestrator.include?("repo-local immutable release-ref actuator pending")
-fail!("release_orchestrator_private_actuator_fallback_missing") unless orchestrator.include?("OMEGA_RELEASE_CONTROLLER_PRIVATE_ACTUATOR_REQUEST") && orchestrator.include?("OMEGA_RELEASE_CONTROLLER_PRIVATE_ACTUATOR_SATISFIED") && orchestrator.include?("gh workflow run omega-release-ref-actuator.yml") && orchestrator.include?('-R "$PRIVATE_REPOSITORY" --ref main') && orchestrator.include?('-f source_sha="$candidate" -f release_ref="$source_ref"')
+fail!("release_orchestrator_private_actuator_observer_missing") unless orchestrator.include?("OMEGA_RELEASE_CONTROLLER_PRIVATE_ACTUATOR_WAIT") && orchestrator.include?("OMEGA_RELEASE_CONTROLLER_PRIVATE_ACTUATOR_SATISFIED")
+fail!("release_orchestrator_cross_repo_actuator_dispatch_forbidden") if orchestrator.include?("gh workflow run omega-release-ref-actuator.yml")
 fail!("release_orchestrator_private_actuator_bounded_poll_missing") unless orchestrator.include?("for _ in $(seq 1 18)") && orchestrator.include?("sleep 5")
-fail!("release_orchestrator_capability_probe_missing") unless orchestrator.include?('if ! gh api --method POST "/repos/$PRIVATE_REPOSITORY/git/refs"') && orchestrator.include?("OMEGA_RELEASE_CONTROLLER_AUTHORITY_WAIT")
+fail!("release_orchestrator_scoped_write_guard_missing") unless orchestrator.include?('if [ "${OMEGA_RELEASE_AUTH_SOURCE:-}" = github-app ]') && orchestrator.include?("direct_created=false") && orchestrator.include?("authority=github-app")
+fail!("release_orchestrator_legacy_write_must_delegate") unless orchestrator.include?("OMEGA_RELEASE_CONTROLLER_PRIVATE_ACTUATOR_WAIT") && orchestrator.include?('if [ "$direct_created" != true ]') && orchestrator.include?("OMEGA_RELEASE_CONTROLLER_AUTHORITY_WAIT")
 fail!("release_orchestrator_must_not_mutate_epoch") if orchestrator.include?("/contents/federation/epochs/current.json") && orchestrator.include?("--method PUT")
 
 # Supply-chain provenance must survive the unsigned handoff and be verified before

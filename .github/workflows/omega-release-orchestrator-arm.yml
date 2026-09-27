@@ -155,36 +155,36 @@ jobs:
             [[ "$existing" =~ ^[0-9a-f]{40}$ ]] || { echo "OMEGA_RELEASE_CONTROLLER_REF_RESPONSE_INVALID:$source_ref" >&2; exit 68; }
           fi
           if [ -z "$existing" ]; then
-            # Capability-based authorization: prefer the scoped GitHub App, but
-            # allow the encrypted bootstrap authority when it can actually create
-            # this single immutable release ref. Fail closed on a denied probe.
-            if ! gh api --method POST "/repos/$PRIVATE_REPOSITORY/git/refs" \
-              -f ref="refs/heads/$source_ref" -f sha="$candidate" >/dev/null 2>&1; then
-              # Preferred zero-trust fallback: ask the private repository to
-              # perform its own create-only mutation with its repo-local
-              # GITHUB_TOKEN. The helper never receives or exports that token.
-              echo "OMEGA_RELEASE_CONTROLLER_PRIVATE_ACTUATOR_REQUEST source=$candidate ref=$source_ref"
-              set +e
-              gh workflow run omega-release-ref-actuator.yml \
-                -R "$PRIVATE_REPOSITORY" --ref main \
-                -f source_sha="$candidate" -f release_ref="$source_ref"
-              actuator_rc=$?
-              set -e
-              if [ "$actuator_rc" -eq 0 ]; then
-                for _ in $(seq 1 18); do
-                  sleep 5
-                  ref_json="$(gh api "/repos/$PRIVATE_REPOSITORY/git/ref/heads/$source_ref" 2>/dev/null || true)"
-                  existing="$(printf '%s' "$ref_json" | jq -r '.object.sha // empty' 2>/dev/null || true)"
-                  if [ "$existing" = "$candidate" ]; then
-                    echo "OMEGA_RELEASE_CONTROLLER_PRIVATE_ACTUATOR_SATISFIED source=$candidate ref=$source_ref"
-                    break
-                  fi
-                  if [[ "$existing" =~ ^[0-9a-f]{40}$ ]] && [ "$existing" != "$candidate" ]; then
-                    echo "OMEGA_RELEASE_CONTROLLER_REF_COLLISION:$source_ref:$existing!=$candidate" >&2
-                    exit 68
-                  fi
-                done
+            # Least privilege: only a scoped GitHub App may mutate the private
+            # repository cross-repo. Legacy bootstrap credentials are read/dispatch
+            # authority only and always delegate the write to the repo-local actuator.
+            direct_created=false
+            if [ "${OMEGA_RELEASE_AUTH_SOURCE:-}" = github-app ]; then
+              if gh api --method POST "/repos/$PRIVATE_REPOSITORY/git/refs" \
+                -f ref="refs/heads/$source_ref" -f sha="$candidate" >/dev/null 2>&1; then
+                direct_created=true
+                existing="$candidate"
+                echo "OMEGA_RELEASE_CONTROLLER_REF_CREATED ref=$source_ref source=$candidate authority=github-app"
               fi
+            fi
+            if [ "$direct_created" != true ]; then
+              # The private repo-local actuator is status-driven by the trusted
+              # exact-final proof. The helper only observes the immutable result;
+              # it needs neither private Actions-write nor private contents-write.
+              echo "OMEGA_RELEASE_CONTROLLER_PRIVATE_ACTUATOR_WAIT source=$candidate ref=$source_ref"
+              for _ in $(seq 1 18); do
+                sleep 5
+                ref_json="$(gh api "/repos/$PRIVATE_REPOSITORY/git/ref/heads/$source_ref" 2>/dev/null || true)"
+                existing="$(printf '%s' "$ref_json" | jq -r '.object.sha // empty' 2>/dev/null || true)"
+                if [ "$existing" = "$candidate" ]; then
+                  echo "OMEGA_RELEASE_CONTROLLER_PRIVATE_ACTUATOR_SATISFIED source=$candidate ref=$source_ref"
+                  break
+                fi
+                if [[ "$existing" =~ ^[0-9a-f]{40}$ ]] && [ "$existing" != "$candidate" ]; then
+                  echo "OMEGA_RELEASE_CONTROLLER_REF_COLLISION:$source_ref:$existing!=$candidate" >&2
+                  exit 68
+                fi
+              done
               if [ "$existing" != "$candidate" ]; then
                 echo "dispatch=false" >> "$GITHUB_OUTPUT"
                 echo "source_sha=$candidate" >> "$GITHUB_OUTPUT"
@@ -200,9 +200,6 @@ jobs:
                 echo "OMEGA_RELEASE_CONTROLLER_AUTHORITY_WAIT source=$candidate ref=$source_ref authority=repo-local-actuator"
                 exit 0
               fi
-            else
-              existing="$candidate"
-              echo "OMEGA_RELEASE_CONTROLLER_REF_CREATED ref=$source_ref source=$candidate authority=${OMEGA_RELEASE_AUTH_SOURCE:-unknown}"
             fi
           fi
           [ "$existing" = "$candidate" ] || { echo "OMEGA_RELEASE_CONTROLLER_REF_COLLISION:$source_ref:$existing!=$candidate" >&2; exit 68; }

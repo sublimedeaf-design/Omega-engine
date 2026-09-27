@@ -144,9 +144,15 @@ jobs:
         env:
           GH_TOKEN: ${{ env.OMEGA_PRIVATE_RELEASE_TOKEN }}
           SOURCE_SHA: ${{ steps.pin.outputs.source_sha }}
+          AUTH_SOURCE: ${{ env.OMEGA_RELEASE_AUTH_SOURCE }}
         shell: bash
         run: |
           set -Eeuo pipefail
+          if [ "${AUTH_SOURCE:-}" != github-app ]; then
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "OMEGA_RELEASE_CAPABILITY_ARTIFACT_FIRST_REQUIRED authority=${AUTH_SOURCE:-none}"
+            exit 0
+          fi
           probe="omega-capability-probe-${GITHUB_RUN_ID}"
           if ! gh api --method POST "/repos/$PRIVATE_REPOSITORY/git/refs" -f ref="refs/heads/$probe" -f sha="$SOURCE_SHA" >/dev/null 2>&1; then
             echo "OMEGA_RELEASE_CAPABILITY_MISSING:private_contents_write" >&2
