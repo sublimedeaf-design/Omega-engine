@@ -18,12 +18,33 @@ concurrency:
 
 env:
   PRIVATE_REPOSITORY: sublimedeaf-design/Omega-engines
-  CANDIDATE_SHA: 8e77abb8b66e7cdd6423809223597ea35b49c7cf
 
 jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      candidate_sha: ${{ steps.pin.outputs.sha }}
+    steps:
+      - name: Pin current private main
+        id: pin
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [ -n "${GH_TOKEN:-}" ] || { echo OMEGA_PROVIDER_SMOKE_PRIVATE_AUTH_MISSING >&2; exit 77; }
+          sha="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/main" --jq .sha)"
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "OMEGA_PROVIDER_SMOKE_SHA_INVALID:$sha" >&2; exit 64; }
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "OMEGA_PROVIDER_SMOKE_PIN sha=$sha"
+
   smoke:
+    needs: resolve
     runs-on: ubuntu-latest
     timeout-minutes: 12
+    env:
+      CANDIDATE_SHA: ${{ needs.resolve.outputs.candidate_sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -47,6 +68,7 @@ jobs:
           export PYTHONPATH="$PWD/src"
           python - <<'PY'
           import json
+          import os
           from datetime import datetime, timezone
           from pathlib import Path
 
@@ -88,7 +110,7 @@ jobs:
 
           payload={
               "schema_version":1,
-              "candidate_sha":"8e77abb8b66e7cdd6423809223597ea35b49c7cf",
+              "candidate_sha":os.environ["CANDIDATE_SHA"],
               "observed_at":now.isoformat(),
               "horizon_hours":30,
               "providers":providers,
