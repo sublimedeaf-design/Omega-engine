@@ -203,10 +203,59 @@ jobs:
               raise SystemExit("OMEGA_FREE_PROVIDER_IMPLEMENTATION_GAP_RAW_ROUTE_HAS_FIXTURES")
           PY
 
+      - name: Install locked model dependencies
+        shell: bash
+        working-directory: omega
+        run: python scripts/install_locked_ci_deps.py
+
+      - name: Prove non-empty exact-SHA T24 product path
+        shell: bash
+        working-directory: omega
+        run: |
+          set -Eeuo pipefail
+          export PYTHONPATH="$PWD/src"
+          export OMEGA_GIT_COMMIT="$CANDIDATE_SHA"
+          rm -f ../live-gate-forecast.json ../live-gate-ledger.jsonl ../live-gate-intelligence.jsonl
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from omega.live.forecast24 import run
+
+          report=run(
+              matches_path="data/fabric/Matches.model.csv",
+              report_path="../live-gate-forecast.json",
+              ledger_path="../live-gate-ledger.jsonl",
+              intelligence_ledger_path="../live-gate-intelligence.jsonl",
+              horizon_hours=72,
+              t24_min_lead_hours=0,
+          )
+          summary={
+              "candidate_sha": report.get("git_commit"),
+              "engine_health": report.get("engine_health"),
+              "provider_backend": report.get("provider_backend"),
+              "provider_health": report.get("provider_health"),
+              "provider_discovered_fixtures": report.get("provider_discovered_fixtures"),
+              "predicted": report.get("predicted"),
+              "coverage_rate": report.get("coverage_rate"),
+              "bet_eligible_count": report.get("bet_eligible_count"),
+          }
+          print(json.dumps(summary,indent=2,sort_keys=True))
+          if report.get("engine_health") != "OK":
+              raise SystemExit("OMEGA_LIVE_DATA_ENGINE_NOT_OK")
+          if report.get("provider_health") == "SYSTEMIC_FAILURE":
+              raise SystemExit("OMEGA_LIVE_DATA_PROVIDER_SYSTEMIC_FAILURE")
+          if int(report.get("provider_discovered_fixtures") or 0) < 1:
+              raise SystemExit("OMEGA_LIVE_DATA_NO_REAL_FIXTURES")
+          if int(report.get("predicted") or 0) < 1:
+              raise SystemExit("OMEGA_LIVE_DATA_NO_MODEL_OUTPUT")
+          PY
+
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
           name: omega-free-provider-live-smoke-${{ env.CANDIDATE_SHA }}
-          path: free-provider-live-smoke.json
+          path: |
+            free-provider-live-smoke.json
+            live-gate-forecast.json
           if-no-files-found: warn
           retention-days: 7
