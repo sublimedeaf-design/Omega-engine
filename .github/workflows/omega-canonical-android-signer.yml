@@ -450,6 +450,38 @@ jobs:
           gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$FINAL_SHA"             -f state=pending             -f context="omega/android-release-signing"             -f description="canonical signer runtime unavailable; automatic retry armed"             -f target_url="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" >/dev/null
           echo "OMEGA_CANONICAL_SIGNER_BLOCKED_AUTORETRY sha=$FINAL_SHA"
 
+      - name: Dispatch isolated Samsung ARM64 signer fallback
+        if: steps.gate.outputs.need_sign == 'true' && steps.rescue_sign.outputs.available != 'true' && steps.hosted_sign.outputs.available != 'true' && steps.wake.outputs.runtime_available != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          FINAL_SHA: ${{ steps.handoff.outputs.final_sha }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          set +x
+          [ -n "${GH_TOKEN:-}" ] || { echo OMEGA_SAMSUNG_SIGNER_DISPATCH_AUTH_MISSING >&2; exit 78; }
+          current="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/main" --jq .sha)"
+          [ "$current" = "$FINAL_SHA" ] || { echo "OMEGA_SAMSUNG_SIGNER_DISPATCH_STALE:$FINAL_SHA!=$current" >&2; exit 75; }
+          active="$(
+            {
+              gh api "/repos/$PRIVATE_REPOSITORY/actions/workflows/android-signing-keepalive.yml/runs?status=queued&per_page=20" --jq '.total_count'
+              gh api "/repos/$PRIVATE_REPOSITORY/actions/workflows/android-signing-keepalive.yml/runs?status=in_progress&per_page=20" --jq '.total_count'
+            } | awk '{s+=$1} END{print s+0}'
+          )"
+          if [ "$active" -eq 0 ]; then
+            gh workflow run android-signing-keepalive.yml \
+              -R "$PRIVATE_REPOSITORY" --ref main \
+              -f mode=rescue -f allow_private_self_hosted=true
+            echo "OMEGA_SAMSUNG_SIGNER_RESCUE_DISPATCHED sha=$FINAL_SHA label=omega-signer-rescue-v2"
+          else
+            echo "OMEGA_SAMSUNG_SIGNER_RESCUE_ALREADY_ACTIVE sha=$FINAL_SHA count=$active"
+          fi
+          gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$FINAL_SHA" \
+            -f state=pending \
+            -f context="omega/android-release-signing" \
+            -f description="Samsung ARM64 canonical signer rescue dispatched; exact-SHA adoption will retry automatically" \
+            -f target_url="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" >/dev/null
+
       - name: Fail closed when no canonical signer backend is available
         if: steps.gate.outputs.need_sign == 'true' && steps.rescue_sign.outputs.available != 'true' && steps.hosted_sign.outputs.available != 'true' && steps.wake.outputs.runtime_available != 'true'
         shell: bash
