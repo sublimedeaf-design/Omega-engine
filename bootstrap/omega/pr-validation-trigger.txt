@@ -1,1 +1,1 @@
-validate-exact-pr cf8582e2517020bf6d960afde01f23ea986d15db release/hosted-ephemeral-signing-v2 hosted-signing-v2
+validate-exact-pr 03882266def9bf9f5922fb10fb10d4579456d584 release/hosted-ephemeral-signing-v2 hosted-signing-v2-fixed
