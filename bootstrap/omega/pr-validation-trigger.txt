@@ -1,1 +1,1 @@
-validate-exact-pr 41d2e52d83f72575ace2d1b4d6e1390bfa89c89f hardening/limited-distribution-runner-policy private-runner-policy-v1
+validate-exact-pr 9663354e459d99682d3cd8d8740c276fe597cf0c hardening/hosted-ephemeral-limited-distribution-release hosted-ephemeral-ld-release-v2
