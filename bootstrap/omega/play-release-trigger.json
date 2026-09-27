@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
-  "source_sha": "6c7dcd5ceac1571f9de80d9b8e74c8b4d8ec8a83",
-  "source_ref": "hardening/status-driven-play-signer-20260927",
+  "source_sha": "a8fdd6b31203bb5240ed7256d122756e0f2acece",
+  "source_ref": "main",
   "requested_by": "omega-control-plane",
-  "purpose": "status-driven-signer-unsigned-proof",
-  "attempt": 7
+  "purpose": "post-merge-status-driven-canonical-signer",
+  "attempt": 8
 }
