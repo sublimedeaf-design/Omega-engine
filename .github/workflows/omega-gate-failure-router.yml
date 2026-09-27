@@ -224,6 +224,11 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
+          current="$(GH_TOKEN="$GH_TOKEN" gh api "/repos/$PRIVATE_REPOSITORY/commits/main" --jq .sha)"
+          if [ "$current" != "$SOURCE_SHA" ]; then
+            echo "OMEGA_GATE_ROUTER_STALE_GENERATION_NOOP source=$SOURCE_SHA current=$current gate=$GATE"
+            exit 0
+          fi
           github_state="${{ steps.classify.outputs.github_state }}"
           case "$github_state" in
             success|failure|pending|error) ;;
