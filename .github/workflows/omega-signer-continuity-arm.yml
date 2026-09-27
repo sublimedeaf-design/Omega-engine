@@ -75,24 +75,29 @@ jobs:
             exit 0
           fi
 
-          if [ -z "${OMEGA_ANDROID_KEYSTORE_B64:-}" ]; then
-            publish pending "omega/signer/key-availability" "canonical signer escrow not configured; signing waits fail-closed"
-            publish error "omega/signer/escrow" "canonical signer escrow missing"
-            echo "dispatch=false" >> "$GITHUB_OUTPUT"
-            echo "OMEGA_HOSTED_SIGNER_ESCROW_NOT_CONFIGURED sha=$sha"
-            exit 0
-          fi
-
           expected="$(gh api "/repos/$PRIVATE_REPOSITORY/contents/android/signing-cert.sha256?ref=$sha" --jq '.content'             | tr -d '\n' | base64 -d | tr -d '[:space:]' | tr -d ':' | tr 'A-F' 'a-f')"
           [[ "$expected" =~ ^[0-9a-f]{64}$ ]] || { echo OMEGA_SIGNER_EXPECTED_FINGERPRINT_INVALID >&2; exit 31; }
-          key="$(mktemp)"
-          trap 'rm -f "$key"' EXIT
-          umask 077
-          printf '%s' "$OMEGA_ANDROID_KEYSTORE_B64" | base64 -d > "$key" || { echo OMEGA_SIGNER_ESCROW_DECODE_FAILED >&2; exit 32; }
-          actual="$(keytool -list -v -keystore "$key" -storepass android -alias androiddebugkey 2>/dev/null             | sed -n 's/.*SHA256: //p' | head -1 | tr -d ':' | tr 'A-F' 'a-f')"
-          [ "$actual" = "$expected" ] || { echo OMEGA_SIGNER_ESCROW_FINGERPRINT_MISMATCH >&2; exit 33; }
-          publish success "omega/signer/key-availability" "canonical private key available and fingerprint verified"
-          publish success "omega/signer/escrow" "hosted canonical signer escrow fingerprint verified"
+
+          # Hosted escrow is the preferred backend, but it is not the only signer
+          # backend. The canonical signer can also consume an exact cache-rescue
+          # handoff or a fingerprint-locked private signer runtime. Missing hosted
+          # escrow therefore reduces redundancy; it must not suppress an otherwise
+          # valid exact-SHA signing attempt.
+          if [ -n "${OMEGA_ANDROID_KEYSTORE_B64:-}" ]; then
+            key="$(mktemp)"
+            trap 'rm -f "$key"' EXIT
+            umask 077
+            printf '%s' "$OMEGA_ANDROID_KEYSTORE_B64" | base64 -d > "$key" || { echo OMEGA_SIGNER_ESCROW_DECODE_FAILED >&2; exit 32; }
+            actual="$(keytool -list -v -keystore "$key" -storepass android -alias androiddebugkey 2>/dev/null               | sed -n 's/.*SHA256: //p' | head -1 | tr -d ':' | tr 'A-F' 'a-f')"
+            [ "$actual" = "$expected" ] || { echo OMEGA_SIGNER_ESCROW_FINGERPRINT_MISMATCH >&2; exit 33; }
+            publish success "omega/signer/key-availability" "hosted canonical signer escrow available and fingerprint verified"
+            publish success "omega/signer/escrow" "hosted canonical signer escrow fingerprint verified"
+            echo "OMEGA_SIGNER_ARM_HOSTED_ESCROW_READY sha=$sha"
+          else
+            publish pending "omega/signer/key-availability" "hosted escrow unavailable; canonical alternate signer backends remain eligible"
+            publish pending "omega/signer/escrow" "hosted escrow unavailable; exact signer workflow will select a fingerprint-bound fallback"
+            echo "OMEGA_SIGNER_ARM_HOSTED_ESCROW_OPTIONAL sha=$sha"
+          fi
 
           ready="$(STATUS_PAYLOAD="$statuses" python3 - <<'PY'
           import json,os

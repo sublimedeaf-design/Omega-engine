@@ -432,6 +432,7 @@ fail!("signer_arm_public_canonical_workflow_missing") unless signer_arm.include?
 fail!("signer_arm_hosted_escrow_missing") unless signer_arm.include?("OMEGA_ANDROID_KEYSTORE_B64")
 fail!("signer_key_availability_status_missing") unless signer_arm.include?('"omega/signer/key-availability"')
 fail!("signer_escrow_status_missing") unless signer_arm.include?('"omega/signer/escrow"')
+fail!("signer_hosted_escrow_optional_fallback_missing") unless signer_arm.include?("OMEGA_SIGNER_ARM_HOSTED_ESCROW_OPTIONAL") && signer_arm.include?("alternate signer backends")
 fail!("signer_upstream_gate_missing") unless signer_arm.include?("OMEGA_SIGNER_ARM_UPSTREAM_READY") && signer_arm.include?('"omega/android-release-unsigned"') && signer_arm.include?('"omega/candidate-evidence-root"')
 fail!("signer_public_dispatch_missing") unless signer_arm.include?("OMEGA_SIGNER_ARM_PUBLIC_SIGNER_DISPATCHED") && signer_arm.include?('gh workflow run "$SIGNER_WORKFLOW"')
 fail!("signer_private_actions_dependency_present") if signer_arm.include?("android-signing-keepalive.yml") || signer_arm.include?("OMEGA_RELEASE_APP_PRIVATE_KEY") || signer_arm.include?("/repos/$PRIVATE_REPOSITORY/actions/workflows/")
