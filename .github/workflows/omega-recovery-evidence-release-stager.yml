@@ -15,6 +15,7 @@ permissions:
 concurrency:
   group: omega-recovery-evidence-release-stager
   cancel-in-progress: false
+  queue: max
 
 env:
   PRIVATE_REPOSITORY: sublimedeaf-design/Omega-engines
@@ -75,6 +76,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           [[ "$EVIDENCE_RUN_ID" =~ ^[0-9]+$ ]] || { echo OMEGA_RELEASE_STAGER_RUN_ID_INVALID >&2; exit 64; }
+          echo "OMEGA_RELEASE_STAGER_EXPLICIT_HANDOFF run=$EVIDENCE_RUN_ID"
           run="$(gh api "/repos/$GITHUB_REPOSITORY/actions/runs/$EVIDENCE_RUN_ID")"
           RUN="$run" python3 - <<'PY'
           import json,os
@@ -90,6 +92,7 @@ jobs:
           for a in p.get("artifacts",[]):
               m=re.fullmatch(r"omega-candidate-evidence-root-([0-9a-f]{40})",str(a.get("name") or ""))
               if m and not a.get("expired"): rows.append((m.group(1),str(a.get("name"))))
+          if not rows: raise SystemExit("OMEGA_RELEASE_STAGE_NOT_EXECUTED_NO_EVIDENCE_ARTIFACT")
           if len(rows)!=1: raise SystemExit("OMEGA_RELEASE_STAGER_EVIDENCE_ARTIFACT_AMBIGUOUS")
           print("|".join(rows[0]))
           PY
@@ -126,7 +129,7 @@ jobs:
           for row in p.get("statuses",[]):
               ctx=str(row.get("context") or "")
               stamp=str(row.get("updated_at") or row.get("created_at") or "")
-              if ctx and (ctx not in latest or stamp>str(latest[ctx].get("_stamp") or "")): latest[ctx]={**row,"_stamp":stamp}
+              if ctx and (ctx not in latest or stamp>str(latest[ctx].get("_omega_stamp") or "")): latest[ctx]={**row,"_omega_stamp":stamp}
           required=("omega/hosted-ci/python311","omega/hosted-ci/python313","omega/hosted-ci/python314",
                     "omega/hosted-ci/storage","omega/hosted-governance","omega/hosted-android",
                     "omega/hosted-recovery","omega/recovery-attestation","omega/candidate-evidence-root")
