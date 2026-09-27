@@ -55,6 +55,7 @@ jobs:
           echo "source_sha=$source" >> "$GITHUB_OUTPUT"
           echo "source_ref=$ref" >> "$GITHUB_OUTPUT"
           echo "SOURCE_SHA=$source" >> "$GITHUB_ENV"
+          echo "OMEGA_SOURCE_SHA=$source" >> "$GITHUB_ENV"
 
       - name: Checkout exact private source
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
