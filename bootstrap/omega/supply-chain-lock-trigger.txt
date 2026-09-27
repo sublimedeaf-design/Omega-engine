@@ -1,1 +1,1 @@
-generate-supply-chain-locks 4215c8a4622a53fe7e947d2cd77c7743c2e97229 main google-play-zero-cost-prep
+generate-supply-chain-locks 16cf0a5556e9dba15cee3f0593664fcc7e4dfd5b prep/google-play-zero-cost-bootstrap google-play-integrity-1.6.0
