@@ -174,6 +174,10 @@ fail!("recovery_helper_must_not_override_llama_commit") if recovery.include?("OM
 fail!("recovery_model_cache_must_follow_manifest") unless recovery.include?("hashFiles('omega/deploy/hosted/hf-model-manifest.json')")
 
 pr_bridge = File.read(WORKFLOWS.join("omega-private-pr-hosted-bridge.yml"), encoding: "UTF-8")
+fail!("pr_bridge_immutable_dispatch_sha_input_missing") unless pr_bridge.include?("source_sha:") && pr_bridge.include?("inputs.source_sha")
+fail!("pr_bridge_immutable_dispatch_ref_input_missing") unless pr_bridge.include?("source_ref:") && pr_bridge.include?("inputs.source_ref")
+fail!("pr_bridge_immutable_dispatch_guard_missing") unless pr_bridge.include?("OMEGA_HOSTED_PR_DISPATCH_INPUT_PASS") && pr_bridge.include?("OMEGA_HOSTED_PR_DISPATCH_SHA_INVALID") && pr_bridge.include?("OMEGA_HOSTED_PR_DISPATCH_REF_INVALID")
+
 fail!("pr_bridge_stale_ref_rejection_missing") unless pr_bridge.include?("OMEGA_EXACT_TRIGGER_STALE")
 fail!("pr_bridge_stale_ref_base_guard_missing") unless pr_bridge.include?("OMEGA_EXACT_TRIGGER_NOT_CURRENT_BASE")
 fail!("pr_bridge_stale_main_trigger_guard_missing") unless pr_bridge.include?("OMEGA_HOSTED_PR_STALE_TRIGGER_MAIN") && pr_bridge.include?("pr-validation-trigger.txt?ref=main") && pr_bridge.include?(".content // empty")

@@ -3,6 +3,15 @@ name: OMEGA Private PR Hosted Bridge
 
 on:
   workflow_dispatch:
+    inputs:
+      source_sha:
+        description: "Immutable private Omega-engines source SHA to validate"
+        required: false
+        type: string
+      source_ref:
+        description: "Immutable private Omega-engines ref whose tip must equal source_sha"
+        required: false
+        type: string
   schedule:
     - cron: "3-59/10 * * * *"
   push:
@@ -45,11 +54,21 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
           EVENT_NAME: ${{ github.event_name }}
+          REQUESTED_SHA_INPUT: ${{ inputs.source_sha || '' }}
+          SOURCE_REF_INPUT: ${{ inputs.source_ref || '' }}
         shell: bash
         run: |
           set -Eeuo pipefail
           requested_sha=''
-          if [ -s bootstrap/omega/pr-validation-trigger.txt ]; then
+          source_ref=''
+          if [ "$EVENT_NAME" = workflow_dispatch ] && [ -n "${REQUESTED_SHA_INPUT:-}" ]; then
+            [[ "$REQUESTED_SHA_INPUT" =~ ^[0-9a-f]{40}$ ]] || { echo "OMEGA_HOSTED_PR_DISPATCH_SHA_INVALID" >&2; exit 67; }
+            [[ "${SOURCE_REF_INPUT:-}" =~ ^[A-Za-z0-9._/-]+$ ]] || { echo "OMEGA_HOSTED_PR_DISPATCH_REF_INVALID" >&2; exit 67; }
+            case "$SOURCE_REF_INPUT" in *..*|/*|-*) echo "OMEGA_HOSTED_PR_DISPATCH_REF_UNSAFE:$SOURCE_REF_INPUT" >&2; exit 67 ;; esac
+            requested_sha="$REQUESTED_SHA_INPUT"
+            source_ref="$SOURCE_REF_INPUT"
+            echo "OMEGA_HOSTED_PR_DISPATCH_INPUT_PASS sha=$requested_sha ref=$source_ref"
+          elif [ -s bootstrap/omega/pr-validation-trigger.txt ]; then
             read -r marker candidate source_ref _ < bootstrap/omega/pr-validation-trigger.txt || true
             if [ "${marker:-}" = validate-exact-pr ] && [[ "${candidate:-}" =~ ^[0-9a-f]{40}$ ]]; then
               requested_sha="$candidate"
