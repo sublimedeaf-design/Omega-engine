@@ -283,6 +283,7 @@ jobs:
           gh workflow run omega-android-runtime-certify.yml \
             -R "$PRIVATE_REPOSITORY" \
             --ref main \
+            -f source_sha="$FINAL_SHA" \
             -f allow_private_self_hosted=true
           echo "OMEGA_LD_SAMSUNG_RUNTIME_DISPATCHED source=$FINAL_SHA label=omega-android-runtime-v1"
 
