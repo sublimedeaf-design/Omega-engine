@@ -19,15 +19,13 @@ permissions:
 cache-mode: read
 
 concurrency:
-  # Serialize every candidate recovery proof in one candidate lane, regardless
-  # of whether it came from an exact-trigger push or the candidate watchdog.
-  # This prevents duplicate clean-recovery runs for the same frozen candidate
-  # from consuming hosted-runner minutes in parallel. Routine-main stays isolated.
-  group: omega-hosted-recovery-v3-${{ (github.event_name == 'push' || (github.event_name == 'schedule' && github.event.schedule == '22,52 * * * *')) && 'candidate' || 'routine-main' }}
-  # Clean recovery is a long-lived certification proof. An explicit push is a
-  # superseding intent for queued work, but it waits behind the active proof.
-  # Scheduled watchdogs and routine-main never cancel active recovery.
-  # Stale queued triggers fail closed in the pin job.
+  # One serialized recovery writer for all events/generations. Candidate,
+  # watchdog and routine-main probes may resolve different targets, but they
+  # publish the same canonical recovery contexts and therefore must never run
+  # concurrently. The pin job generation-fences stale queued work.
+  group: omega-hosted-recovery-v4
+  # Clean recovery is a long-lived certification proof. New intent waits behind
+  # the active proof; no schedule or push can cancel evidence already in flight.
   cancel-in-progress: false
   queue: single
 
