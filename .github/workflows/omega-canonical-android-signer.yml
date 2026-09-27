@@ -5,6 +5,11 @@ on:
     workflows: ["OMEGA Recovery Evidence Release Stager"]
     types: [completed]
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "bootstrap/omega/signer-trigger.txt"
+      - ".github/workflows/omega-canonical-android-signer.yml"
   schedule:
     - cron: "17,47 * * * *"
 
@@ -55,6 +60,18 @@ jobs:
             exit 0
           fi
           case "$promotion_ref" in *..*|/*|-*) echo "OMEGA_SIGNER_PROMOTION_REF_UNSAFE:$promotion_ref" >&2; exit 64 ;; esac
+          if [ "$EVENT_NAME" = push ]; then
+            if [ -s bootstrap/omega/signer-trigger.txt ]; then
+              read -r trigger_marker trigger_sha trigger_ref _ < bootstrap/omega/signer-trigger.txt || true
+              [ "${trigger_marker:-}" = sign-exact ] || { echo "OMEGA_SIGNER_TRIGGER_INVALID" >&2; exit 64; }
+              [ "${trigger_sha:-}" = "$promotion_candidate" ] || { echo "OMEGA_SIGNER_TRIGGER_SHA_MISMATCH:${trigger_sha:-missing}!=$promotion_candidate" >&2; exit 65; }
+              [ "${trigger_ref:-}" = "$promotion_ref" ] || { echo "OMEGA_SIGNER_TRIGGER_REF_MISMATCH:${trigger_ref:-missing}!=$promotion_ref" >&2; exit 65; }
+            else
+              trigger_sha="$promotion_candidate"
+              trigger_ref="$promotion_ref"
+            fi
+            echo "OMEGA_SIGNER_TRIGGER_BOUND sha=$trigger_sha ref=$trigger_ref"
+          fi
           if [ "$EVENT_NAME" = workflow_run ] && [ "$EVENT_WORKFLOW_NAME" = "OMEGA Recovery Evidence Release Stager" ]; then
             runs=("$EVENT_RUN_ID")
           else
