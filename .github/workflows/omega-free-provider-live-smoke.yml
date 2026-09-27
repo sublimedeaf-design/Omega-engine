@@ -2,6 +2,11 @@ name: OMEGA Free Provider Live Smoke
 
 on:
   workflow_dispatch:
+  workflow_run:
+    workflows: ["OMEGA Private CI Hosted Bridge"]
+    types: [completed]
+  schedule:
+    - cron: "5,20,35,50 * * * *"
   push:
     paths:
       - ".github/workflows/omega-free-provider-live-smoke.yml"
@@ -18,12 +23,33 @@ concurrency:
 
 env:
   PRIVATE_REPOSITORY: sublimedeaf-design/Omega-engines
-  CANDIDATE_SHA: 8e77abb8b66e7cdd6423809223597ea35b49c7cf
 
 jobs:
-  smoke:
+  resolve:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 2
+    outputs:
+      candidate_sha: ${{ steps.pin.outputs.sha }}
+    steps:
+      - name: Pin current private main
+        id: pin
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [ -n "${GH_TOKEN:-}" ] || { echo OMEGA_LIVE_DATA_PRIVATE_AUTH_MISSING >&2; exit 77; }
+          sha="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/main" --jq .sha)"
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "OMEGA_LIVE_DATA_SHA_INVALID:$sha" >&2; exit 64; }
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "OMEGA_LIVE_DATA_PIN sha=$sha"
+
+  smoke:
+    needs: resolve
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    env:
+      CANDIDATE_SHA: ${{ needs.resolve.outputs.candidate_sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -38,76 +64,121 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: Probe independent zero-account fixture routes
+      - name: Verify exact source and install locked dependencies
         working-directory: omega
         shell: bash
         run: |
           set -Eeuo pipefail
           test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          python scripts/install_locked_ci_deps.py
+
+      - name: Prove current non-synthetic fixture and model path
+        working-directory: omega
+        shell: bash
+        run: |
+          set -Eeuo pipefail
           export PYTHONPATH="$PWD/src"
+          export OMEGA_GIT_COMMIT="$CANDIDATE_SHA"
           python - <<'PY'
           import json
+          import os
           from datetime import datetime, timezone
           from pathlib import Path
 
           from omega.live.espn_provider import discover as espn_discover
-          from omega.live.thesportsdb_provider import discover as tsdb_discover
-          from omega.live.worldcup26_provider import discover as worldcup26_discover
-          from omega.live.openfoot_provider import discover as openfoot_discover
+          from omega.live.openligadb import discover as openliga_discover
+          from omega.live.forecast24 import run as forecast24_run
 
           now=datetime.now(timezone.utc)
+          horizon_hours=72
           providers={}
-          all_rows=[]
-
-          for name,fn in (("espn",espn_discover),("worldcup26",worldcup26_discover),("thesportsdb",tsdb_discover),("openfoot",openfoot_discover)):
+          fixtures=[]
+          for name,fn in (("espn",espn_discover),("openligadb",openliga_discover)):
               try:
-                  rows,meta=fn(now,horizon_hours=30)
+                  rows,meta=fn(now,horizon_hours=horizon_hours)
               except Exception as exc:
                   rows=[]
-                  meta={"provider_health":"SYSTEMIC_FAILURE","exception":f"{type(exc).__name__}:{exc}"}
+                  meta={"provider_health":"SYSTEMIC_FAILURE","provider_errors":[{"reason":f"{type(exc).__name__}:{exc}"}]}
               providers[name]={
                   "health":meta.get("provider_health"),
                   "count":len(rows),
                   "sports":sorted({str(x.get("sport") or "") for x in rows}),
-                  "errors":meta.get("provider_errors",[]),
+                  "errors":meta.get("provider_errors",[])[:8],
               }
-              all_rows.extend((name,row) for row in rows)
+              fixtures.extend((name,row) for row in rows)
 
-          nations=[
-              {
-                  "provider":name,
-                  "event_id":row.get("event",{}).get("id"),
-                  "sport":row.get("sport"),
-                  "kickoff":row.get("event",{}).get("commence_time"),
-                  "home":row.get("event",{}).get("home_team"),
-                  "away":row.get("event",{}).get("away_team"),
-              }
-              for name,row in all_rows
-              if row.get("sport")=="soccer_uefa_nations_league"
-          ]
+          Path("../live-data-forecast.json").unlink(missing_ok=True)
+          Path("../live-data-ledger.jsonl").unlink(missing_ok=True)
+          Path("../live-data-intelligence.jsonl").unlink(missing_ok=True)
+          forecast=forecast24_run(
+              matches_path="data/fabric/Matches.model.csv",
+              report_path="../live-data-forecast.json",
+              ledger_path="../live-data-ledger.jsonl",
+              intelligence_ledger_path="../live-data-intelligence.jsonl",
+              now=now,
+              horizon_hours=horizon_hours,
+              t24_min_lead_hours=0,
+          )
 
           payload={
               "schema_version":1,
-              "candidate_sha":"8e77abb8b66e7cdd6423809223597ea35b49c7cf",
+              "source_sha":os.environ["CANDIDATE_SHA"],
               "observed_at":now.isoformat(),
-              "horizon_hours":30,
-              "providers":providers,
-              "nations_league":nations,
+              "horizon_hours":horizon_hours,
               "synthetic_fixtures":False,
+              "providers":providers,
+              "fixture_count":len(fixtures),
+              "model_supported_fixture_count":sum(bool(row.get("model_supported")) for _,row in fixtures),
+              "engine_health":forecast.get("engine_health"),
+              "forecast_provider_backend":forecast.get("provider_backend"),
+              "forecast_provider_health":forecast.get("provider_health"),
+              "provider_discovered_fixtures":forecast.get("provider_discovered_fixtures"),
+              "predicted":forecast.get("predicted"),
+              "coverage_rate":forecast.get("coverage_rate"),
+              "bet_eligible_count":forecast.get("bet_eligible_count"),
           }
-          Path("../free-provider-live-smoke.json").write_text(
-              json.dumps(payload,indent=2,sort_keys=True)+"\n",encoding="utf-8"
+          Path("../live-data-ready.json").write_text(
+              json.dumps(payload,indent=2,sort_keys=True,allow_nan=False)+"\n",encoding="utf-8"
           )
-          print(json.dumps(payload,indent=2,sort_keys=True))
+          print(json.dumps(payload,indent=2,sort_keys=True,allow_nan=False))
 
-          real_rows=[row for _,row in all_rows]
-          if not real_rows:
-              raise SystemExit("OMEGA_FREE_PROVIDER_NO_REAL_FIXTURES")
+          if not fixtures:
+              raise SystemExit("OMEGA_LIVE_DATA_NO_REAL_FIXTURES")
+          if not any(bool(row.get("model_supported")) for _,row in fixtures):
+              raise SystemExit("OMEGA_LIVE_DATA_NO_MODEL_SUPPORTED_FIXTURE")
+          if forecast.get("engine_health") != "OK":
+              raise SystemExit("OMEGA_LIVE_DATA_ENGINE_NOT_OK")
+          if forecast.get("provider_health") == "SYSTEMIC_FAILURE":
+              raise SystemExit("OMEGA_LIVE_DATA_PROVIDER_SYSTEMIC_FAILURE")
+          if int(forecast.get("provider_discovered_fixtures") or 0) < 1:
+              raise SystemExit("OMEGA_LIVE_DATA_FORECAST_DISCOVERY_EMPTY")
+          if int(forecast.get("predicted") or 0) < 1:
+              raise SystemExit("OMEGA_LIVE_DATA_MODEL_OUTPUT_EMPTY")
           PY
 
+      - name: Publish exact-SHA live-data readiness status
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          RESULT: ${{ job.status }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          state=failure
+          description="exact-SHA live data/model gate: failure"
+          if [ "$RESULT" = success ]; then
+            state=success
+            description="exact-SHA live fixtures + model output: success"
+          fi
+          gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$CANDIDATE_SHA"             -f state="$state"             -f context="omega/live-data-ready"             -f description="$description"             -f target_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
+          echo "OMEGA_LIVE_DATA_STATUS source=$CANDIDATE_SHA state=$state result=$RESULT"
+
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
         with:
-          name: omega-free-provider-live-smoke-${{ env.CANDIDATE_SHA }}
-          path: free-provider-live-smoke.json
-          if-no-files-found: error
-          retention-days: 7
+          name: omega-live-data-ready-${{ env.CANDIDATE_SHA }}
+          path: |
+            live-data-ready.json
+            live-data-forecast.json
+          if-no-files-found: warn
+          retention-days: 14
