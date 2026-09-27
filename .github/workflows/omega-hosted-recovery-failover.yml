@@ -24,10 +24,10 @@ concurrency:
   # This prevents duplicate clean-recovery runs for the same frozen candidate
   # from consuming hosted-runner minutes in parallel. Routine-main stays isolated.
   group: omega-hosted-recovery-v3-${{ (github.event_name == 'push' || (github.event_name == 'schedule' && github.event.schedule == '22,52 * * * *')) && 'candidate' || 'routine-main' }}
-  # A trigger-file push is an explicit newer control-plane intent and may
-  # supersede an older candidate watchdog/proof still occupying this lane.
-  # Scheduled watchdogs and routine-main never cancel active recovery.
-  cancel-in-progress: ${{ github.event_name == 'push' }}
+  # Clean recovery is a long-lived certification proof. A later trigger may
+  # queue behind it, but must never cancel a proof that already crossed the
+  # exact-SHA/ref guards. Stale queued triggers fail closed in the pin job.
+  cancel-in-progress: false
   queue: single
 
 env:
