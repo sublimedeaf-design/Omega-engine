@@ -1,0 +1,530 @@
+name: OMEGA Google One-Click Release
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "*/5 * * * *"
+
+permissions:
+  contents: write
+  id-token: write
+  actions: read
+
+concurrency:
+  group: omega-google-one-click-release
+  cancel-in-progress: false
+
+env:
+  PRIVATE_REPOSITORY: sublimedeaf-design/Omega-engines
+  PACKAGE_ID: com.sublimedeafdesign.omegaengine
+  TRIGGER_PATH: bootstrap/omega/google-one-click-release.json
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    steps:
+      - name: Checkout control plane
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Arm or load immutable source
+        id: trigger
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          CONTROL_TOKEN: ${{ github.token }}
+          OMEGA_BOOTSTRAP_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          set +x
+          active=false
+          source=""
+          if [ "$EVENT_NAME" = workflow_dispatch ]; then
+            source="$(GH_TOKEN="$OMEGA_BOOTSTRAP_TOKEN" gh api "/repos/$PRIVATE_REPOSITORY/commits/main" --jq .sha)"
+            [[ "$source" =~ ^[0-9a-f]{40}$ ]]
+            payload="$(SOURCE="$source" python3 - <<'PY'
+          import datetime,json,os
+          print(json.dumps({
+            "schema_version":1,
+            "state":"ARMED",
+            "source_sha":os.environ["SOURCE"],
+            "package_id":"com.sublimedeafdesign.omegaengine",
+            "armed_at":datetime.datetime.now(datetime.timezone.utc).isoformat()
+          },indent=2,sort_keys=True))
+          PY
+            )"
+            meta="$(GH_TOKEN="$CONTROL_TOKEN" gh api "/repos/$GITHUB_REPOSITORY/contents/$TRIGGER_PATH?ref=main" 2>/dev/null || true)"
+            encoded="$(printf '%s\n' "$payload" | base64 -w0)"
+            if [ -n "$meta" ]; then
+              blob="$(printf '%s' "$meta" | jq -r .sha)"
+              GH_TOKEN="$CONTROL_TOKEN" gh api --method PUT "/repos/$GITHUB_REPOSITORY/contents/$TRIGGER_PATH" \
+                -f message="Google one-click: arm exact source $source" \
+                -f content="$encoded" -f sha="$blob" -f branch=main >/dev/null
+            else
+              GH_TOKEN="$CONTROL_TOKEN" gh api --method PUT "/repos/$GITHUB_REPOSITORY/contents/$TRIGGER_PATH" \
+                -f message="Google one-click: arm exact source $source" \
+                -f content="$encoded" -f branch=main >/dev/null
+            fi
+            active=true
+          elif [ -s "$TRIGGER_PATH" ]; then
+            readarray -t f < <(python3 - "$TRIGGER_PATH" <<'PY'
+          import json,re,sys
+          d=json.load(open(sys.argv[1],encoding="utf-8"))
+          state=str(d.get("state") or "")
+          source=str(d.get("source_sha") or "").lower()
+          active=state in {"ARMED","WAITING"}
+          if active and not re.fullmatch(r"[0-9a-f]{40}",source):
+            raise SystemExit("OMEGA_GOOGLE_TRIGGER_SOURCE_INVALID")
+          print("true" if active else "false")
+          print(source)
+          print(state)
+          PY
+            )
+            active="${{f[0]}"
+            source="${{f[1]}"
+            echo "OMEGA_GOOGLE_TRIGGER_LOAD state=${{f[2]} source=$source active=$active"
+          fi
+          echo "active=$active" >> "$GITHUB_OUTPUT"
+          echo "source_sha=$source" >> "$GITHUB_OUTPUT"
+
+      - name: Require immutable current main and pre-Google gates
+        id: gate
+        if: steps.trigger.outputs.active == 'true'
+        env:
+          SOURCE_SHA: ${{ steps.trigger.outputs.source_sha }}
+          CONTROL_TOKEN: ${{ github.token }}
+          OMEGA_BOOTSTRAP_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          set +x
+          current="$(GH_TOKEN="$OMEGA_BOOTSTRAP_TOKEN" gh api "/repos/$PRIVATE_REPOSITORY/commits/main" --jq .sha)"
+          if [ "$current" != "$SOURCE_SHA" ]; then
+            GH_TOKEN="$OMEGA_BOOTSTRAP_TOKEN" gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$SOURCE_SHA" \
+              -f state=error -f context="omega/google-one-click" \
+              -f description="armed source is no longer current main; click again" \
+              -f target_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          statuses="$(GH_TOKEN="$OMEGA_BOOTSTRAP_TOKEN" gh api "/repos/$PRIVATE_REPOSITORY/commits/$SOURCE_SHA/status?per_page=100")"
+          STATUS_PAYLOAD="$statuses" python3 - <<'PY' > "$RUNNER_TEMP/google-gates.json"
+          import json,os
+          p=json.loads(os.environ["STATUS_PAYLOAD"])
+          latest={}
+          for row in p.get("statuses",[]):
+              ctx=str(row.get("context") or "")
+              stamp=str(row.get("updated_at") or row.get("created_at") or "")
+              if ctx and (ctx not in latest or stamp>latest[ctx][0]):
+                  latest[ctx]=(stamp,str(row.get("state") or ""))
+          required=[
+            "omega/hosted-ci/python311",
+            "omega/hosted-ci/python313",
+            "omega/hosted-ci/python314",
+            "omega/hosted-ci/storage",
+            "omega/hosted-governance",
+            "omega/hosted-android",
+            "omega/exact-final-validation",
+            "omega/hosted-runtime-fallback/t24",
+            "omega/hosted-runtime-fallback/t60",
+            "omega/hosted-runtime-fallback/settlement",
+            "omega/federation-v3-release",
+            "omega/hosted-recovery",
+            "omega/recovery-attestation",
+            "omega/resilience-certified",
+          ]
+          missing=[x for x in required if latest.get(x,("", ""))[1]!="success"]
+          print(json.dumps({"missing":missing,"all_green":not missing},indent=2))
+          PY
+          ready="$(python3 -c 'import json,os; print("true" if json.load(open(os.environ["RUNNER_TEMP"]+"/google-gates.json"))["all_green"] else "false")')"
+          echo "ready=$ready" >> "$GITHUB_OUTPUT"
+          if [ "$ready" != true ]; then
+            missing="$(python3 -c 'import json,os; print(",".join(json.load(open(os.environ["RUNNER_TEMP"]+"/google-gates.json"))["missing"][:6]))')"
+            GH_TOKEN="$OMEGA_BOOTSTRAP_TOKEN" gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$SOURCE_SHA" \
+              -f state=pending -f context="omega/google-one-click" \
+              -f description="waiting for pre-Google gates: $missing" \
+              -f target_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
+            python3 - "$SOURCE_SHA" "$missing" <<'PY' > "$RUNNER_TEMP/trigger-next.json"
+          import datetime,json,sys
+          print(json.dumps({
+            "schema_version":1,
+            "state":"WAITING",
+            "source_sha":sys.argv[1],
+            "package_id":"com.sublimedeafdesign.omegaengine",
+            "waiting_for":[x for x in sys.argv[2].split(",") if x],
+            "updated_at":datetime.datetime.now(datetime.timezone.utc).isoformat()
+          },indent=2,sort_keys=True))
+          PY
+            meta="$(GH_TOKEN="$CONTROL_TOKEN" gh api "/repos/$GITHUB_REPOSITORY/contents/$TRIGGER_PATH?ref=main")"
+            blob="$(printf '%s' "$meta" | jq -r .sha)"
+            encoded="$(base64 -w0 "$RUNNER_TEMP/trigger-next.json")"
+            GH_TOKEN="$CONTROL_TOKEN" gh api --method PUT "/repos/$GITHUB_REPOSITORY/contents/$TRIGGER_PATH" \
+              -f message="Google one-click: waiting for release gates" \
+              -f content="$encoded" -f sha="$blob" -f branch=main >/dev/null
+          fi
+
+      - name: Check one-time Google trust configuration
+        id: config
+        if: steps.gate.outputs.ready == 'true'
+        env:
+          SOURCE_SHA: ${{ steps.trigger.outputs.source_sha }}
+          WIF_PROVIDER: ${{ vars.GOOGLE_WIF_PROVIDER }}
+          PLAY_SERVICE_ACCOUNT: ${{ vars.GOOGLE_PLAY_SERVICE_ACCOUNT }}
+          UPLOAD_CERT_SHA256: ${{ vars.OMEGA_GOOGLE_UPLOAD_CERT_SHA256 }}
+          PLAY_APP_SIGNING_CERT_SHA256: ${{ vars.GOOGLE_PLAY_APP_SIGNING_CERT_SHA256 }}
+          UPLOAD_KEYSTORE_B64: ${{ secrets.OMEGA_GOOGLE_UPLOAD_KEYSTORE_B64 }}
+          UPLOAD_KEY_PASSWORD: ${{ secrets.OMEGA_GOOGLE_UPLOAD_KEY_PASSWORD }}
+          OMEGA_BOOTSTRAP_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          missing=()
+          [ -n "$WIF_PROVIDER" ] || missing+=(GOOGLE_WIF_PROVIDER)
+          [ -n "$PLAY_SERVICE_ACCOUNT" ] || missing+=(GOOGLE_PLAY_SERVICE_ACCOUNT)
+          [[ "$(printf '%s' "$UPLOAD_CERT_SHA256" | tr -d ':[:space:]' | tr 'A-F' 'a-f')" =~ ^[0-9a-f]{64}$ ]] || missing+=(OMEGA_GOOGLE_UPLOAD_CERT_SHA256)
+          [[ "$(printf '%s' "$PLAY_APP_SIGNING_CERT_SHA256" | tr -d ':[:space:]' | tr 'A-F' 'a-f')" =~ ^[0-9a-f]{64}$ ]] || missing+=(GOOGLE_PLAY_APP_SIGNING_CERT_SHA256)
+          [ -n "$UPLOAD_KEYSTORE_B64" ] || missing+=(OMEGA_GOOGLE_UPLOAD_KEYSTORE_B64)
+          [ -n "$UPLOAD_KEY_PASSWORD" ] || missing+=(OMEGA_GOOGLE_UPLOAD_KEY_PASSWORD)
+          if [ "${{#missing[@]}" -gt 0 ]; then
+            list="$(IFS=,; echo "${{missing[*]}")"
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            GH_TOKEN="$OMEGA_BOOTSTRAP_TOKEN" gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$SOURCE_SHA" \
+              -f state=pending -f context="omega/google-one-click" \
+              -f description="one-time Google setup required: $list" \
+              -f target_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
+            echo "OMEGA_GOOGLE_SETUP_REQUIRED missing=$list"
+            exit 0
+          fi
+          echo "configured=true" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout exact private source
+        if: steps.config.outputs.configured == 'true'
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: ${{ env.PRIVATE_REPOSITORY }}
+          ref: ${{ steps.trigger.outputs.source_sha }}
+          token: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          persist-credentials: false
+          fetch-depth: 0
+          path: omega
+
+      - name: Set up Java
+        if: steps.config.outputs.configured == 'true'
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        if: steps.config.outputs.configured == 'true'
+        uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a
+        with:
+          gradle-version: "8.13"
+          cache-read-only: true
+
+      - name: Build and upload-sign exact AAB
+        id: build
+        if: steps.config.outputs.configured == 'true'
+        working-directory: omega
+        env:
+          SOURCE_SHA: ${{ steps.trigger.outputs.source_sha }}
+          UPLOAD_CERT_SHA256: ${{ vars.OMEGA_GOOGLE_UPLOAD_CERT_SHA256 }}
+          UPLOAD_KEYSTORE_B64: ${{ secrets.OMEGA_GOOGLE_UPLOAD_KEYSTORE_B64 }}
+          UPLOAD_KEY_PASSWORD: ${{ secrets.OMEGA_GOOGLE_UPLOAD_KEY_PASSWORD }}
+          UPLOAD_KEY_ALIAS: ${{ vars.OMEGA_GOOGLE_UPLOAD_KEY_ALIAS || 'omega-upload' }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          set +x
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          grep -Fq 'applicationId = "com.sublimedeafdesign.omegaengine"' android/app/build.gradle.kts
+          export OMEGA_SOURCE_SHA="$SOURCE_SHA"
+
+          if [ ! -d "$ANDROID_HOME/platforms/android-36" ] || [ ! -x "$ANDROID_HOME/build-tools/36.0.0/apksigner" ]; then
+            yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+            "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "platforms;android-36" "build-tools;36.0.0" >/dev/null
+          fi
+
+          mkdir -p "$HOME/.android" dist reports
+          rm -f "$HOME/.android/debug.keystore"
+          keytool -genkeypair -noprompt -keystore "$HOME/.android/debug.keystore" \
+            -storepass android -keypass android -alias androiddebugkey \
+            -dname "CN=OMEGA Disposable Build,O=OMEGA,C=NL" \
+            -keyalg RSA -keysize 2048 -validity 1 >/dev/null
+
+          python3 scripts/materialize_gradle_verification.py
+          python3 scripts/validate_supply_chain_locks.py --out reports/google-supply-chain.json
+          python3 scripts/evidence_identity.py release-id --source-sha "$SOURCE_SHA" --out dist/release-identity.json
+          python3 scripts/generate_omega_sbom.py --out reports/omega-sbom.spdx.json
+
+          (
+            cd android
+            gradle --no-daemon --max-workers=2 --dependency-verification strict --stacktrace --console=plain \
+              -Dorg.gradle.vfs.watch=false -Dkotlin.compiler.execution.strategy=in-process \
+              lintRelease :app:bundleRelease
+          )
+          test -s android/app/build/outputs/bundle/release/app-release.aab
+
+          python3 - <<'PY'
+          import pathlib,zipfile
+          src=pathlib.Path("android/app/build/outputs/bundle/release/app-release.aab")
+          dst=pathlib.Path("dist/OMEGA-Engine-upload.aab")
+          suffixes=(".SF",".RSA",".DSA",".EC")
+          with zipfile.ZipFile(src,"r") as zin, zipfile.ZipFile(dst,"w") as zout:
+              for info in zin.infolist():
+                  u=info.filename.upper()
+                  if u=="META-INF/MANIFEST.MF" or (u.startswith("META-INF/") and u.endswith(suffixes)):
+                      continue
+                  data=zin.read(info.filename)
+                  clone=zipfile.ZipInfo(info.filename,info.date_time)
+                  clone.compress_type=info.compress_type
+                  clone.comment=info.comment
+                  clone.extra=info.extra
+                  clone.internal_attr=info.internal_attr
+                  clone.external_attr=info.external_attr
+                  clone.create_system=info.create_system
+                  zout.writestr(clone,data)
+          PY
+
+          key="$RUNNER_TEMP/omega-google-upload.jks"
+          printf '%s' "$UPLOAD_KEYSTORE_B64" | base64 -d > "$key"
+          chmod 600 "$key"
+          expected="$(printf '%s' "$UPLOAD_CERT_SHA256" | tr -d ':[:space:]' | tr 'A-F' 'a-f')"
+          actual="$(keytool -list -v -keystore "$key" -storepass "$UPLOAD_KEY_PASSWORD" -alias "$UPLOAD_KEY_ALIAS" 2>/dev/null | sed -n 's/.*SHA256: //p' | head -1 | tr -d ':' | tr 'A-F' 'a-f')"
+          [ "$actual" = "$expected" ] || { echo OMEGA_GOOGLE_UPLOAD_KEY_FINGERPRINT_MISMATCH >&2; exit 67; }
+
+          jarsigner -keystore "$key" -storepass "$UPLOAD_KEY_PASSWORD" -keypass "$UPLOAD_KEY_PASSWORD" \
+            -sigalg SHA256withRSA -digestalg SHA-256 dist/OMEGA-Engine-upload.aab "$UPLOAD_KEY_ALIAS" >/dev/null
+          jarsigner -verify -strict -certs dist/OMEGA-Engine-upload.aab >/dev/null
+
+          SOURCE="$SOURCE_SHA" python3 - <<'PY'
+          import os,zipfile
+          needle=os.environ["SOURCE"].encode()
+          with zipfile.ZipFile("dist/OMEGA-Engine-upload.aab") as z:
+              dex=[n for n in z.namelist() if n.endswith(".dex")]
+              if not dex or not any(needle in z.read(n) for n in dex):
+                  raise SystemExit("OMEGA_GOOGLE_SOURCE_SHA_NOT_EMBEDDED")
+          PY
+
+          readarray -t meta < <(python3 - <<'PY'
+          import json,pathlib,re
+          g=pathlib.Path("android/app/build.gradle.kts").read_text()
+          def one(p):
+              m=re.findall(p,g,re.M)
+              if len(m)!=1: raise SystemExit("OMEGA_GOOGLE_ANDROID_METADATA_INVALID")
+              return m[0]
+          print(one(r'^\s*versionCode\s*=\s*(\d+)\s*$'))
+          print(one(r'^\s*versionName\s*=\s*"([^"]+)"\s*$'))
+          print(json.load(open("dist/release-identity.json"))["release_id"])
+          PY
+          )
+          version_code="${{meta[0]}"
+          version_name="${{meta[1]}"
+          release_id="${{meta[2]}"
+          aab_sha="$(sha256sum dist/OMEGA-Engine-upload.aab | awk '{print $1}')"
+          printf '%s  OMEGA-Engine-upload.aab\n' "$aab_sha" > dist/OMEGA-Engine-upload.aab.sha256
+
+          AAB_SHA="$aab_sha" VERSION_CODE="$version_code" VERSION_NAME="$version_name" RELEASE_ID="$release_id" python3 - <<'PY'
+          import datetime,hashlib,json,os,pathlib
+          def sha(p): return hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest()
+          doc={
+            "schema_version":1,
+            "classification":"OMEGA_GOOGLE_PLAY_UPLOAD_CANDIDATE",
+            "source_sha":os.environ["SOURCE_SHA"],
+            "release_id":os.environ["RELEASE_ID"],
+            "package_id":"com.sublimedeafdesign.omegaengine",
+            "version_code":int(os.environ["VERSION_CODE"]),
+            "version_name":os.environ["VERSION_NAME"],
+            "upload_aab_sha256":os.environ["AAB_SHA"],
+            "upload_certificate_sha256":os.environ["UPLOAD_CERT_SHA256"].replace(":","").lower(),
+            "sbom_sha256":sha("reports/omega-sbom.spdx.json"),
+            "supply_chain_sha256":sha("reports/google-supply-chain.json"),
+            "release_identity_sha256":sha("dist/release-identity.json"),
+            "play_app_signing_required":True,
+            "built_at":datetime.datetime.now(datetime.timezone.utc).isoformat()
+          }
+          pathlib.Path("dist/OMEGA-Google.provenance.json").write_text(
+            json.dumps(doc,indent=2,sort_keys=True,allow_nan=False)+"\n",encoding="utf-8"
+          )
+          PY
+          echo "version_code=$version_code" >> "$GITHUB_OUTPUT"
+          echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
+          echo "aab_sha256=$aab_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Authenticate to Google through GitHub OIDC
+        id: google_auth
+        if: steps.config.outputs.configured == 'true'
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093
+        with:
+          workload_identity_provider: ${{ vars.GOOGLE_WIF_PROVIDER }}
+          service_account: ${{ vars.GOOGLE_PLAY_SERVICE_ACCOUNT }}
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/androidpublisher
+          create_credentials_file: true
+
+      - name: Deploy to Google Play Internal Testing
+        id: play
+        if: steps.config.outputs.configured == 'true'
+        continue-on-error: true
+        working-directory: omega
+        env:
+          ACCESS_TOKEN: ${{ steps.google_auth.outputs.access_token }}
+          SOURCE_SHA: ${{ steps.trigger.outputs.source_sha }}
+          VERSION_CODE: ${{ steps.build.outputs.version_code }}
+          EXPECTED_APP_SIGNING_CERT: ${{ vars.GOOGLE_PLAY_APP_SIGNING_CERT_SHA256 }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          set +x
+          mkdir -p dist/google-play
+          api="https://androidpublisher.googleapis.com/androidpublisher/v3/applications/$PACKAGE_ID"
+          upload="https://androidpublisher.googleapis.com/upload/androidpublisher/v3/applications/$PACKAGE_ID"
+          edit="$(curl -fsS -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' \
+            -X POST "$api/edits" -d '{}')"
+          edit_id="$(printf '%s' "$edit" | jq -r '.id // empty')"
+          [ -n "$edit_id" ] || exit 70
+          printf '%s\n' "$edit" > dist/google-play/edit.json
+
+          bundle="$(curl -fsS --max-time 180 -H "Authorization: Bearer $ACCESS_TOKEN" \
+            -H 'Content-Type: application/octet-stream' -X POST \
+            "$upload/edits/$edit_id/bundles?uploadType=media" \
+            --data-binary @dist/OMEGA-Engine-upload.aab)"
+          uploaded_code="$(printf '%s' "$bundle" | jq -r '.versionCode // empty')"
+          [ "$uploaded_code" = "$VERSION_CODE" ] || exit 71
+          printf '%s\n' "$bundle" > dist/google-play/bundle.json
+
+          jq -n --arg vc "$VERSION_CODE" --arg src "$SOURCE_SHA" '{
+            track:"qa",
+            releases:[{
+              name:("OMEGA exact "+$src),
+              versionCodes:[$vc],
+              status:"completed",
+              releaseNotes:[{language:"en-US",text:("OMEGA exact-SHA internal release "+$src)}]
+            }]
+          }' > dist/google-play/track-request.json
+          curl -fsS -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' \
+            -X PUT "$api/edits/$edit_id/tracks/qa" --data-binary @dist/google-play/track-request.json \
+            > dist/google-play/track-response.json
+          curl -fsS -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' \
+            -X POST "$api/edits/$edit_id:validate" > dist/google-play/validate.json
+          curl -fsS -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' \
+            -X POST "$api/edits/$edit_id:commit?changesInReviewBehavior=ERROR_IF_IN_REVIEW" \
+            > dist/google-play/commit.json
+
+          expected="$(printf '%s' "$EXPECTED_APP_SIGNING_CERT" | tr -d ':[:space:]' | tr 'A-F' 'a-f')"
+          for attempt in 1 2 3 4 5 6; do
+            if curl -fsS -H "Authorization: Bearer $ACCESS_TOKEN" "$api/generatedApks/$VERSION_CODE" \
+              > dist/google-play/generated-apks.json; then
+              actual="$(jq -r '.generatedApks[]?.certificateSha256Hash // empty' dist/google-play/generated-apks.json | tr -d ':' | tr 'A-F' 'a-f' | sort -u)"
+              if grep -Fxq "$expected" <<<"$actual"; then
+                echo "OMEGA_GOOGLE_PLAY_INTERNAL_PASS source=$SOURCE_SHA version_code=$VERSION_CODE"
+                exit 0
+              fi
+            fi
+            sleep $((attempt * 5))
+          done
+          echo OMEGA_GOOGLE_PLAY_APP_SIGNING_PROOF_NOT_READY >&2
+          exit 72
+
+      - name: Fallback to Google Play Internal App Sharing
+        id: internal_sharing
+        if: steps.config.outputs.configured == 'true' && steps.play.outcome != 'success'
+        continue-on-error: true
+        working-directory: omega
+        env:
+          ACCESS_TOKEN: ${{ steps.google_auth.outputs.access_token }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          set +x
+          mkdir -p dist/google-play
+          url="https://androidpublisher.googleapis.com/upload/androidpublisher/v3/applications/internalappsharing/$PACKAGE_ID/artifacts/bundle?uploadType=media"
+          curl -fsS --max-time 180 -H "Authorization: Bearer $ACCESS_TOKEN" \
+            -H 'Content-Type: application/octet-stream' -X POST "$url" \
+            --data-binary @dist/OMEGA-Engine-upload.aab > dist/google-play/internal-sharing.json
+          download="$(jq -r '.downloadUrl // empty' dist/google-play/internal-sharing.json)"
+          sha="$(jq -r '.sha256 // empty' dist/google-play/internal-sharing.json)"
+          [ -n "$download" ] && [[ "$sha" =~ ^[0-9a-f]{64}$ ]]
+
+      - name: Upload immutable Google evidence
+        if: steps.config.outputs.configured == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: OMEGA-Google-${{ steps.trigger.outputs.source_sha }}-${{ github.run_id }}
+          retention-days: 30
+          if-no-files-found: error
+          path: |
+            omega/dist/OMEGA-Engine-upload.aab
+            omega/dist/OMEGA-Engine-upload.aab.sha256
+            omega/dist/OMEGA-Google.provenance.json
+            omega/dist/release-identity.json
+            omega/reports/omega-sbom.spdx.json
+            omega/reports/google-supply-chain.json
+            omega/dist/google-play
+
+      - name: Publish distribution proof and close trigger
+        if: steps.config.outputs.configured == 'true'
+        env:
+          SOURCE_SHA: ${{ steps.trigger.outputs.source_sha }}
+          AAB_SHA256: ${{ steps.build.outputs.aab_sha256 }}
+          RELEASE_ID: ${{ steps.build.outputs.release_id }}
+          PLAY_OUTCOME: ${{ steps.play.outcome }}
+          INTERNAL_SHARING_OUTCOME: ${{ steps.internal_sharing.outcome }}
+          OMEGA_BOOTSTRAP_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          CONTROL_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          set +x
+          mode=""
+          if [ "$PLAY_OUTCOME" = success ]; then
+            mode=play_internal_testing
+            for ctx in omega/google-distribution omega/google-play/internal omega/google-play/app-signing; do
+              GH_TOKEN="$OMEGA_BOOTSTRAP_TOKEN" gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$SOURCE_SHA" \
+                -f state=success -f context="$ctx" -f description="Google exact-SHA distribution PASS" \
+                -f target_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
+            done
+          elif [ "$INTERNAL_SHARING_OUTCOME" = success ]; then
+            mode=play_internal_app_sharing
+            for ctx in omega/google-distribution omega/google-play/internal-app-sharing; do
+              GH_TOKEN="$OMEGA_BOOTSTRAP_TOKEN" gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$SOURCE_SHA" \
+                -f state=success -f context="$ctx" -f description="Google exact-SHA fallback distribution PASS" \
+                -f target_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
+            done
+          else
+            GH_TOKEN="$OMEGA_BOOTSTRAP_TOKEN" gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$SOURCE_SHA" \
+              -f state=failure -f context="omega/google-distribution" \
+              -f description="Google Play and Internal App Sharing both failed" \
+              -f target_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
+            exit 74
+          fi
+
+          python3 - "$SOURCE_SHA" "$RELEASE_ID" "$AAB_SHA256" "$mode" "$GITHUB_RUN_ID" <<'PY' > "$RUNNER_TEMP/trigger-done.json"
+          import datetime,json,sys
+          print(json.dumps({
+            "schema_version":1,
+            "state":"DISTRIBUTED",
+            "source_sha":sys.argv[1],
+            "package_id":"com.sublimedeafdesign.omegaengine",
+            "release_id":sys.argv[2],
+            "aab_sha256":sys.argv[3],
+            "distribution_mode":sys.argv[4],
+            "workflow_run_id":sys.argv[5],
+            "completed_at":datetime.datetime.now(datetime.timezone.utc).isoformat()
+          },indent=2,sort_keys=True))
+          PY
+          meta="$(GH_TOKEN="$CONTROL_TOKEN" gh api "/repos/$GITHUB_REPOSITORY/contents/$TRIGGER_PATH?ref=main")"
+          blob="$(printf '%s' "$meta" | jq -r .sha)"
+          encoded="$(base64 -w0 "$RUNNER_TEMP/trigger-done.json")"
+          GH_TOKEN="$CONTROL_TOKEN" gh api --method PUT "/repos/$GITHUB_REPOSITORY/contents/$TRIGGER_PATH" \
+            -f message="Google one-click: distribution complete for $SOURCE_SHA" \
+            -f content="$encoded" -f sha="$blob" -f branch=main >/dev/null
+          echo "OMEGA_GOOGLE_ONE_CLICK_DISTRIBUTED source=$SOURCE_SHA mode=$mode release_id=$RELEASE_ID"
+
+      - name: Remove ephemeral signing material
+        if: always()
+        shell: bash
+        run: rm -f "$RUNNER_TEMP/omega-google-upload.jks" "$HOME/.android/debug.keystore" || true
