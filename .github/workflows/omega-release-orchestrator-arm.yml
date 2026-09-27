@@ -160,22 +160,50 @@ jobs:
             # this single immutable release ref. Fail closed on a denied probe.
             if ! gh api --method POST "/repos/$PRIVATE_REPOSITORY/git/refs" \
               -f ref="refs/heads/$source_ref" -f sha="$candidate" >/dev/null 2>&1; then
-              echo "dispatch=false" >> "$GITHUB_OUTPUT"
-              echo "source_sha=$candidate" >> "$GITHUB_OUTPUT"
-              echo "source_ref=$source_ref" >> "$GITHUB_OUTPUT"
-              gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$candidate" \
-                -f state=pending -f context="omega/authority/private-actions" \
-                -f description="private contents-write capability unavailable for immutable release ref" \
-                -f target_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
-              gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$candidate" \
-                -f state=pending -f context="omega/control-plane/release-controller" \
-                -f description="waiting for immutable release-ref capability gen=${candidate:0:12}" \
-                -f target_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
-              echo "OMEGA_RELEASE_CONTROLLER_AUTHORITY_WAIT source=$candidate ref=$source_ref authority=${OMEGA_RELEASE_AUTH_SOURCE:-unknown}"
-              exit 0
+              # Preferred zero-trust fallback: ask the private repository to
+              # perform its own create-only mutation with its repo-local
+              # GITHUB_TOKEN. The helper never receives or exports that token.
+              echo "OMEGA_RELEASE_CONTROLLER_PRIVATE_ACTUATOR_REQUEST source=$candidate ref=$source_ref"
+              set +e
+              gh workflow run omega-release-ref-actuator.yml \
+                -R "$PRIVATE_REPOSITORY" --ref main \
+                -f source_sha="$candidate" -f release_ref="$source_ref"
+              actuator_rc=$?
+              set -e
+              if [ "$actuator_rc" -eq 0 ]; then
+                for _ in $(seq 1 18); do
+                  sleep 5
+                  ref_json="$(gh api "/repos/$PRIVATE_REPOSITORY/git/ref/heads/$source_ref" 2>/dev/null || true)"
+                  existing="$(printf '%s' "$ref_json" | jq -r '.object.sha // empty' 2>/dev/null || true)"
+                  if [ "$existing" = "$candidate" ]; then
+                    echo "OMEGA_RELEASE_CONTROLLER_PRIVATE_ACTUATOR_SATISFIED source=$candidate ref=$source_ref"
+                    break
+                  fi
+                  if [[ "$existing" =~ ^[0-9a-f]{40}$ ]] && [ "$existing" != "$candidate" ]; then
+                    echo "OMEGA_RELEASE_CONTROLLER_REF_COLLISION:$source_ref:$existing!=$candidate" >&2
+                    exit 68
+                  fi
+                done
+              fi
+              if [ "$existing" != "$candidate" ]; then
+                echo "dispatch=false" >> "$GITHUB_OUTPUT"
+                echo "source_sha=$candidate" >> "$GITHUB_OUTPUT"
+                echo "source_ref=$source_ref" >> "$GITHUB_OUTPUT"
+                gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$candidate" \
+                  -f state=pending -f context="omega/authority/private-actions" \
+                  -f description="repo-local immutable release-ref actuator pending" \
+                  -f target_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
+                gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$candidate" \
+                  -f state=pending -f context="omega/control-plane/release-controller" \
+                  -f description="waiting for repo-local release authority gen=${candidate:0:12}" \
+                  -f target_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
+                echo "OMEGA_RELEASE_CONTROLLER_AUTHORITY_WAIT source=$candidate ref=$source_ref authority=repo-local-actuator"
+                exit 0
+              fi
+            else
+              existing="$candidate"
+              echo "OMEGA_RELEASE_CONTROLLER_REF_CREATED ref=$source_ref source=$candidate authority=${OMEGA_RELEASE_AUTH_SOURCE:-unknown}"
             fi
-            existing="$candidate"
-            echo "OMEGA_RELEASE_CONTROLLER_REF_CREATED ref=$source_ref source=$candidate authority=${OMEGA_RELEASE_AUTH_SOURCE:-unknown}"
           fi
           [ "$existing" = "$candidate" ] || { echo "OMEGA_RELEASE_CONTROLLER_REF_COLLISION:$source_ref:$existing!=$candidate" >&2; exit 68; }
           gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$candidate" \
