@@ -199,7 +199,10 @@ jobs:
           certification=str(p.get("certification_state") or "")
           if not re.fullmatch(r"[0-9a-f]{40}",control):
               raise SystemExit("OMEGA_RELEASE_CONTROLLER_CONTROL_SHA_INVALID")
-          live=(latest.get("omega/live-certified") or {}).get("state")=="success"
+          live=(
+              (latest.get("omega/live-certified") or {}).get("state")=="success"
+              or (latest.get("omega/limited-distribution/live-certified") or {}).get("state")=="success"
+          )
           compare_status=str(compare.get("status") or "")
           changed=[str(x.get("filename") or "") for x in compare.get("files",[]) if x.get("filename")]
           state_only=lambda path: path.startswith("federation/epochs/") or path=="bootstrap/omega/pr-validation-trigger.txt"

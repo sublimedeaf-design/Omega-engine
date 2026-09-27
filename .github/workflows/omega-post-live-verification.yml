@@ -16,6 +16,7 @@ on:
 
 permissions:
   contents: read
+  actions: write
 
 concurrency:
   group: omega-post-live-verification
@@ -102,7 +103,7 @@ jobs:
             rc=$?
             trap - EXIT
             if [ "$rc" -ne 0 ]; then
-              for ctx in omega/post-live-smoke omega/live-certified; do
+              for ctx in omega/release-post-live-smoke omega/release-certified; do
                 gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$FINAL_SHA"                   -f state=failure -f context="$ctx"                   -f description="post-live production verification failed"                   -f target_url="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" >/dev/null || true
               done
             fi
@@ -228,14 +229,14 @@ jobs:
           issuer="https://token.actions.githubusercontent.com"
           cosign verify-blob OMEGA-Engine.apk             --bundle OMEGA-Engine.apk.sigstore.json             --certificate-identity "$identity"             --certificate-oidc-issuer "$issuer" >/dev/null
           cosign verify-blob OMEGA-Engine.provenance.json             --bundle OMEGA-Engine.provenance.sigstore.json             --certificate-identity "$identity"             --certificate-oidc-issuer "$issuer" >/dev/null
-          FINAL_SHA="$FINAL_SHA" python3 <<'PY' > "$RUNNER_TEMP/post-live/report/live-certified.json"
+          FINAL_SHA="$FINAL_SHA" python3 <<'PY' > "$RUNNER_TEMP/post-live/report/release-certified.json"
           import datetime,hashlib,json,os,pathlib
           def sha(name):
               return hashlib.sha256(pathlib.Path(name).read_bytes()).hexdigest()
           prov=json.loads(pathlib.Path("OMEGA-Engine.provenance.json").read_text(encoding="utf-8"))
           print(json.dumps({
               "schema_version":1,
-              "state":"LIVE-CERTIFIED",
+              "state":"RELEASE_CERTIFIED",
               "source_sha":os.environ["FINAL_SHA"],
               "apk_sha256":sha("OMEGA-Engine.apk"),
               "provenance_sha256":sha("OMEGA-Engine.provenance.json"),
@@ -252,10 +253,25 @@ jobs:
               }
           },indent=2,sort_keys=True,allow_nan=False))
           PY
-          for ctx in omega/post-live-smoke omega/live-certified; do
+          for ctx in omega/release-post-live-smoke omega/release-certified; do
             gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$FINAL_SHA"               -f state=success -f context="$ctx"               -f description="published production release and immediate health/provenance independently verified"               -f target_url="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" >/dev/null
           done
-          echo "OMEGA_POST_LIVE_PASS sha=$FINAL_SHA state=LIVE-CERTIFIED"
+          echo "OMEGA_POST_LIVE_PASS sha=$FINAL_SHA state=RELEASE_CERTIFIED"
+
+      - name: Dispatch exact certified release to zero-cost Limited Distribution adapter
+        if: steps.live.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FINAL_SHA: ${{ steps.live.outputs.final_sha }}
+          POST_LIVE_RUN_ID: ${{ github.run_id }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          gh workflow run omega-limited-distribution-release-adapter.yml \
+            -R "$GITHUB_REPOSITORY" --ref main \
+            -f final_sha="$FINAL_SHA" \
+            -f post_live_run_id="$POST_LIVE_RUN_ID"
+          echo "OMEGA_LD_ADAPTER_DISPATCHED sha=$FINAL_SHA post_live_run=$POST_LIVE_RUN_ID"
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always() && steps.live.outputs.ready == 'true'

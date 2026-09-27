@@ -295,6 +295,9 @@ fail!("single_promotion_branch_missing") unless stager.include?('release/recover
 signer = File.read(WORKFLOWS.join("omega-canonical-android-signer.yml"), encoding: "UTF-8")
 fail!("signer_current_promotion_binding_missing") unless signer.include?("OMEGA_SIGNER_CURRENT_PROMOTION_PASS") && signer.include?("OMEGA_SIGNER_STALE_HANDOFF") && signer.include?('bootstrap/omega/pr-validation-trigger.txt')
 coldstart = File.read(WORKFLOWS.join("omega-android-runtime-coldstart.yml"), encoding: "UTF-8")
+fail!("coldstart_registered_package_missing") unless coldstart.include?("com.sublimedeafdesign.omegaengine")
+fail!("coldstart_legacy_package_forbidden") if coldstart.include?("com.omega.app")
+fail!("coldstart_signed_digest_compat_missing") unless coldstart.include?('p.get("signed_apk_sha256") or p.get("apk_sha256")')
 promoter = File.read(WORKFLOWS.join("omega-final-release-promoter.yml"), encoding: "UTF-8")
 fail!("single_promotion_unsigned_handoff_missing") unless signer.include?("OMEGA-Unsigned-Release-")
 fail!("single_promotion_signed_handoff_missing") unless signer.include?("OMEGA-Signed-Release-") && coldstart.include?("OMEGA-Signed-Release-") && promoter.include?("OMEGA-Signed-Release-")
@@ -392,7 +395,10 @@ fail!("federation_certifier_stale_status_dependency_forbidden") if certifier.inc
 epoch_verifier = File.read(ROOT.join("scripts", "verify_federation_epoch.py"), encoding: "UTF-8")
 fail!("release_epoch_verifier_missing") unless epoch_verifier.include?("release_epoch_deviation_policy") && epoch_verifier.include?("external_epoch")
 
-fail!("postlive_live_certified_artifact_missing") unless postlive.include?('"state":"LIVE-CERTIFIED"') && postlive.include?("live-certified.json")
+fail!("postlive_release_certified_artifact_missing") unless postlive.include?('"state":"RELEASE_CERTIFIED"') && postlive.include?("release-certified.json")
+fail!("postlive_generic_release_status_missing") unless postlive.include?("omega/release-post-live-smoke") && postlive.include?("omega/release-certified")
+fail!("postlive_must_not_claim_distribution_live") if postlive.include?("omega/post-live-smoke omega/live-certified")
+fail!("postlive_limited_distribution_dispatch_missing") unless postlive.include?("omega-limited-distribution-release-adapter.yml") && postlive.include?("OMEGA_LD_ADAPTER_DISPATCHED") && postlive.include?("actions: write")
 fail!("postlive_release_epoch_policy_missing") unless postlive.include?('"new_deviation_requires_new_epoch":True') && postlive.include?('"old_evidence_runs_are_never_mutated":True')
 
 # Cross-repository release authority must prefer a repository-scoped, short-lived
@@ -457,6 +463,7 @@ fail!("release_epoch_monotonic_sequence_missing") unless rollover_script.include
 fail!("release_epoch_unfinished_supersede_missing") unless rollover_script.include?("safe_unfinished_supersede") && rollover_script.include?("OMEGA_RELEASE_EPOCH_SUPERSEDE_UNFINISHED_CONTROL_DEVIATION")
 fail!("release_epoch_certified_pre_live_supersede_missing") unless rollover_script.include?("safe_certified_pre_live_supersede") && rollover_script.include?("OMEGA_RELEASE_EPOCH_SUPERSEDE_CERTIFIED_PRE_LIVE_CONTROL_DEVIATION")
 fail!("release_epoch_live_immutability_missing") unless rollover_script.include?("OMEGA_RELEASE_EPOCH_LIVE_CERTIFIED_IMMUTABLE")
+fail!("release_epoch_limited_distribution_live_boundary_missing") unless rollover_script.include?("omega/limited-distribution/live-certified")
 fail!("release_epoch_supersede_policy_missing") unless rollover_script.include?('"supersedes_unfinished_epoch_on_control_deviation": True') && rollover_script.include?('"supersedes_unfinished_epoch_on_new_private_generation": True') && rollover_script.include?('"current_private_main_is_generation_fence": True') && rollover_script.include?('"supersedes_certified_pre_live_epoch_on_control_deviation": True') && rollover_script.include?('"live_certified_epoch_is_immutable": True')
 fail!("release_epoch_parent_control_binding_missing") unless rollover_script.include?('"control_contract_sha": prior_control_contract or None') && rollover_script.include?('"parent_sequence": prior_sequence')
 
@@ -484,7 +491,7 @@ fail!("release_orchestrator_schedule_missing") unless orchestrator.include?('cro
 fail!("release_orchestrator_exact_proof_event_missing") unless orchestrator.include?("workflow_run:") && orchestrator.include?('OMEGA Private PR Hosted Bridge') && orchestrator.include?("types: [completed]")
 fail!("release_orchestrator_explicit_rollover_missing") unless orchestrator.include?('gh workflow run "$ROLLOVER_WORKFLOW" -R "$GITHUB_REPOSITORY" --ref main')
 fail!("release_orchestrator_duplicate_guard_missing") unless orchestrator.include?("OMEGA_RELEASE_ORCHESTRATOR_ROLLOVER_ALREADY_ACTIVE") && orchestrator.include?("status=queued") && orchestrator.include?("status=in_progress")
-fail!("release_orchestrator_control_deviation_missing") unless orchestrator.include?("pre-live-control-deviation") && orchestrator.include?("live-certified-generation-immutable") && orchestrator.include?('omega/live-certified')
+fail!("release_orchestrator_control_deviation_missing") unless orchestrator.include?("pre-live-control-deviation") && orchestrator.include?("live-certified-generation-immutable") && orchestrator.include?('omega/live-certified') && orchestrator.include?('omega/limited-distribution/live-certified')
 fail!("release_orchestrator_private_main_reconcile_missing") unless orchestrator.include?('commits/main" --jq .sha') && orchestrator.include?('source_ref="release/auto-') && orchestrator.include?("OMEGA_RELEASE_CONTROLLER_REF_CREATED")
 fail!("release_orchestrator_trigger_file_authority_forbidden") if orchestrator.include?("read -r marker candidate source_ref")
 fail!("release_orchestrator_generation_inputs_missing") unless orchestrator.include?('-f source_sha="$SOURCE_SHA" -f source_ref="$SOURCE_REF"')
@@ -507,6 +514,18 @@ fail!("release_stager_slsa_statement_missing") unless stager.include?("https://i
 fail!("release_stager_builder_binding_missing") unless stager.include?("OMEGA_CONTROL_WORKFLOW_SHA") && stager.include?("github.workflow_sha")
 fail!("signer_slsa_subject_verification_missing") unless signer.include?("OMEGA_SIGNER_SLSA_SUBJECT_MISMATCH") && signer.include?("OMEGA_SIGNER_SLSA_BUILDER_INVALID")
 fail!("signer_slsa_dependency_verification_missing") unless signer.include?("OMEGA_SIGNER_SLSA_DEPENDENCY_MISMATCH") && signer.include?("omega-sbom.spdx.json") && signer.include?("release-stage-supply-chain.json")
+
+adapter_path = WORKFLOWS.join("omega-limited-distribution-release-adapter.yml")
+fail!("limited_distribution_adapter_missing") unless adapter_path.exist?
+adapter = File.read(adapter_path, encoding: "UTF-8")
+fail!("limited_distribution_adapter_exact_inputs_missing") unless adapter.include?("final_sha:") && adapter.include?("post_live_run_id:")
+fail!("limited_distribution_adapter_registered_package_missing") unless adapter.include?("com.sublimedeafdesign.omegaengine")
+fail!("limited_distribution_adapter_canonical_signer_missing") unless adapter.include?("0738b245ec8a557edc0600a6961d7bb2586cc22f886ed5273560ce6ab2db447f")
+fail!("limited_distribution_adapter_production_reuse_missing") unless adapter.include?("PRODUCTION_FINAL") && adapter.include?("re_attested_from_production_final")
+fail!("limited_distribution_adapter_release_identity_missing") unless adapter.include?("release-identity.json") && adapter.include?("OMEGA_LIMITED_DISTRIBUTION_SIGNED_CANDIDATE")
+fail!("limited_distribution_adapter_statuses_missing") unless adapter.include?("omega/limited-distribution/apk-signed") && adapter.include?("omega/limited-distribution/signer-continuity") && adapter.include?("omega/limited-distribution/emulator-coldstart") && adapter.include?("omega/limited-distribution/device-install")
+fail!("limited_distribution_adapter_must_not_certify_live") if adapter.include?("omega/limited-distribution/live-certified") || adapter.include?("omega/live-certified")
+fail!("limited_distribution_adapter_device_gate_pending_missing") unless adapter.include?('state=pending -f context="omega/limited-distribution/device-install"')
 
 puts "OMEGA_CONTROL_PLANE_INTEGRITY_GREEN workflows=#{files.length}"
 # support fastpath restack v2 exact-head trigger

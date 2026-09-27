@@ -20,6 +20,7 @@ concurrency:
 env:
   PRIVATE_REPOSITORY: sublimedeaf-design/Omega-engines
   CONTROL_REPOSITORY: sublimedeaf-design/Omega-engine
+  OMEGA_PACKAGE_ID: com.sublimedeafdesign.omegaengine
 
 jobs:
   coldstart:
@@ -135,7 +136,8 @@ jobs:
           expected="$(python3 - "$prov" "$FINAL_SHA" "$actual" <<'PY'
           import json,re,sys
           p=json.load(open(sys.argv[1],encoding="utf-8"))
-          if p.get("source_commit")!=sys.argv[2] or p.get("signed_apk_sha256")!=sys.argv[3]:
+          signed_digest=p.get("signed_apk_sha256") or p.get("apk_sha256")
+          if p.get("source_commit")!=sys.argv[2] or signed_digest!=sys.argv[3]:
               raise SystemExit("OMEGA_ANDROID_COLDSTART_SIGNED_PROVENANCE_MISMATCH")
           if p.get("signer_continuity")!="PASS":
               raise SystemExit("OMEGA_ANDROID_COLDSTART_SIGNER_CONTINUITY_NOT_PASS")
@@ -170,32 +172,32 @@ jobs:
 
           adb install -r "$apk" > "$RUNNER_TEMP/android-coldstart/install.txt"
           adb logcat -c
-          adb shell am force-stop com.omega.app
-          adb shell pm clear com.omega.app >/dev/null
-          adb shell am start -W -S -n com.omega.app/.MainActivity | tee "$RUNNER_TEMP/android-coldstart/launch.txt"
+          adb shell am force-stop "$OMEGA_PACKAGE_ID"
+          adb shell pm clear "$OMEGA_PACKAGE_ID" >/dev/null
+          adb shell am start -W -S -n "$OMEGA_PACKAGE_ID/.MainActivity" | tee "$RUNNER_TEMP/android-coldstart/launch.txt"
           grep -Eq 'Status: ok|Complete' "$RUNNER_TEMP/android-coldstart/launch.txt"
           sleep 8
-          pid="$(adb shell pidof com.omega.app | tr -d '\r')"
+          pid="$(adb shell pidof "$OMEGA_PACKAGE_ID" | tr -d '\r')"
           [ -n "$pid" ] || { echo OMEGA_ANDROID_COLDSTART_PROCESS_NOT_ALIVE >&2; exit 75; }
           adb shell dumpsys activity activities > "$RUNNER_TEMP/android-coldstart/activities.txt"
-          grep -F "com.omega.app/.MainActivity" "$RUNNER_TEMP/android-coldstart/activities.txt" >/dev/null
+          grep -F "$OMEGA_PACKAGE_ID/.MainActivity" "$RUNNER_TEMP/android-coldstart/activities.txt" >/dev/null
           adb exec-out screencap -p > "$RUNNER_TEMP/android-coldstart/coldstart.png" || true
           adb logcat -d > "$RUNNER_TEMP/android-coldstart/logcat.txt"
-          if grep -E 'FATAL EXCEPTION|ANR in com\.omega\.app|Process: com\.omega\.app, PID:' "$RUNNER_TEMP/android-coldstart/logcat.txt"; then
+          if grep -E 'FATAL EXCEPTION|ANR in com\.sublimedeafdesign\.omegaengine|Process: com\.sublimedeafdesign\.omegaengine, PID:' "$RUNNER_TEMP/android-coldstart/logcat.txt"; then
             echo OMEGA_ANDROID_COLDSTART_FATAL_RUNTIME_SIGNAL >&2
             exit 76
           fi
 
           # A second fresh-data launch catches one-time initialization defects.
           adb logcat -c
-          adb shell am force-stop com.omega.app
-          adb shell pm clear com.omega.app >/dev/null
-          adb shell am start -W -S -n com.omega.app/.MainActivity | tee "$RUNNER_TEMP/android-coldstart/relaunch.txt"
+          adb shell am force-stop "$OMEGA_PACKAGE_ID"
+          adb shell pm clear "$OMEGA_PACKAGE_ID" >/dev/null
+          adb shell am start -W -S -n "$OMEGA_PACKAGE_ID/.MainActivity" | tee "$RUNNER_TEMP/android-coldstart/relaunch.txt"
           sleep 5
-          pid2="$(adb shell pidof com.omega.app | tr -d '\r')"
+          pid2="$(adb shell pidof "$OMEGA_PACKAGE_ID" | tr -d '\r')"
           [ -n "$pid2" ] || { echo OMEGA_ANDROID_COLDSTART_RELAUNCH_PROCESS_NOT_ALIVE >&2; exit 77; }
           adb logcat -d > "$RUNNER_TEMP/android-coldstart/relaunch-logcat.txt"
-          if grep -E 'FATAL EXCEPTION|ANR in com\.omega\.app|Process: com\.omega\.app, PID:' "$RUNNER_TEMP/android-coldstart/relaunch-logcat.txt"; then
+          if grep -E 'FATAL EXCEPTION|ANR in com\.sublimedeafdesign\.omegaengine|Process: com\.sublimedeafdesign\.omegaengine, PID:' "$RUNNER_TEMP/android-coldstart/relaunch-logcat.txt"; then
             echo OMEGA_ANDROID_COLDSTART_RELAUNCH_FATAL_RUNTIME_SIGNAL >&2
             exit 78
           fi

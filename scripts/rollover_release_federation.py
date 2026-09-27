@@ -195,7 +195,10 @@ control_deviation = bool(
     and prior_control_contract != CONTROL_CONTRACT_SHA
 )
 authority_pass = prior_state == "PASS" and prior_certification == "PASS"
-live_certified = (latest.get("omega/live-certified") or {}).get("state") == "success"
+live_certified = (
+    (latest.get("omega/live-certified") or {}).get("state") == "success"
+    or (latest.get("omega/limited-distribution/live-certified") or {}).get("state") == "success"
+)
 safe_unfinished_supersede = (
     prior_state == "NOT_EXECUTED"
     and prior_certification == "NOT_EXECUTED"
