@@ -1,1 +1,1 @@
-validate-exact-pr dad7f70329f7619b3d83fe4edea14801141dd744 hardening/current-generation-isolated-signer-v3 signer-generation-v3
+validate-exact-pr 6a60b923d7863b86c1da65dd10f6e6dddfd847d2 main postmerge-signer-generation-v3
