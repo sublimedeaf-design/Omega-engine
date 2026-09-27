@@ -193,22 +193,25 @@ jobs:
           m=re.search(r"/actions/runs/([0-9]+)$",str(row.get("target_url") or ""))
           if not m: raise SystemExit(1)
           print(m.group(1))
-          ')" || { echo "OMEGA_HOSTED_PR_REUSE_PROOF_MISSING" >&2; exit 69; }
-            prior_conclusion="$(gh api "/repos/$GITHUB_REPOSITORY/actions/runs/$prior_run" --jq '.conclusion // empty')"
-            [ "$prior_conclusion" = success ] || { echo "OMEGA_HOSTED_PR_REUSE_RUN_NOT_SUCCESS:$prior_run" >&2; exit 69; }
-            prior_exact="$(gh api "/repos/$GITHUB_REPOSITORY/actions/runs/$prior_run/jobs?filter=latest&per_page=100" --jq '[.jobs[] | select(.name=="exact_final" and .conclusion=="success")] | length')"
-            [ "$prior_exact" = 1 ] || { echo "OMEGA_HOSTED_PR_REUSE_EXACT_FINAL_NOT_PASS:$prior_run" >&2; exit 69; }
-            {
-              echo "found=false"
-              echo "reuse=true"
-              echo "prior_run_id=$prior_run"
-              echo "sha=$requested_sha"
-              echo "base_sha=$base_sha"
-              echo "number=0"
-              echo "android=$android"
-            } >> "$GITHUB_OUTPUT"
-            echo "OMEGA_HOSTED_PR_REUSE_PROOF sha=$requested_sha prior_run=$prior_run android=$android"
-            exit 0
+          ')" || prior_run=""
+            if [ -n "$prior_run" ]; then
+              prior_conclusion="$(gh api "/repos/$GITHUB_REPOSITORY/actions/runs/$prior_run" --jq '.conclusion // empty')"
+              [ "$prior_conclusion" = success ] || { echo "OMEGA_HOSTED_PR_REUSE_RUN_NOT_SUCCESS:$prior_run" >&2; exit 69; }
+              prior_exact="$(gh api "/repos/$GITHUB_REPOSITORY/actions/runs/$prior_run/jobs?filter=latest&per_page=100" --jq '[.jobs[] | select(.name=="exact_final" and .conclusion=="success")] | length')"
+              [ "$prior_exact" = 1 ] || { echo "OMEGA_HOSTED_PR_REUSE_EXACT_FINAL_NOT_PASS:$prior_run" >&2; exit 69; }
+              {
+                echo "found=false"
+                echo "reuse=true"
+                echo "prior_run_id=$prior_run"
+                echo "sha=$requested_sha"
+                echo "base_sha=$base_sha"
+                echo "number=0"
+                echo "android=$android"
+              } >> "$GITHUB_OUTPUT"
+              echo "OMEGA_HOSTED_PR_REUSE_PROOF sha=$requested_sha prior_run=$prior_run android=$android"
+              exit 0
+            fi
+            echo "OMEGA_HOSTED_PR_GREEN_LANES_WITHOUT_EXACT_FINAL sha=$requested_sha action=fresh_exact_validation"
           fi
 
           {
