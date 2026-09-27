@@ -100,7 +100,7 @@ jobs:
               raise SystemExit("OMEGA_FINAL_FEDERATION_STAGE_NOT_CERTIFIED")
           if not re.fullmatch(r"[0-9a-f]{40}",candidate):
               raise SystemExit("OMEGA_FINAL_FEDERATION_SOURCE_SHA_INVALID")
-          if not re.fullmatch(r"release/[A-Za-z0-9._/-]+",source_ref):
+          if not re.fullmatch(r"^release/[A-Za-z0-9._/-]+$",source_ref):
               raise SystemExit("OMEGA_FINAL_RELEASE_REF_UNSAFE:"+source_ref)
           if any((row.get("state")!="PASS" or row.get("contract_state")!="PASS") for row in (d.get("peers") or [])):
               raise SystemExit("OMEGA_FINAL_FEDERATION_PEER_NOT_PASS")
