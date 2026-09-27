@@ -1,1 +1,1 @@
-validate-exact-pr 2b0028b17b1e467d6f56dbbf60a2e9413babc147 refactor/content-addressed-release-identity release-identity-state-machine-v7
+validate-exact-pr 8f339b7b8872f0d9fcaffafbd5bac30610efc80a refactor/content-addressed-release-identity release-identity-state-machine-v7
