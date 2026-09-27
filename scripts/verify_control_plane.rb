@@ -424,14 +424,17 @@ fail!("federation_rollover_explicit_peer_dispatch_missing") unless rollover_work
 fail!("federation_rollover_duplicate_active_guard_missing") unless rollover_workflow.include?("status=queued") && rollover_workflow.include?("status=in_progress") && rollover_workflow.include?("OMEGA_RELEASE_FEDERATION_PROOF_ALREADY_ACTIVE")
 
 # Signer identity and operational key availability are separate security
-# objects. An unavailable runner/escrow must never invalidate a previously
-# attested signing identity.
+# objects. Canonical signing is owned by the public control plane so private
+# Actions availability cannot become a single point of failure.
 signer_arm = File.read(WORKFLOWS.join("omega-signer-continuity-arm.yml"), encoding: "UTF-8")
-fail!("signer_authority_blocked_state_missing") unless signer_arm.include?("OMEGA_SIGNER_AUTHORITY_BLOCKED_STATE")
-fail!("signer_authority_status_missing") unless signer_arm.include?('context="omega/authority/private-actions"')
-fail!("signer_key_availability_status_missing") unless signer_arm.include?('context="omega/signer/key-availability"')
-fail!("signer_authority_blocked_must_not_invalidate_identity") if signer_arm.match?(/OMEGA_SIGNER_ARM_PERMISSION_BLOCKED[\s\S]{0,500}context="omega\/signer\/continuity"/)
-fail!("signer_authority_blocked_must_not_exit_77") if signer_arm.match?(/OMEGA_SIGNER_AUTHORITY_BLOCKED_STATE[\s\S]{0,200}exit 77/)
+fail!("signer_arm_actions_write_missing") unless signer_arm.include?("actions: write")
+fail!("signer_arm_public_canonical_workflow_missing") unless signer_arm.include?("SIGNER_WORKFLOW: omega-canonical-android-signer.yml")
+fail!("signer_arm_hosted_escrow_missing") unless signer_arm.include?("OMEGA_ANDROID_KEYSTORE_B64")
+fail!("signer_key_availability_status_missing") unless signer_arm.include?('"omega/signer/key-availability"')
+fail!("signer_escrow_status_missing") unless signer_arm.include?('"omega/signer/escrow"')
+fail!("signer_upstream_gate_missing") unless signer_arm.include?("OMEGA_SIGNER_ARM_UPSTREAM_READY") && signer_arm.include?('"omega/android-release-unsigned"') && signer_arm.include?('"omega/candidate-evidence-root"')
+fail!("signer_public_dispatch_missing") unless signer_arm.include?("OMEGA_SIGNER_ARM_PUBLIC_SIGNER_DISPATCHED") && signer_arm.include?('gh workflow run "$SIGNER_WORKFLOW"')
+fail!("signer_private_actions_dependency_present") if signer_arm.include?("android-signing-keepalive.yml") || signer_arm.include?("OMEGA_RELEASE_APP_PRIVATE_KEY") || signer_arm.include?("/repos/$PRIVATE_REPOSITORY/actions/workflows/")
 
 hosted_signer = File.read(WORKFLOWS.join("omega-hosted-signer-readiness.yml"), encoding: "UTF-8")
 fail!("signer_key_availability_blocked_state_missing") unless hosted_signer.include?("OMEGA_HOSTED_SIGNER_KEY_AVAILABILITY_BLOCKED")
