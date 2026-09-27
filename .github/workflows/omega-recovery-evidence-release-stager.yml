@@ -93,18 +93,28 @@ jobs:
           set -Eeuo pipefail
           json="$(gh api "/repos/${{ github.repository }}/actions/runs/$EVIDENCE_RUN_ID/artifacts?per_page=100")"
           row="$(python3 - "$json" <<'PY'
-          import json,re,sys
+          import datetime,json,re,sys
           p=json.loads(sys.argv[1])
           rows=[]
           for a in p.get("artifacts",[]):
               n=str(a.get("name") or "")
               m=re.fullmatch(r"omega-candidate-evidence-root-([0-9a-f]{40})",n)
               if m and not a.get("expired"):
-                  rows.append((m.group(1),n,str(a.get("id"))))
-          if len(rows)>1:
-              raise SystemExit(f"OMEGA_RELEASE_STAGE_EVIDENCE_ARTIFACT_AMBIGUOUS:{len(rows)}")
+                  created=str(a.get("created_at") or "")
+                  artifact_id=str(a.get("id") or "")
+                  if not artifact_id.isdigit():
+                      raise SystemExit("OMEGA_RELEASE_STAGE_EVIDENCE_ARTIFACT_ID_INVALID")
+                  rows.append((m.group(1),n,artifact_id,created,int(artifact_id)))
+          sources={row[0] for row in rows}
+          if len(sources)>1:
+              raise SystemExit("OMEGA_RELEASE_STAGE_EVIDENCE_SOURCE_AMBIGUOUS:"+",".join(sorted(sources)))
           if rows:
-              print("|".join(rows[0]))
+              # GitHub keeps artifacts from earlier attempts of the same run.
+              # All matching artifacts must bind to one source SHA; then select
+              # the newest immutable artifact deterministically by timestamp/id.
+              rows.sort(key=lambda row:(row[3],row[4]),reverse=True)
+              selected=rows[0]
+              print("|".join(selected[:3]))
           PY
           )"
           if [ -z "$row" ]; then
@@ -154,7 +164,7 @@ jobs:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         if: steps.pin.outputs.skip != 'true'
         with:
-          name: ${{ steps.pin.outputs.artifact_name }}
+          artifact-ids: ${{ steps.pin.outputs.artifact_id }}
           path: ${{ runner.temp }}/candidate-root
           github-token: ${{ github.token }}
           run-id: ${{ env.EVIDENCE_RUN_ID }}
