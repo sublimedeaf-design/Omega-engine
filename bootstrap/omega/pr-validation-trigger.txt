@@ -1,1 +1,1 @@
-validate-exact-pr 0b955ff131a014ac5633afae82964781d30fd571 control/ref-actuator-exact-final-event-v2 pr322-trusted-status-local-authority
+validate-exact-pr a3716b49b4c31d4c94a89bf620b3f2863f7f88b9 main postmerge-pr322-exact-main
