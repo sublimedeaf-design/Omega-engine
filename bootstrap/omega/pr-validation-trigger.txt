@@ -1,1 +1,1 @@
-validate-exact-pr 2d200e7b6d85fe50de7fe672a1af1360ffe1eb15 unify/status-authority-v1 unified-status-authority-pr312-v1
+validate-exact-pr 2d3e449b3c481dbeb9bf8517d1963fb8fdd870e5 unify/bigtech-control-plane-v1 bigtech-private-pr313-v1
