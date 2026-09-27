@@ -223,6 +223,10 @@ fail!("legacy_play_builder_must_not_autostart") if play_builder.include?("push:"
 fail!("legacy_play_builder_must_not_publish_primary_signer_trigger") if play_builder.include?('context="omega/play-aab-build-unsigned"')
 fail!("legacy_play_builder_current_package_missing") unless play_builder.include?("com.sublimedeafdesign.omegaengine")
 
+resilience_certifier = File.read(ROOT.join("control-plane", "certify.mjs"), encoding: "UTF-8")
+fail!("resilience_scope_must_be_pre_signing") unless resilience_certifier.include?('scope:"PRE_SIGNING"') && resilience_certifier.include?("const releaseSignals=")
+fail!("resilience_must_not_gate_on_signer") if resilience_certifier.match?(/const layers=\{.*signer_continuity:/m)
+
 %w[
   incident_id
   diagnostic_sha256
