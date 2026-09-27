@@ -379,6 +379,7 @@ fail!("promoter_coldstart_trigger_missing") unless promoter.include?('- "OMEGA A
 rollover_workflow = File.read(WORKFLOWS.join("omega-release-federation-rollover.yml"), encoding: "UTF-8")
 fail!("federation_rollover_must_be_controller_dispatch_only") if rollover_workflow.include?("workflow_run:")
 fail!("federation_rollover_generation_inputs_missing") unless rollover_workflow.include?("source_sha:") && rollover_workflow.include?("source_ref:") && rollover_workflow.include?("OMEGA_RELEASE_FEDERATION_STALE_GENERATION")
+fail!("federation_rollover_stale_generation_must_noop") unless rollover_workflow.include?("OMEGA_RELEASE_FEDERATION_STALE_GENERATION_NOOP") && rollover_workflow.match?(/if \[ "\$main" != "\$candidate" \]; then.*?found=false.*?exit 0/m)
 fail!("federation_rollover_private_main_fence_missing") unless rollover_script.include?("OMEGA_RELEASE_FEDERATION_STALE_GENERATION")
 fail!("release_epoch_control_token_missing") unless rollover_workflow.include?("OMEGA_CONTROL_TOKEN: ${{ github.token }}")
 fail!("release_epoch_control_write_permission_missing") unless rollover_workflow.include?("permissions:\n  contents: write")
