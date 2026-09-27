@@ -7,6 +7,10 @@ on:
         description: "Exact successful OMEGA Canonical Android Signer run id"
         required: true
         type: string
+  push:
+    branches: [main]
+    paths:
+      - "bootstrap/omega/android-coldstart-trigger.txt"
 
 permissions:
   contents: read
@@ -35,10 +39,18 @@ jobs:
         id: artifact
         env:
           GH_TOKEN: ${{ github.token }}
-          SIGNER_RUN_ID: ${{ inputs.signer_run_id }}
+          SIGNER_RUN_ID: ${{ inputs.signer_run_id || '' }}
+          EVENT_NAME: ${{ github.event_name }}
         shell: bash
         run: |
           set -Eeuo pipefail
+          trigger_sha=""
+          if [ "$EVENT_NAME" = push ]; then
+            read -r marker trigger_run trigger_sha < bootstrap/omega/android-coldstart-trigger.txt || true
+            [ "${marker:-}" = coldstart-signer ] || { echo OMEGA_ANDROID_COLDSTART_TRIGGER_INVALID >&2; exit 64; }
+            SIGNER_RUN_ID="${trigger_run:-}"
+            [[ "${trigger_sha:-}" =~ ^[0-9a-f]{40}$ ]] || { echo OMEGA_ANDROID_COLDSTART_TRIGGER_SHA_INVALID >&2; exit 64; }
+          fi
           [[ "$SIGNER_RUN_ID" =~ ^[0-9]+$ ]] || { echo "OMEGA_ANDROID_COLDSTART_SIGNER_RUN_INVALID:$SIGNER_RUN_ID" >&2; exit 64; }
           json="$(gh api "/repos/$CONTROL_REPOSITORY/actions/runs/$SIGNER_RUN_ID/artifacts?per_page=100")"
           row="$(python3 - "$json" <<'PY'
@@ -63,6 +75,10 @@ jobs:
           IFS='|' read -r final artifact artifact_id <<<"$row"
           [[ "$final" =~ ^[0-9a-f]{40}$ ]]
           [[ "$artifact_id" =~ ^[0-9]+$ ]]
+          if [ "$EVENT_NAME" = push ] && [ "$final" != "$trigger_sha" ]; then
+            echo "OMEGA_ANDROID_COLDSTART_TRIGGER_SOURCE_MISMATCH:$final!=$trigger_sha" >&2
+            exit 65
+          fi
           echo "ready=true" >> "$GITHUB_OUTPUT"
           echo "final_sha=$final" >> "$GITHUB_OUTPUT"
           echo "artifact_name=$artifact" >> "$GITHUB_OUTPUT"
