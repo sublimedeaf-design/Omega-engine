@@ -396,11 +396,35 @@ jobs:
           RESULT: ${{ job.status }}
         shell: bash
         run: |
+          set -Eeuo pipefail
           set +x
-          state=failure
-          [ "$RESULT" = success ] && state=success
-          gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$OMEGA_SHA" \
-            -f state="$state" \
-            -f context="omega/hosted-runtime-fallback/$OMEGA_MODE" \
-            -f description="public hosted immutable shadow/data handoff: $RESULT" \
-            -f target_url="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" >/dev/null
+          target="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          publish() {
+            gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$OMEGA_SHA" \
+              -f state="$2" \
+              -f context="omega/hosted-runtime-fallback/$1" \
+              -f description="public hosted immutable shadow/data handoff: $3" \
+              -f target_url="$target" >/dev/null
+          }
+          if [ "$RESULT" != success ]; then
+            publish "$OMEGA_MODE" failure "$RESULT"
+            exit 0
+          fi
+          # A successful higher-order cycle has already executed or cryptographically
+          # restored every predecessor on this exact SHA. Publish the proven chain,
+          # not only the terminal mode, so downstream reconciliation cannot lose
+          # completed work.
+          case "$OMEGA_MODE" in
+            daily) publish daily success success ;;
+            t24) publish t24 success success ;;
+            t60)
+              publish t24 success success
+              publish t60 success success
+              ;;
+            settlement)
+              publish t24 success success
+              publish t60 success success
+              publish settlement success success
+              ;;
+            *) exit 64 ;;
+          esac
