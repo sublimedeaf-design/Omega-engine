@@ -1,1 +1,1 @@
-validate-exact-pr a8fdd6b31203bb5240ed7256d122756e0f2acece release/code19-final-a8fdd6b3 final-code19-live-v1
+validate-exact-pr 7a326d4398071108b20116327123ef3a4aa5d78f hardening/status-signer-concurrency-20260927 signer-public-artifact-transport-v1
