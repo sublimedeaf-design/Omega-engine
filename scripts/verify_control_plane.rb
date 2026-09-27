@@ -428,6 +428,9 @@ fail!("federation_rollover_duplicate_active_guard_missing") unless rollover_work
 # Actions availability cannot become a single point of failure.
 signer_arm = File.read(WORKFLOWS.join("omega-signer-continuity-arm.yml"), encoding: "UTF-8")
 fail!("signer_arm_actions_write_missing") unless signer_arm.include?("actions: write")
+fail!("signer_arm_event_reconciliation_missing") unless signer_arm.include?("workflow_run:") && signer_arm.include?("OMEGA Recovery Evidence Release Stager") && signer_arm.include?("OMEGA Private PR Hosted Bridge") && signer_arm.include?("OMEGA Release Federation Certifier")
+fail!("signer_arm_reconcile_marker_missing") unless signer_arm.include?("bootstrap/omega/signer-trigger.txt")
+fail!("signer_arm_failed_upstream_must_skip") unless signer_arm.include?("github.event.workflow_run.conclusion == 'success'")
 fail!("signer_arm_public_canonical_workflow_missing") unless signer_arm.include?("SIGNER_WORKFLOW: omega-canonical-android-signer.yml")
 fail!("signer_arm_hosted_escrow_missing") unless signer_arm.include?("OMEGA_ANDROID_KEYSTORE_B64")
 fail!("signer_key_availability_status_missing") unless signer_arm.include?('"omega/signer/key-availability"')
