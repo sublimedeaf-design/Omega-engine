@@ -361,7 +361,10 @@ jobs:
               raise SystemExit("OMEGA_CACHE_RESCUE_FINGERPRINT_PROVENANCE_MISMATCH")
           if p.get("signer_continuity")!="PASS":
               raise SystemExit("OMEGA_CACHE_RESCUE_CONTINUITY_NOT_PASS")
-          if p.get("signer_recovery_source")!="legacy_actions_cache_fingerprint_verified":
+          if p.get("signer_recovery_source") not in {
+              "legacy_actions_cache_fingerprint_verified",
+              "isolated_private_signer_fingerprint_verified",
+          }:
               raise SystemExit("OMEGA_CACHE_RESCUE_SOURCE_INVALID")
           if p.get("private_key_exported") is not False:
               raise SystemExit("OMEGA_CACHE_RESCUE_PRIVATE_KEY_EXPORT_INVALID")
