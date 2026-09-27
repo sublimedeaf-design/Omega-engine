@@ -137,7 +137,19 @@ jobs:
           set -Eeuo pipefail
           mkdir -p "$OMEGA_STATE/evidence"
           source_pin="$SOURCE_SHA"
-          python3 scripts/federation_executor.py             --source-pin "$source_pin"             --report "$OMEGA_STATE/evidence/federation-executor.json"
+          epoch="$OMEGA_STATE/evidence/federation-epoch.json"
+          authority_meta="$OMEGA_STATE/evidence/federation-epoch.authority.json"
+          python3 scripts/fetch_federation_epoch.py \
+            --source-sha "$source_pin" \
+            --out "$epoch" \
+            --metadata-out "$authority_meta"
+          test -s "$epoch"
+          test -s "$authority_meta"
+          python3 scripts/federation_executor.py \
+            --source-pin "$source_pin" \
+            --lock "$epoch" \
+            --authority-metadata "$authority_meta" \
+            --report "$OMEGA_STATE/evidence/federation-executor.json"
           python3 - <<'PY'
           import json,os
           from pathlib import Path
