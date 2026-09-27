@@ -631,3 +631,25 @@ jobs:
         run: |
           set -Eeuo pipefail
           gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$FINAL_SHA"             -f state=success             -f context="omega/release-evidence-staged"             -f description="attested recovery evidence promoted; canonical signer still required"             -f target_url="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" >/dev/null
+
+      - name: Dispatch canonical signer after exact staged handoff
+        if: steps.pin.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SIGNER_WORKFLOW: omega-canonical-android-signer.yml
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          active="$(
+            {
+              gh api "/repos/$GITHUB_REPOSITORY/actions/workflows/$SIGNER_WORKFLOW/runs?status=queued&per_page=20" --jq '.total_count'
+              gh api "/repos/$GITHUB_REPOSITORY/actions/workflows/$SIGNER_WORKFLOW/runs?status=in_progress&per_page=20" --jq '.total_count'
+            } | awk '{s+=$1} END{print s+0}'
+          )"
+          if [ "$active" -gt 0 ]; then
+            echo "OMEGA_RELEASE_STAGER_SIGNER_ALREADY_ACTIVE count=$active sha=$FINAL_SHA"
+            exit 0
+          fi
+          gh workflow run "$SIGNER_WORKFLOW" -R "$GITHUB_REPOSITORY" --ref main
+          echo "OMEGA_RELEASE_STAGER_SIGNER_DISPATCHED sha=$FINAL_SHA stager_run=$GITHUB_RUN_ID"
+
