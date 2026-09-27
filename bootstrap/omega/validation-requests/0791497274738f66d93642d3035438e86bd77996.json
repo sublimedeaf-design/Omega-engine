@@ -1,0 +1,6 @@
+{
+  "schema_version": 1,
+  "source_sha": "0791497274738f66d93642d3035438e86bd77996",
+  "source_ref": "fix/limited-distribution-signer-continuity-final",
+  "request_id": "ld-signer-continuity-final-v1"
+}
