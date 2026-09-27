@@ -10,7 +10,7 @@ on:
     - cron: "9 * * * *"
 
 permissions:
-  contents: read
+  contents: write
   actions: write
   id-token: write
 
@@ -167,7 +167,7 @@ jobs:
           echo "OMEGA_FINAL_RELEASE_NOT_READY_FAIL_CLOSED" >&2
           exit 75
 
-      - name: Preflight final private mutation capability
+      - name: Preflight private mutation only when main still needs promotion
         if: steps.gate.outputs.ready == 'true'
         env:
           GH_TOKEN: ${{ env.OMEGA_PRIVATE_RELEASE_TOKEN }}
@@ -175,6 +175,11 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
+          main="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/main" --jq .sha)"
+          if [ "$main" = "$FINAL_SHA" ]; then
+            echo "OMEGA_FINAL_RELEASE_PRIVATE_MUTATION_NOT_REQUIRED main_already_exact=true"
+            exit 0
+          fi
           probe="omega-final-capability-probe-${GITHUB_RUN_ID}"
           gh api --method POST "/repos/$PRIVATE_REPOSITORY/git/refs" -f ref="refs/heads/$probe" -f sha="$FINAL_SHA" >/dev/null || {
             echo "OMEGA_FINAL_RELEASE_CAPABILITY_MISSING:private_contents_write" >&2
@@ -461,30 +466,29 @@ jobs:
             --certificate-identity "$identity" \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com
 
-      - name: Publish immutable GitHub release at exact main SHA
+      - name: Publish immutable GitHub release in control artifact registry
         id: release
         if: steps.gate.outputs.ready == 'true'
         working-directory: omega
         env:
-          GH_TOKEN: ${{ env.OMEGA_PRIVATE_RELEASE_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+          PRIVATE_GH_TOKEN: ${{ env.OMEGA_PRIVATE_RELEASE_TOKEN }}
           FINAL_SHA: ${{ steps.gate.outputs.sha }}
         shell: bash
         run: |
           set -Eeuo pipefail
-          main="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/main" --jq .sha)"
+          main="$(GH_TOKEN="$PRIVATE_GH_TOKEN" gh api "/repos/$PRIVATE_REPOSITORY/commits/main" --jq .sha)"
           [ "$main" = "$FINAL_SHA" ] || { echo "OMEGA_FINAL_RELEASE_MAIN_MOVED:$main!=$FINAL_SHA" >&2; exit 81; }
           version="$(python3 -c 'import json; print(json.load(open("dist/OMEGA-Engine.provenance.json"))["android_version"])')"
           code="$(python3 -c 'import json; print(json.load(open("dist/OMEGA-Engine.provenance.json"))["android_version_code"])')"
-          tag="omega-android-v${version}-code${code}"
-          if gh api "/repos/$PRIVATE_REPOSITORY/releases/tags/$tag" > "$RUNNER_TEMP/existing-release.json" 2>/dev/null; then
-            target="$(jq -r .target_commitish "$RUNNER_TEMP/existing-release.json")"
-            [ "$target" = "$FINAL_SHA" ] || { echo "OMEGA_FINAL_RELEASE_TAG_COLLISION:$tag:$target!=$FINAL_SHA" >&2; exit 82; }
-            echo "OMEGA_FINAL_RELEASE_ALREADY_EXISTS tag=$tag sha=$FINAL_SHA"
+          tag="omega-prod-v${version}-code${code}-${FINAL_SHA:0:12}"
+          if gh api "/repos/$CONTROL_REPOSITORY/releases/tags/$tag" > "$RUNNER_TEMP/existing-release.json" 2>/dev/null; then
+            echo "OMEGA_FINAL_CONTROL_RELEASE_ALREADY_EXISTS tag=$tag source=$FINAL_SHA"
             url="$(jq -r .html_url "$RUNNER_TEMP/existing-release.json")"
           else
-            gh release create "$tag" -R "$PRIVATE_REPOSITORY" --target "$FINAL_SHA" \
+            gh release create "$tag" -R "$CONTROL_REPOSITORY" --target "$GITHUB_SHA" \
               --title "OMEGA Android $version (code $code)" \
-              --notes "Production-final OMEGA Android release. Exact source: $FINAL_SHA. Clean recovery, candidate evidence root, federation v3, canonical signer continuity, hosted CI/Android and Sigstore provenance are all bound to this release." \
+              --notes "Production-final OMEGA Android artifact registry release. Exact private source: $FINAL_SHA. Clean recovery, candidate evidence root, federation v3, canonical signer continuity, hosted CI/Android and Sigstore provenance are bound to the assets." \
               dist/OMEGA-Engine.apk#OMEGA-Engine.apk \
               dist/OMEGA-Engine.apk.sha256#OMEGA-Engine.apk.sha256 \
               dist/OMEGA-Engine.provenance.json#OMEGA-Engine.provenance.json \
@@ -493,31 +497,37 @@ jobs:
               dist/OMEGA-Engine.sbom.spdx.json#OMEGA-Engine.sbom.spdx.json \
               dist/OMEGA-Engine.supply-chain.json#OMEGA-Engine.supply-chain.json \
               dist/OMEGA-Engine.final-recovery-root.json#OMEGA-Engine.final-recovery-root.json
-            url="$(gh api "/repos/$PRIVATE_REPOSITORY/releases/tags/$tag" --jq .html_url)"
+            url="$(gh api "/repos/$CONTROL_REPOSITORY/releases/tags/$tag" --jq .html_url)"
           fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "url=$url" >> "$GITHUB_OUTPUT"
 
-      - name: Verify published release and certify live
+      - name: Verify immutable registry assets and certify live
         if: steps.gate.outputs.ready == 'true'
         working-directory: omega
         env:
-          GH_TOKEN: ${{ env.OMEGA_PRIVATE_RELEASE_TOKEN }}
+          CONTROL_GH_TOKEN: ${{ github.token }}
+          PRIVATE_GH_TOKEN: ${{ env.OMEGA_PRIVATE_RELEASE_TOKEN }}
           FINAL_SHA: ${{ steps.gate.outputs.sha }}
           TAG: ${{ steps.release.outputs.tag }}
           RELEASE_URL: ${{ steps.release.outputs.url }}
         shell: bash
         run: |
           set -Eeuo pipefail
-          release="$(gh api "/repos/$PRIVATE_REPOSITORY/releases/tags/$TAG")"
-          [ "$(printf '%s' "$release" | jq -r .target_commitish)" = "$FINAL_SHA" ]
+          release="$(GH_TOKEN="$CONTROL_GH_TOKEN" gh api "/repos/$CONTROL_REPOSITORY/releases/tags/$TAG")"
+          [ "$(printf '%s' "$release" | jq -r .draft)" = false ]
+          [ "$(printf '%s' "$release" | jq -r .prerelease)" = false ]
           assets="$(printf '%s' "$release" | jq -r '.assets[].name')"
+          mkdir -p "$RUNNER_TEMP/published-final"
+          GH_TOKEN="$CONTROL_GH_TOKEN" gh release download "$TAG" -R "$CONTROL_REPOSITORY" -D "$RUNNER_TEMP/published-final"
           for name in OMEGA-Engine.apk OMEGA-Engine.apk.sha256 OMEGA-Engine.provenance.json OMEGA-Engine.apk.sigstore.json OMEGA-Engine.provenance.sigstore.json OMEGA-Engine.sbom.spdx.json OMEGA-Engine.supply-chain.json OMEGA-Engine.final-recovery-root.json; do
             grep -Fxq "$name" <<<"$assets" || { echo "OMEGA_FINAL_RELEASE_ASSET_MISSING:$name" >&2; exit 83; }
+            test -s "$RUNNER_TEMP/published-final/$name" || { echo "OMEGA_FINAL_RELEASE_DOWNLOAD_MISSING:$name" >&2; exit 84; }
+            cmp -s "dist/$name" "$RUNNER_TEMP/published-final/$name" || { echo "OMEGA_FINAL_RELEASE_REGISTRY_MISMATCH:$name" >&2; exit 85; }
           done
-          gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$FINAL_SHA" \
+          GH_TOKEN="$PRIVATE_GH_TOKEN" gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$FINAL_SHA" \
             -f state=success -f context="omega/release-live" \
-            -f description="production-final Android release published and verified" \
+            -f description="production-final Android artifact published and byte-verified in control registry" \
             -f target_url="$RELEASE_URL" >/dev/null
           echo "OMEGA_RELEASE_LIVE_PASS sha=$FINAL_SHA tag=$TAG url=$RELEASE_URL"
 
