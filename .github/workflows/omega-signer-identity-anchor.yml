@@ -42,7 +42,10 @@ jobs:
           read -r marker candidate source_ref _ < bootstrap/omega/pr-validation-trigger.txt || true
           [ "${marker:-}" = validate-exact-pr ] || { echo OMEGA_SIGNER_IDENTITY_TRIGGER_INVALID >&2; exit 64; }
           [[ "${candidate:-}" =~ ^[0-9a-f]{40}$ ]] || { echo OMEGA_SIGNER_IDENTITY_SHA_INVALID >&2; exit 64; }
-          [[ "${source_ref:-}" =~ ^release/[A-Za-z0-9._/-]+$ ]] || { echo OMEGA_SIGNER_IDENTITY_REF_INVALID >&2; exit 64; }
+          if [ "${source_ref:-}" != main ] && [[ ! "${source_ref:-}" =~ ^release/[A-Za-z0-9._/-]+$ ]]; then
+            echo OMEGA_SIGNER_IDENTITY_REF_INVALID >&2
+            exit 64
+          fi
           tip="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/$source_ref" --jq .sha)"
           [ "$tip" = "$candidate" ] || { echo "OMEGA_SIGNER_IDENTITY_PROMOTION_REF_MOVED:$tip!=$candidate" >&2; exit 75; }
 
