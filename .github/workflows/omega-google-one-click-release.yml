@@ -66,7 +66,7 @@ jobs:
           for ctx in ("omega/google-one-click","omega/system-health","omega/live-certified"):
               print(latest.get(ctx,("", ""))[1])
           PY
-            )"
+            )
             google_state="${states[0]:-}"
             system_state="${states[1]:-}"
             live_state="${states[2]:-}"
