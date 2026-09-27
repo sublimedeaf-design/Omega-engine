@@ -1,1 +1,1 @@
-validate-exact-pr 60d6f6d16032730b5e575bb490e8013564eb47a8 hardening/hosted-ephemeral-limited-distribution-release hosted-ephemeral-ld-release-v3
+validate-exact-pr 4999e7c7fdf8dab90a759ab3290e636b1008b64e hardening/hosted-limited-distribution-coldstart hosted-coldstart-v1
