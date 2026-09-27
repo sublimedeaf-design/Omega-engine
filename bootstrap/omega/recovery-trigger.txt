@@ -1,1 +1,1 @@
-recover-exact 2f6635b66b74b4afc5f26013c73fc8b0db236a6e release/auto-2f6635b66b74 release-federation-second-proof
+recover-exact 696d34781540af5d46da5febb7854b55318fba28 release/auto-696d34781540 release-federation-second-proof
