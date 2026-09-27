@@ -1,1 +1,1 @@
-build-product-exact 17a359c3a268668d8e844e28658b50a8413d3aa8 product/single-model-core-20260925
+build-product-exact 5e43b58ca61ff291c17d1edf16c00746ca79a4a6 main
