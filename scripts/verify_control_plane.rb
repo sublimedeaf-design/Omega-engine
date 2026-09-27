@@ -211,6 +211,7 @@ classifier = File.read(classifier_path, encoding: "UTF-8")
 end
 integrity_workflow = File.read(WORKFLOWS.join("omega-control-plane-integrity.yml"), encoding: "UTF-8")
 fail!("gate_classifier_self_test_missing") unless integrity_workflow.include?("omega_gate_classifier.py --self-test")
+fail!("control_plane_integrity_concurrency_scope_missing") unless integrity_workflow.include?('group: omega-control-plane-integrity-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}')
 
 google_one_click = File.read(WORKFLOWS.join("omega-google-one-click-release.yml"), encoding: "UTF-8")
 fail!("google_one_click_must_not_write_control_contents") if google_one_click.include?("contents: write") || google_one_click.include?("/contents/$TRIGGER_PATH") || google_one_click.include?("bootstrap/omega/google-one-click-release.json")
@@ -334,6 +335,7 @@ end
 fail!("release_stager_fallback_trigger_forbidden") if stager_text.include?("bootstrap/omega/release-stager-trigger.txt") || stager_text.include?("OMEGA_RELEASE_STAGER_STALE_TRIGGER")
 fail!("release_stager_explicit_handoff_marker_missing") unless stager_text.include?("OMEGA_RELEASE_STAGER_EXPLICIT_HANDOFF") && stager_text.include?('EVIDENCE_RUN_ID: ${{ inputs.evidence_run_id }}')
 fail!("release_stager_actions_write_missing") unless stager_text.include?("actions: write")
+fail!("release_stager_signer_dispatch_missing") unless stager_text.include?("OMEGA_RELEASE_STAGER_SIGNER_DISPATCHED") && stager_text.include?('gh workflow run "$SIGNER_WORKFLOW"') && stager_text.include?("OMEGA_RELEASE_STAGER_SIGNER_ALREADY_ACTIVE")
 fail!("stager_explicit_final_dispatch_missing") unless stager_text.include?('gh workflow run omega-private-pr-hosted-bridge.yml') && stager_text.include?('gh workflow run omega-hosted-recovery-failover.yml') && stager_text.include?('-R "$GITHUB_REPOSITORY" --ref main')
 fail!("release_stager_capability_preflight_missing") unless stager_text.include?("OMEGA_RELEASE_CAPABILITY_PASS:private_contents_write") && stager_text.include?("OMEGA_RELEASE_CAPABILITY_MISSING:private_contents_write")
 fail!("release_stager_missing_artifact_must_fail") unless stager_text.include?("OMEGA_RELEASE_STAGE_NOT_EXECUTED_NO_EVIDENCE_ARTIFACT") && stager_text.include?("exit 75")

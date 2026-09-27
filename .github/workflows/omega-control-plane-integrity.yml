@@ -26,7 +26,10 @@ permissions:
   statuses: write
 
 concurrency:
-  group: omega-control-plane-integrity
+  # PR validation and production-main integrity are independent fault domains.
+  # New commits may supersede older checks within the same ref, but main-state
+  # churn must never cancel a pull-request proof.
+  group: omega-control-plane-integrity-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
