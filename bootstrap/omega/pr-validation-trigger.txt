@@ -1,1 +1,1 @@
-validate-exact-pr 6c7dcd5ceac1571f9de80d9b8e74c8b4d8ec8a83 hardening/status-driven-play-signer-20260927 status-driven-play-signer-v1
+validate-exact-pr a8fdd6b31203bb5240ed7256d122756e0f2acece release/code19-main-a8fdd6b3 post-merge-status-driven-signer-v1
