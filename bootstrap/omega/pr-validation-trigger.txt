@@ -1,1 +1,1 @@
-validate-exact-pr 98cbfe76866e3afec535f610a88da54adec73b3a main current-main-reconcile
+validate-exact-pr 6172cd666a7ce12f9d930e837b928f64c9b3c556 fix/live-model-runtime-fallback-20260927 live-model-runtime-fallback-pr324
