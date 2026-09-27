@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
-  "source_sha": "584472d9397e2dfc8769baaad7dfd9a6cb8285e5",
+  "source_sha": "da16f5c7a1fee574d1ce4f69c248165945fd239d",
   "source_ref": "hardening/content-addressed-release-state-machine-20260927",
   "requested_by": "omega-control-plane",
-  "purpose": "content-addressed-code19-unsigned-aab-proof",
-  "attempt": 3
+  "purpose": "content-addressed-code19-unsigned-aab-proof-signer-integrated",
+  "attempt": 4
 }
