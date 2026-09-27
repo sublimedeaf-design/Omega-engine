@@ -61,8 +61,54 @@ jobs:
           echo "need_run=$need_run" >> "$GITHUB_OUTPUT"
           echo "OMEGA_HOSTED_FEDERATION_PIN sha=$sha need_run=$need_run"
 
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Fence execution to current federation epoch
+        id: epoch
         if: ${{ steps.pin.outputs.need_run == 'true' }}
+        env:
+          CONTROL_TOKEN: ${{ github.token }}
+          PRIVATE_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          SOURCE_SHA: ${{ steps.pin.outputs.sha }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          encoded="$(GH_TOKEN="$CONTROL_TOKEN" gh api "/repos/$GITHUB_REPOSITORY/contents/federation/epochs/current.json?ref=main" --jq '.content // empty')"
+          [ -n "$encoded" ] || { echo OMEGA_FEDERATION_EPOCH_UNREADABLE >&2; exit 66; }
+          readarray -t epoch_fields < <(printf '%s' "$encoded" | python3 -c 'import base64,json,sys; d=json.loads(base64.b64decode("".join(sys.stdin.read().split()),validate=True)); print(str((d.get("primary") or {}).get("source_sha") or "")); print(str((d.get("release_epoch") or {}).get("source_binding_mode") or "peer_pinned")); print(str(d.get("state") or ""))')
+          epoch_source="${epoch_fields[0]:-}"
+          binding_mode="${epoch_fields[1]:-peer_pinned}"
+          epoch_state="${epoch_fields[2]:-}"
+          target="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          publish_fallback() {
+            local state="$1" description="$2"
+            for ctx in omega-runtime/main-exact omega-federation/peer-http-5x omega-federation/exact-sha-executor omega-federation/evidence-verifier omega-federation/evidence-publish; do
+              GH_TOKEN="$PRIVATE_TOKEN" gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$SOURCE_SHA" \
+                -f state="$state" -f context="$ctx" -f description="$description" -f target_url="$target" >/dev/null
+            done
+          }
+          if [ "$epoch_source" != "$SOURCE_SHA" ]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            publish_fallback pending "awaiting federation epoch for current generation"
+            echo "OMEGA_FEDERATION_STALE_EPOCH_NOOP current=$SOURCE_SHA epoch=$epoch_source"
+            exit 0
+          fi
+          if [ "$binding_mode" = external_epoch ]; then
+            statuses="$(GH_TOKEN="$PRIVATE_TOKEN" gh api "/repos/$PRIVATE_REPOSITORY/commits/$SOURCE_SHA/status?per_page=100")"
+            release_state="$(printf '%s' "$statuses" | python3 -c 'import json,sys; p=json.load(sys.stdin); latest={}; [(latest.setdefault(str(r.get("context") or ""),str(r.get("state") or ""))) for r in p.get("statuses",[]) if r.get("context")]; print(latest.get("omega/federation-v3-release",""),end="")')"
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            if [ "$epoch_state" = PASS ] && [ "$release_state" = success ]; then
+              publish_fallback success "external federation epoch certified by release-federation proof"
+              echo "OMEGA_FEDERATION_EXTERNAL_EPOCH_CERTIFIED source=$SOURCE_SHA"
+            else
+              publish_fallback pending "external federation epoch awaiting release-federation certification"
+              echo "OMEGA_FEDERATION_EXTERNAL_EPOCH_WAIT source=$SOURCE_SHA epoch_state=$epoch_state release_state=${release_state:-missing}"
+            fi
+            exit 0
+          fi
+          echo "ready=true" >> "$GITHUB_OUTPUT"
+          echo "OMEGA_FEDERATION_EPOCH_CURRENT source=$SOURCE_SHA mode=$binding_mode"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        if: ${{ steps.pin.outputs.need_run == 'true' && steps.epoch.outputs.ready == 'true' }}
         with:
           repository: ${{ env.PRIVATE_REPOSITORY }}
           ref: ${{ steps.pin.outputs.sha }}
@@ -72,12 +118,12 @@ jobs:
           path: omega
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
-        if: ${{ steps.pin.outputs.need_run == 'true' }}
+        if: ${{ steps.pin.outputs.need_run == 'true' && steps.epoch.outputs.ready == 'true' }}
         with:
           python-version: "3.13"
 
       - name: Verify exact main and peer authorization
-        if: ${{ steps.pin.outputs.need_run == 'true' }}
+        if: ${{ steps.pin.outputs.need_run == 'true' && steps.epoch.outputs.ready == 'true' }}
         working-directory: omega
         shell: bash
         env:
@@ -125,7 +171,7 @@ jobs:
           PY
 
       - name: Run exact peer executor
-        if: ${{ steps.pin.outputs.need_run == 'true' }}
+        if: ${{ steps.pin.outputs.need_run == 'true' && steps.epoch.outputs.ready == 'true' }}
         id: exec
         working-directory: omega
         shell: bash
@@ -179,7 +225,7 @@ jobs:
           PY
 
       - name: Independent hosted verifier
-        if: ${{ steps.pin.outputs.need_run == 'true' }}
+        if: ${{ steps.pin.outputs.need_run == 'true' && steps.epoch.outputs.ready == 'true' }}
         working-directory: omega
         shell: bash
         env:
@@ -217,7 +263,7 @@ jobs:
           PY
 
       - name: Publish exact-main federation stages
-        if: ${{ always() && steps.pin.outputs.need_run == 'true' }}
+        if: ${{ always() && steps.pin.outputs.need_run == 'true' && steps.epoch.outputs.ready == 'true' }}
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
