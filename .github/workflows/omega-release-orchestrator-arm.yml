@@ -104,10 +104,11 @@ jobs:
           candidate="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/main" --jq .sha)"
           [[ "$candidate" =~ ^[0-9a-f]{40}$ ]] || { echo OMEGA_RELEASE_CONTROLLER_MAIN_INVALID >&2; exit 64; }
           source_ref="release/auto-${candidate:0:12}"
-          statuses="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/$candidate/status?per_page=100")"
-          exact_final="$(STATUS_PAYLOAD="$statuses" python3 - <<'PY'
-          import json,os
-          rows=json.loads(os.environ["STATUS_PAYLOAD"]).get("statuses",[])
+          status_file="$RUNNER_TEMP/omega-release-statuses.json"
+          gh api "/repos/$PRIVATE_REPOSITORY/commits/$candidate/status?per_page=100" > "$status_file"
+          exact_final="$(python3 - "$status_file" <<'PY'
+          import json,sys
+          rows=json.load(open(sys.argv[1],encoding="utf-8")).get("statuses",[])
           latest={}
           for row in rows:
               ctx=str(row.get("context") or "")
@@ -158,18 +159,26 @@ jobs:
           [ "$existing" = "$candidate" ] || { echo "OMEGA_RELEASE_CONTROLLER_REF_COLLISION:$source_ref:$existing!=$candidate" >&2; exit 68; }
 
           control_main="$(GH_TOKEN="$CONTROL_TOKEN" gh api "/repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)"
-          epoch="$(GH_TOKEN="$CONTROL_TOKEN" gh api "/repos/$GITHUB_REPOSITORY/contents/federation/epochs/current.json?ref=main" --jq '.content' | python3 -c 'import base64,sys; print(base64.b64decode("".join(sys.stdin.read().split()),validate=True).decode(),end="")')"
-          contract="$(EPOCH="$epoch" python3 -c 'import json,os; print(str((json.loads(os.environ["EPOCH"]).get("release_epoch") or {}).get("control_contract_sha") or ""))')"
-          compare='{"status":"identical","files":[]}'
+          epoch_file="$RUNNER_TEMP/omega-release-epoch.json"
+          compare_file="$RUNNER_TEMP/omega-release-compare.json"
+          GH_TOKEN="$CONTROL_TOKEN" gh api "/repos/$GITHUB_REPOSITORY/contents/federation/epochs/current.json?ref=main" --jq '.content' \
+            | python3 -c 'import base64,sys; sys.stdout.write(base64.b64decode("".join(sys.stdin.read().split()),validate=True).decode())' \
+            > "$epoch_file"
+          contract="$(python3 - "$epoch_file" <<'PY'
+          import json,sys
+          print(str((json.load(open(sys.argv[1],encoding="utf-8")).get("release_epoch") or {}).get("control_contract_sha") or ""))
+          PY
+          )"
+          printf '%s\n' '{"status":"identical","files":[]}' > "$compare_file"
           if [[ "$contract" =~ ^[0-9a-f]{40}$ ]] && [ "$contract" != "$control_main" ]; then
-            compare="$(GH_TOKEN="$CONTROL_TOKEN" gh api "/repos/$GITHUB_REPOSITORY/compare/$contract...$control_main?per_page=100")"
+            GH_TOKEN="$CONTROL_TOKEN" gh api "/repos/$GITHUB_REPOSITORY/compare/$contract...$control_main?per_page=100" > "$compare_file"
           fi
 
-          decision="$(EPOCH="$epoch" COMPARE_PAYLOAD="$compare" STATUS_PAYLOAD="$statuses" CANDIDATE="$candidate" SOURCE_REF="$source_ref" CONTROL_MAIN="$control_main" python3 <<'PY'
-          import json,os,re
-          d=json.loads(os.environ["EPOCH"])
-          compare=json.loads(os.environ["COMPARE_PAYLOAD"])
-          status=json.loads(os.environ["STATUS_PAYLOAD"])
+          decision="$(CANDIDATE="$candidate" SOURCE_REF="$source_ref" CONTROL_MAIN="$control_main" python3 - "$epoch_file" "$compare_file" "$status_file" <<'PY'
+          import json,os,re,sys
+          d=json.load(open(sys.argv[1],encoding="utf-8"))
+          compare=json.load(open(sys.argv[2],encoding="utf-8"))
+          status=json.load(open(sys.argv[3],encoding="utf-8"))
           latest={}
           for row in status.get("statuses",[]):
               ctx=str(row.get("context") or "")
