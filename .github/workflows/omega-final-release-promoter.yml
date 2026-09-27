@@ -160,6 +160,13 @@ jobs:
           echo "signer_run_id=$(jq -r .signer_run "$RUNNER_TEMP/final-gates.json")" >> "$GITHUB_OUTPUT"
           echo "evidence_run_id=$(jq -r .evidence_run "$RUNNER_TEMP/final-gates.json")" >> "$GITHUB_OUTPUT"
 
+      - name: Fail closed while final promotion gates are incomplete
+        if: steps.gate.outputs.ready != 'true'
+        shell: bash
+        run: |
+          echo "OMEGA_FINAL_RELEASE_NOT_READY_FAIL_CLOSED" >&2
+          exit 75
+
       - name: Preflight final private mutation capability
         if: steps.gate.outputs.ready == 'true'
         env:
