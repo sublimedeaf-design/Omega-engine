@@ -203,29 +203,6 @@ jobs:
             omega/dist/release-identity.json
             omega/reports/omega-sbom.spdx.json
 
-      - name: Dispatch private canonical signer for exact main release
-        if: steps.source.outputs.source_ref == 'main'
-        env:
-          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          python3 - <<'PY' > "$RUNNER_TEMP/signer-dispatch.json"
-          import json,os
-          print(json.dumps({
-              "ref":"main",
-              "inputs":{
-                  "source_sha":os.environ["SOURCE_SHA"],
-                  "release_id":os.environ["RELEASE_ID"],
-                  "builder_run_id":os.environ["GITHUB_RUN_ID"],
-                  "unsigned_aab_sha256":os.environ["UNSIGNED_AAB_SHA"],
-                  "allow_private_self_hosted":True,
-              },
-          },separators=(",",":")))
-          PY
-          gh api --method POST             "/repos/$PRIVATE_REPOSITORY/actions/workflows/omega-play-canonical-signer.yml/dispatches"             --input "$RUNNER_TEMP/signer-dispatch.json"
-          echo "OMEGA_PLAY_SIGNER_DISPATCH_PASS source=$SOURCE_SHA release_id=$RELEASE_ID builder_run=$GITHUB_RUN_ID"
-
       - name: Publish exact private unsigned-build status
         if: always()
         env:
