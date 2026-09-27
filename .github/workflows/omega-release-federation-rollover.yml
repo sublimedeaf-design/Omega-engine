@@ -45,7 +45,13 @@ jobs:
           [[ "$source_ref" =~ ^release/[A-Za-z0-9._/-]+$ ]] || { echo OMEGA_RELEASE_FEDERATION_INPUT_REF_INVALID >&2; exit 64; }
           case "$source_ref" in *..*|/*|-*) echo "OMEGA_RELEASE_FEDERATION_REF_UNSAFE:$source_ref" >&2; exit 64 ;; esac
           main="$(gh api "/repos/sublimedeaf-design/Omega-engines/commits/main" --jq .sha)"
-          [ "$main" = "$candidate" ] || { echo "OMEGA_RELEASE_FEDERATION_STALE_GENERATION candidate=$candidate main=$main" >&2; exit 68; }
+          if [ "$main" != "$candidate" ]; then
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            echo "sha=$candidate" >> "$GITHUB_OUTPUT"
+            echo "source_ref=$source_ref" >> "$GITHUB_OUTPUT"
+            echo "OMEGA_RELEASE_FEDERATION_STALE_GENERATION_NOOP candidate=$candidate main=$main"
+            exit 0
+          fi
           tip="$(gh api "/repos/sublimedeaf-design/Omega-engines/commits/$source_ref" --jq .sha)"
           [ "$tip" = "$candidate" ] || { echo "OMEGA_RELEASE_FEDERATION_REF_MOVED:$tip!=$candidate" >&2; exit 68; }
           echo "found=true" >> "$GITHUB_OUTPUT"
