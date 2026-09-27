@@ -1,0 +1,80 @@
+name: OMEGA Immutable Validation Request Dispatcher
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "bootstrap/omega/validation-requests/*.json"
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: omega-immutable-validation-request-dispatcher
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: Resolve exactly one immutable request
+        id: request
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          AFTER_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mapfile -t files < <(git diff --name-only "$BEFORE_SHA" "$AFTER_SHA" -- 'bootstrap/omega/validation-requests/*.json')
+          [ "${#files[@]}" -eq 1 ] || { echo "OMEGA_VALIDATION_REQUEST_COUNT_INVALID:${#files[@]}" >&2; exit 64; }
+          file="${files[0]}"
+          test -s "$file"
+          REQUEST_FILE="$file" python3 - <<'PY' > /tmp/omega-validation-request.env
+          import json,os,pathlib,re,shlex
+          path=pathlib.Path(os.environ["REQUEST_FILE"])
+          p=json.loads(path.read_text(encoding="utf-8"))
+          source=str(p.get("source_sha") or "").lower()
+          ref=str(p.get("source_ref") or "")
+          request_id=str(p.get("request_id") or "")
+          if not re.fullmatch(r"[0-9a-f]{40}",source):
+              raise SystemExit("OMEGA_VALIDATION_REQUEST_SHA_INVALID")
+          if not re.fullmatch(r"[A-Za-z0-9._/-]+",ref) or ".." in ref or ref.startswith("/") or ref.startswith("-"):
+              raise SystemExit("OMEGA_VALIDATION_REQUEST_REF_INVALID")
+          if not re.fullmatch(r"[A-Za-z0-9._-]{1,96}",request_id):
+              raise SystemExit("OMEGA_VALIDATION_REQUEST_ID_INVALID")
+          expected=f"bootstrap/omega/validation-requests/{source}.json"
+          if path.as_posix()!=expected:
+              raise SystemExit(f"OMEGA_VALIDATION_REQUEST_PATH_MISMATCH:{path}!={expected}")
+          print("source_sha="+shlex.quote(source))
+          print("source_ref="+shlex.quote(ref))
+          print("request_id="+shlex.quote(request_id))
+          PY
+          source /tmp/omega-validation-request.env
+          {
+            echo "source_sha=$source_sha"
+            echo "source_ref=$source_ref"
+            echo "request_id=$request_id"
+          } >> "$GITHUB_OUTPUT"
+          echo "OMEGA_IMMUTABLE_VALIDATION_REQUEST_PASS source=$source_sha ref=$source_ref request=$request_id"
+
+      - name: Dispatch exact bridge with immutable inputs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ steps.request.outputs.source_sha }}
+          SOURCE_REF: ${{ steps.request.outputs.source_ref }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          gh workflow run omega-private-pr-hosted-bridge.yml \
+            -R "$GITHUB_REPOSITORY" \
+            --ref main \
+            -f source_sha="$SOURCE_SHA" \
+            -f source_ref="$SOURCE_REF"
+          echo "OMEGA_IMMUTABLE_VALIDATION_DISPATCHED source=$SOURCE_SHA ref=$SOURCE_REF"
