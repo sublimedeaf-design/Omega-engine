@@ -230,6 +230,29 @@ jobs:
             exit 0
           fi
           github_state="${{ steps.classify.outputs.github_state }}"
+          if [ "$github_state" = pending ] && { [ "$FAILURE_CLASS" = SUCCESS_WITHOUT_PROOF ] || [ "$FAILURE_CLASS" = NOT_EXECUTED ]; }; then
+            statuses="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/$SOURCE_SHA/status?per_page=100")"
+            if STATUS_PAYLOAD="$statuses" PROOF_CONTEXTS="$PROOF_CONTEXTS" python3 <<'PY'
+          import json,os
+          p=json.loads(os.environ["STATUS_PAYLOAD"]); latest={}
+          for row in p.get("statuses",[]):
+              ctx=str(row.get("context") or "")
+              stamp=str(row.get("updated_at") or row.get("created_at") or "")
+              if ctx and (ctx not in latest or stamp > str(latest[ctx].get("_stamp") or "")):
+                  latest[ctx]={**row,"_stamp":stamp}
+          required=[x for x in os.environ.get("PROOF_CONTEXTS","").split(",") if x]
+          raise SystemExit(0 if required and all((latest.get(x) or {}).get("state")=="success" for x in required) else 1)
+          PY
+            then
+              gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$SOURCE_SHA" \
+                -f state=success \
+                -f context="omega/control-plane/$GATE" \
+                -f description="existing exact-SHA proof preserved gen=${SOURCE_SHA:0:12}" \
+                -f target_url="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" >/dev/null
+              echo "OMEGA_GATE_ROUTER_MONOTONIC_PROOF_PRESERVED gate=$GATE source=$SOURCE_SHA"
+              exit 0
+            fi
+          fi
           case "$github_state" in
             success|failure|pending|error) ;;
             *) echo "OMEGA_GATE_ROUTER_GITHUB_STATE_INVALID:$github_state" >&2; exit 65 ;;
