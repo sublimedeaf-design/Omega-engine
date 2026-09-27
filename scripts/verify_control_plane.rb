@@ -211,6 +211,7 @@ classifier = File.read(classifier_path, encoding: "UTF-8")
 end
 integrity_workflow = File.read(WORKFLOWS.join("omega-control-plane-integrity.yml"), encoding: "UTF-8")
 fail!("gate_classifier_self_test_missing") unless integrity_workflow.include?("omega_gate_classifier.py --self-test")
+fail!("control_plane_integrity_concurrency_scope_missing") unless integrity_workflow.include?('group: omega-control-plane-integrity-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}')
 
 google_one_click = File.read(WORKFLOWS.join("omega-google-one-click-release.yml"), encoding: "UTF-8")
 fail!("google_one_click_must_not_write_control_contents") if google_one_click.include?("contents: write") || google_one_click.include?("/contents/$TRIGGER_PATH") || google_one_click.include?("bootstrap/omega/google-one-click-release.json")
