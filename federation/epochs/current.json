@@ -77,18 +77,18 @@
   "release_rollover": {
     "source_ref": "release/code19-final-a8fdd6b3",
     "stage": "IMMUTABLE_EPOCH_STAGED_PENDING_READ_ONLY_PEER_PROOF",
-    "release_epoch_id": "7de79e3255fc2cadc3bac3679207c4b3d4ab6ea05308dfed425cf8138ba54d07",
-    "immutable_path": "federation/epochs/releases/a8fdd6b31203bb5240ed7256d122756e0f2acece-7de79e3255fc2cad.json"
+    "release_epoch_id": "52311a26dc8037e61e3166be9a4aa2b785876fd4dca20709ecdc87a7b14e42d1",
+    "immutable_path": "federation/epochs/releases/a8fdd6b31203bb5240ed7256d122756e0f2acece-52311a26dc8037e6.json"
   },
   "release_epoch": {
     "contract_version": 2,
-    "id": "7de79e3255fc2cadc3bac3679207c4b3d4ab6ea05308dfed425cf8138ba54d07",
-    "sequence": 19,
-    "immutable_path": "federation/epochs/releases/a8fdd6b31203bb5240ed7256d122756e0f2acece-7de79e3255fc2cad.json",
-    "control_contract_sha": "67db7e329001ce036d93831ffa1a02c4ff2ee86e",
-    "parent_epoch_id": "db88c8da1ddaeaf6260cd3e5b623781dbd840fb2651edac15a7efa126c66dacf",
-    "parent_control_contract_sha": "d3022d100a80c817465d7a2153534613d3e0ba77",
-    "parent_sequence": 18,
+    "id": "52311a26dc8037e61e3166be9a4aa2b785876fd4dca20709ecdc87a7b14e42d1",
+    "sequence": 20,
+    "immutable_path": "federation/epochs/releases/a8fdd6b31203bb5240ed7256d122756e0f2acece-52311a26dc8037e6.json",
+    "control_contract_sha": "c07f2df068ff7dbde7174476ad1c6c48aacdbe03",
+    "parent_epoch_id": "7de79e3255fc2cadc3bac3679207c4b3d4ab6ea05308dfed425cf8138ba54d07",
+    "parent_control_contract_sha": "67db7e329001ce036d93831ffa1a02c4ff2ee86e",
+    "parent_sequence": 19,
     "source_binding_mode": "external_epoch",
     "peer_contract_source_sha": "51fac1413e2177c7c94207a4c24dccd7657a6d3b",
     "new_deviation_requires_new_epoch": true,
