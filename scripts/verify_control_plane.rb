@@ -491,6 +491,9 @@ fail!("release_orchestrator_state_only_drift_missing") unless orchestrator.inclu
 fail!("release_orchestrator_compare_guard_missing") unless orchestrator.include?("/compare/$contract...$control_main") && orchestrator.include?("control-diff-too-large") && orchestrator.include?("control-history-")
 fail!("release_orchestrator_missing_ref_json_guard") unless orchestrator.include?('if ref_json="$(gh api "/repos/$PRIVATE_REPOSITORY/git/ref/heads/$source_ref" 2>/dev/null)"; then') && orchestrator.include?("OMEGA_RELEASE_CONTROLLER_REF_RESPONSE_INVALID")
 fail!("release_orchestrator_404_stdout_collision_regression") if orchestrator.include?('--jq .object.sha 2>/dev/null || true')
+fail!("release_orchestrator_scoped_app_authority_missing") unless orchestrator.include?("actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1") && orchestrator.include?("repositories: Omega-engines") && orchestrator.include?("permission-contents: write") && orchestrator.include?("permission-statuses: write")
+fail!("release_orchestrator_private_token_selection_missing") unless orchestrator.include?("OMEGA_PRIVATE_RELEASE_TOKEN") && orchestrator.include?("OMEGA_RELEASE_AUTHORITY_SELECTED")
+fail!("release_orchestrator_reconcile_must_use_selected_private_authority") unless orchestrator.include?('GH_TOKEN: ${{ env.OMEGA_PRIVATE_RELEASE_TOKEN }}')
 fail!("release_orchestrator_must_not_mutate_epoch") if orchestrator.include?("/contents/federation/epochs/current.json") && orchestrator.include?("--method PUT")
 
 # Supply-chain provenance must survive the unsigned handoff and be verified before
