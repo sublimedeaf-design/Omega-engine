@@ -1,0 +1,283 @@
+name: OMEGA Limited Distribution Release Adapter
+
+on:
+  workflow_dispatch:
+    inputs:
+      final_sha:
+        description: "Exact production-final private SHA"
+        required: true
+        type: string
+      post_live_run_id:
+        description: "Exact successful OMEGA Post Live Verification run"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+cache-mode: none
+
+concurrency:
+  group: omega-limited-distribution-release-adapter
+  cancel-in-progress: false
+  queue: max
+
+env:
+  PRIVATE_REPOSITORY: sublimedeaf-design/Omega-engines
+  EXPECTED_PACKAGE: com.sublimedeafdesign.omegaengine
+  EXPECTED_FINGERPRINT: 0738b245ec8a557edc0600a6961d7bb2586cc22f886ed5273560ce6ab2db447f
+
+jobs:
+  adapt:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Pin exact certified generic release
+        id: pin
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          FINAL_SHA: ${{ inputs.final_sha }}
+          POST_LIVE_RUN_ID: ${{ inputs.post_live_run_id }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [[ "$FINAL_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo OMEGA_LD_ADAPTER_SHA_INVALID >&2; exit 64; }
+          [[ "$POST_LIVE_RUN_ID" =~ ^[0-9]+$ ]] || { echo OMEGA_LD_ADAPTER_POST_LIVE_RUN_INVALID >&2; exit 64; }
+          main="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/main" --jq .sha)"
+          [ "$main" = "$FINAL_SHA" ] || { echo "OMEGA_LD_ADAPTER_MAIN_MOVED:$main!=$FINAL_SHA" >&2; exit 65; }
+
+          post_run="$(GH_TOKEN="${{ github.token }}" gh api "/repos/$GITHUB_REPOSITORY/actions/runs/$POST_LIVE_RUN_ID")"
+          POST_RUN="$post_run" python3 - <<'PY'
+          import json,os
+          r=json.loads(os.environ["POST_RUN"])
+          if r.get("name")!="OMEGA Post Live Verification" or r.get("status")!="completed" or r.get("conclusion")!="success":
+              raise SystemExit("OMEGA_LD_ADAPTER_POST_LIVE_RUN_NOT_SUCCESS")
+          PY
+
+          statuses="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/$FINAL_SHA/status?per_page=100")"
+          STATUS_PAYLOAD="$statuses" POST_LIVE_RUN_ID="$POST_LIVE_RUN_ID" python3 - <<'PY' > "$RUNNER_TEMP/ld-adapter-gates.json"
+          import json,os,re
+          p=json.loads(os.environ["STATUS_PAYLOAD"]); latest={}
+          for row in p.get("statuses",[]):
+              ctx=str(row.get("context") or "")
+              stamp=str(row.get("updated_at") or row.get("created_at") or "")
+              if ctx and (ctx not in latest or stamp>str(latest[ctx].get("_stamp") or "")):
+                  latest[ctx]={**row,"_stamp":stamp}
+          required=(
+              "omega/exact-final-validation",
+              "omega/federation-v3-release",
+              "omega/hosted-recovery",
+              "omega/recovery-attestation",
+              "omega/candidate-evidence-root",
+              "omega/signer/continuity",
+              "omega/android-release-signed",
+              "omega/android-runtime-coldstart",
+              "omega/release-live",
+              "omega/release-certified",
+          )
+          bad=[ctx for ctx in required if (latest.get(ctx) or {}).get("state")!="success"]
+          if bad: raise SystemExit("OMEGA_LD_ADAPTER_GATE_NOT_PASS:"+",".join(bad))
+          release_cert=latest["omega/release-certified"]
+          m=re.search(r"/actions/runs/([0-9]+)$",str(release_cert.get("target_url") or ""))
+          if not m or m.group(1)!=os.environ["POST_LIVE_RUN_ID"]:
+              raise SystemExit("OMEGA_LD_ADAPTER_POST_LIVE_BINDING_MISMATCH")
+          exact=latest["omega/exact-final-validation"]
+          exact_url=str(exact.get("target_url") or "")
+          m2=re.search(r"/actions/runs/([0-9]+)$",exact_url)
+          if not m2: raise SystemExit("OMEGA_LD_ADAPTER_EXACT_FINAL_RUN_BINDING_MISSING")
+          print(json.dumps({"validator_run_id":m2.group(1),"validator_target_url":exact_url}))
+          PY
+          echo "validator_run_id=$(jq -r .validator_run_id "$RUNNER_TEMP/ld-adapter-gates.json")" >> "$GITHUB_OUTPUT"
+          echo "validator_target_url=$(jq -r .validator_target_url "$RUNNER_TEMP/ld-adapter-gates.json")" >> "$GITHUB_OUTPUT"
+
+          releases="$(gh api "/repos/$PRIVATE_REPOSITORY/releases?per_page=50")"
+          RELEASES="$releases" FINAL_SHA="$FINAL_SHA" python3 - <<'PY' > "$RUNNER_TEMP/ld-generic-release.txt"
+          import json,os
+          rows=[]
+          for r in json.loads(os.environ["RELEASES"]):
+              if (r.get("draft") is False and r.get("prerelease") is False
+                  and str(r.get("target_commitish") or "")==os.environ["FINAL_SHA"]):
+                  rows.append(str(r.get("tag_name") or ""))
+          if len(rows)!=1: raise SystemExit(f"OMEGA_LD_ADAPTER_GENERIC_RELEASE_COUNT:{len(rows)}")
+          print(rows[0])
+          PY
+          tag="$(cat "$RUNNER_TEMP/ld-generic-release.txt")"
+          [ -n "$tag" ]
+          echo "generic_tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "OMEGA_LD_ADAPTER_PIN_PASS source=$FINAL_SHA generic_tag=$tag"
+
+      - name: Download immutable production release
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          GENERIC_TAG: ${{ steps.pin.outputs.generic_tag }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p dist/generic dist/limited
+          gh release download "$GENERIC_TAG" -R "$PRIVATE_REPOSITORY" -D dist/generic
+          for name in OMEGA-Engine.apk OMEGA-Engine.apk.sha256 OMEGA-Engine.provenance.json OMEGA-Engine.sbom.spdx.json OMEGA-Engine.supply-chain.json; do
+            test -s "dist/generic/$name" || { echo "OMEGA_LD_ADAPTER_ASSET_MISSING:$name" >&2; exit 66; }
+          done
+
+      - name: Re-attest exact production artifact for Limited Distribution
+        id: evidence
+        env:
+          FINAL_SHA: ${{ inputs.final_sha }}
+          VALIDATOR_RUN_ID: ${{ steps.pin.outputs.validator_run_id }}
+          VALIDATOR_TARGET_URL: ${{ steps.pin.outputs.validator_target_url }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          actual="$(sha256sum dist/generic/OMEGA-Engine.apk | awk '{print $1}')"
+          recorded="$(awk '{print $1}' dist/generic/OMEGA-Engine.apk.sha256 | tr 'A-F' 'a-f')"
+          [ "$actual" = "$recorded" ] || { echo OMEGA_LD_ADAPTER_APK_DIGEST_MISMATCH >&2; exit 67; }
+
+          FINAL_SHA="$FINAL_SHA" APK_SHA="$actual" python3 - <<'PY' > "$RUNNER_TEMP/ld-meta.json"
+          import hashlib,json,os,pathlib,re
+          base=pathlib.Path("dist/generic")
+          prov=json.loads((base/"OMEGA-Engine.provenance.json").read_text(encoding="utf-8"))
+          if prov.get("classification")!="PRODUCTION_FINAL" or prov.get("production_final") is not True:
+              raise SystemExit("OMEGA_LD_ADAPTER_PRODUCTION_PROVENANCE_INVALID")
+          if prov.get("source_commit")!=os.environ["FINAL_SHA"] or prov.get("apk_sha256")!=os.environ["APK_SHA"]:
+              raise SystemExit("OMEGA_LD_ADAPTER_PRODUCTION_IDENTITY_MISMATCH")
+          if prov.get("application_id")!=os.environ["EXPECTED_PACKAGE"]:
+              raise SystemExit("OMEGA_LD_ADAPTER_PACKAGE_MISMATCH")
+          fp=str(prov.get("signer_certificate_sha256") or "").replace(":","").lower()
+          if fp!=os.environ["EXPECTED_FINGERPRINT"]:
+              raise SystemExit("OMEGA_LD_ADAPTER_SIGNER_MISMATCH")
+          if prov.get("signer_continuity")!="PASS":
+              raise SystemExit("OMEGA_LD_ADAPTER_SIGNER_CONTINUITY_NOT_PASS")
+          def sha(path): return hashlib.sha256(path.read_bytes()).hexdigest()
+          if prov.get("sbom_file_sha256")!=sha(base/"OMEGA-Engine.sbom.spdx.json"):
+              raise SystemExit("OMEGA_LD_ADAPTER_SBOM_MISMATCH")
+          if prov.get("supply_chain_report_sha256")!=sha(base/"OMEGA-Engine.supply-chain.json"):
+              raise SystemExit("OMEGA_LD_ADAPTER_SUPPLY_CHAIN_MISMATCH")
+          version=str(prov.get("android_version") or "")
+          code=int(prov.get("android_version_code") or 0)
+          if not re.fullmatch(r"\d+\.\d+\.\d+-live\.\d+",version) or code<1:
+              raise SystemExit("OMEGA_LD_ADAPTER_VERSION_INVALID")
+          print(json.dumps({"version":version,"code":code,"signer":fp}))
+          PY
+          version="$(jq -r .version "$RUNNER_TEMP/ld-meta.json")"
+          code="$(jq -r .code "$RUNNER_TEMP/ld-meta.json")"
+          signer="$(jq -r .signer "$RUNNER_TEMP/ld-meta.json")"
+
+          cp dist/generic/OMEGA-Engine.apk dist/limited/OMEGA-Engine.apk
+          cp dist/generic/OMEGA-Engine.apk.sha256 dist/limited/OMEGA-Engine.apk.sha256
+          cp dist/generic/OMEGA-Engine.sbom.spdx.json dist/limited/OMEGA-Engine.sbom.spdx.json
+          cp dist/generic/OMEGA-Engine.supply-chain.json dist/limited/OMEGA-Engine.supply-chain.json
+
+          FINAL_SHA="$FINAL_SHA" APK_SHA="$actual" SIGNER="$signer" VERSION="$version" CODE="$code" python3 - <<'PY'
+          import hashlib,json,os,pathlib
+          base=pathlib.Path("dist/limited")
+          seed="omega-limited-distribution-v1\0"+os.environ["FINAL_SHA"]+"\0"+os.environ["APK_SHA"]+"\0"+os.environ["SIGNER"]
+          release_id=hashlib.sha256(seed.encode()).hexdigest()
+          identity={
+              "schema_version":1,
+              "release_id":release_id,
+              "source_sha":os.environ["FINAL_SHA"],
+              "artifact":"OMEGA-Engine.apk",
+              "apk_sha256":os.environ["APK_SHA"],
+              "signer_certificate_sha256":os.environ["SIGNER"],
+              "distribution":"android_developer_console_limited_distribution",
+          }
+          (base/"release-identity.json").write_text(json.dumps(identity,indent=2,sort_keys=True)+"\n",encoding="utf-8")
+          def sha(path): return hashlib.sha256(path.read_bytes()).hexdigest()
+          payload={
+              "schema_version":1,
+              "classification":"OMEGA_LIMITED_DISTRIBUTION_SIGNED_CANDIDATE",
+              "live_certified":False,
+              "release_id":release_id,
+              "source_sha":os.environ["FINAL_SHA"],
+              "validator_run_id":os.environ["VALIDATOR_RUN_ID"],
+              "validator_target_url":os.environ["VALIDATOR_TARGET_URL"],
+              "package_id":os.environ["EXPECTED_PACKAGE"],
+              "android_version":os.environ["VERSION"],
+              "android_version_code":int(os.environ["CODE"]),
+              "apk_sha256":os.environ["APK_SHA"],
+              "signer_certificate_sha256":os.environ["SIGNER"],
+              "sbom_sha256":sha(base/"OMEGA-Engine.sbom.spdx.json"),
+              "supply_chain_report_sha256":sha(base/"OMEGA-Engine.supply-chain.json"),
+              "release_identity_sha256":sha(base/"release-identity.json"),
+              "distribution":"android_developer_console_limited_distribution",
+              "requires_runtime_certification":True,
+              "re_attested_from_production_final":True,
+          }
+          (base/"OMEGA-Engine.provenance.json").write_text(json.dumps(payload,indent=2,sort_keys=True)+"\n",encoding="utf-8")
+          PY
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          echo "apk_sha256=$actual" >> "$GITHUB_OUTPUT"
+          echo "OMEGA_LD_ADAPTER_EVIDENCE_PASS source=$FINAL_SHA apk=$actual"
+
+      - name: Publish immutable zero-cost Limited Distribution prerelease
+        id: release
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          FINAL_SHA: ${{ inputs.final_sha }}
+          VERSION: ${{ steps.evidence.outputs.version }}
+          CODE: ${{ steps.evidence.outputs.code }}
+          APK_SHA: ${{ steps.evidence.outputs.apk_sha256 }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          tag="omega-ld-v${VERSION}-code${CODE}-${FINAL_SHA:0:12}"
+          if gh release view "$tag" -R "$PRIVATE_REPOSITORY" >/dev/null 2>&1; then
+            target="$(gh release view "$tag" -R "$PRIVATE_REPOSITORY" --json targetCommitish --jq .targetCommitish)"
+            [ "$target" = "$FINAL_SHA" ] || { echo OMEGA_LD_ADAPTER_RELEASE_TARGET_COLLISION >&2; exit 70; }
+            mkdir -p "$RUNNER_TEMP/existing-ld"
+            gh release download "$tag" -R "$PRIVATE_REPOSITORY" -D "$RUNNER_TEMP/existing-ld"
+            existing="$(sha256sum "$RUNNER_TEMP/existing-ld/OMEGA-Engine.apk" | awk '{print $1}')"
+            [ "$existing" = "$APK_SHA" ] || { echo OMEGA_LD_ADAPTER_RELEASE_ARTIFACT_COLLISION >&2; exit 71; }
+            echo "OMEGA_LD_ADAPTER_RELEASE_REUSED tag=$tag"
+          else
+            gh release create "$tag" -R "$PRIVATE_REPOSITORY" --target "$FINAL_SHA" \
+              --title "OMEGA Limited Distribution $VERSION (code $CODE)" \
+              --notes "Zero-cost Android Developer Console Limited Distribution candidate. Exact production artifact re-attested for the authorized-device lane. ANDROID_LIMITED_CERTIFIED remains pending until physical-device cold-start and evidence-sync gates pass." \
+              --prerelease \
+              dist/limited/OMEGA-Engine.apk \
+              dist/limited/OMEGA-Engine.apk.sha256 \
+              dist/limited/OMEGA-Engine.provenance.json \
+              dist/limited/OMEGA-Engine.sbom.spdx.json \
+              dist/limited/OMEGA-Engine.supply-chain.json \
+              dist/limited/release-identity.json
+            echo "OMEGA_LD_ADAPTER_RELEASE_CREATED tag=$tag"
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Re-attest canonical release proofs into Limited Distribution namespace
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          FINAL_SHA: ${{ inputs.final_sha }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          target="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          for ctx in \
+            omega/limited-distribution/apk-signed \
+            omega/limited-distribution/signer-continuity \
+            omega/limited-distribution/emulator-coldstart \
+            omega/limited-distribution/release-ready
+          do
+            gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$FINAL_SHA" \
+              -f state=success -f context="$ctx" \
+              -f description="exact production proof re-attested for zero-cost Limited Distribution" \
+              -f target_url="$target" >/dev/null
+          done
+          gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$FINAL_SHA" \
+            -f state=pending -f context="omega/limited-distribution/device-install" \
+            -f description="authorized Samsung installation and physical runtime proof pending" \
+            -f target_url="$target" >/dev/null
+          echo "OMEGA_LD_ADAPTER_HANDOFF_READY source=$FINAL_SHA tag=${{ steps.release.outputs.tag }}"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: OMEGA-Limited-Distribution-Adapter-${{ inputs.final_sha }}
+          retention-days: 30
+          if-no-files-found: error
+          path: dist/limited
