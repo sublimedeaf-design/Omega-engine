@@ -21,7 +21,6 @@ permissions:
 concurrency:
   group: omega-gate-failure-router
   cancel-in-progress: false
-  queue: max
 
 env:
   PRIVATE_REPOSITORY: sublimedeaf-design/Omega-engines
@@ -42,6 +41,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
           WORKFLOW_NAME: ${{ github.event.workflow_run.name }}
+          TRIGGER_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -89,14 +89,21 @@ jobs:
           esac
 
           sha=""
-          if [ -s "$trigger" ]; then
-            read -r marker candidate _ < "$trigger" || true
+          trigger_content="$(
+            gh api "/repos/$GITHUB_REPOSITORY/contents/$trigger?ref=$TRIGGER_HEAD_SHA"               --jq '.content // empty' 2>/dev/null || true
+          )"
+          if [ -n "$trigger_content" ]; then
+            trigger_text="$(
+              TRIGGER_B64="$trigger_content" python3 -c 'import base64,os; print(base64.b64decode("".join(os.environ["TRIGGER_B64"].split())).decode("utf-8"),end="")'
+            )"
+            read -r marker candidate _ <<<"$trigger_text" || true
             if [[ "${candidate:-}" =~ ^[0-9a-f]{40}$ ]]; then
               sha="$candidate"
             fi
           fi
           if [ -z "$sha" ]; then
-            sha="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/main" --jq .sha)"
+            echo "OMEGA_GATE_ROUTER_TRIGGER_SOURCE_UNRESOLVED workflow=$WORKFLOW_NAME public_head=$TRIGGER_HEAD_SHA trigger=$trigger" >&2
+            exit 66
           fi
           [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
