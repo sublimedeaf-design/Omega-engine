@@ -78,7 +78,11 @@ jobs:
             exit 0
           fi
 
-          existing="$(gh api "/repos/$PRIVATE_REPOSITORY/git/ref/heads/$source_ref" --jq .object.sha 2>/dev/null || true)"
+          existing=""
+          if ref_json="$(gh api "/repos/$PRIVATE_REPOSITORY/git/ref/heads/$source_ref" 2>/dev/null)"; then
+            existing="$(printf '%s' "$ref_json" | jq -r '.object.sha // empty')"
+            [[ "$existing" =~ ^[0-9a-f]{40}$ ]] || { echo "OMEGA_RELEASE_CONTROLLER_REF_RESPONSE_INVALID:$source_ref" >&2; exit 68; }
+          fi
           if [ -z "$existing" ]; then
             gh api --method POST "/repos/$PRIVATE_REPOSITORY/git/refs" \
               -f ref="refs/heads/$source_ref" -f sha="$candidate" >/dev/null
