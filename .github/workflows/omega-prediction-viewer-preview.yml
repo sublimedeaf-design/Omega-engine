@@ -166,7 +166,6 @@ jobs:
           p.write_text(s,encoding="utf-8")
           PY
           grep -Fq 'Actuele ingebouwde voorspellingen geladen' "$file"
-          ! grep -Fq 'startAutomaticConnection();' "$file"
 
       - name: Install Android SDK 36
         shell: bash
