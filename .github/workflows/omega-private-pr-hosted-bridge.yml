@@ -447,9 +447,13 @@ jobs:
             [[ "$PRIOR_RUN_ID" =~ ^[0-9]+$ ]]
             prior_conclusion="$(gh api "/repos/$GITHUB_REPOSITORY/actions/runs/$PRIOR_RUN_ID" --jq '.conclusion // empty')"
             prior_exact="$(gh api "/repos/$GITHUB_REPOSITORY/actions/runs/$PRIOR_RUN_ID/jobs?filter=latest&per_page=100" --jq '[.jobs[] | select(.name=="exact_final" and .conclusion=="success")] | length')"
-            [ "$prior_conclusion" = success ] && [ "$prior_exact" = 1 ] || { echo "OMEGA_HOSTED_PR_REATTEST_INVALID:$PRIOR_RUN_ID" >&2; exit 69; }
-            state=success
-            desc="exact final-SHA proof re-attested from run $PRIOR_RUN_ID"
+            [ "$prior_conclusion" = success ] && [ "$prior_exact" = 1 ] || { echo "OMEGA_HOSTED_PR_REUSE_INVALID:$PRIOR_RUN_ID" >&2; exit 69; }
+            # Monotonic/idempotent proof semantics: the latest exact-SHA success
+            # already points at a verified successful run. Re-publishing the same
+            # success creates a new status event and can wake legacy consumers,
+            # so preserve the existing proof instead of generating a duplicate.
+            echo "OMEGA_HOSTED_PR_REUSE_PROOF_PRESERVED sha=$OMEGA_SHA prior_run=$PRIOR_RUN_ID"
+            exit 0
           elif [ "$GOVERNANCE_RESULT" = success ] && [ "$CI_RESULT" = success ]; then
             if [ "$ANDROID_REQUIRED" != true ] || [ "$ANDROID_RESULT" = success ]; then
               state=success
