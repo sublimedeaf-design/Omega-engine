@@ -212,6 +212,12 @@ end
 integrity_workflow = File.read(WORKFLOWS.join("omega-control-plane-integrity.yml"), encoding: "UTF-8")
 fail!("gate_classifier_self_test_missing") unless integrity_workflow.include?("omega_gate_classifier.py --self-test")
 
+google_one_click = File.read(WORKFLOWS.join("omega-google-one-click-release.yml"), encoding: "UTF-8")
+fail!("google_one_click_must_not_write_control_contents") if google_one_click.include?("contents: write") || google_one_click.include?("/contents/$TRIGGER_PATH") || google_one_click.include?("bootstrap/omega/google-one-click-release.json")
+fail!("google_one_click_status_reconciler_missing") unless google_one_click.include?('context="omega/google-one-click"') && google_one_click.include?("workflow_dispatch:") && google_one_click.include?("schedule:")
+fail!("google_one_click_oidc_missing") unless google_one_click.include?("id-token: write") && google_one_click.include?("google-github-actions/auth@")
+fail!("google_one_click_exact_source_missing") unless google_one_click.include?('commits/main" --jq .sha') && google_one_click.include?("OMEGA_GOOGLE_PRE_GATES_PASS")
+
 %w[
   incident_id
   diagnostic_sha256
@@ -332,7 +338,7 @@ fail!("federation_rollover_integrity_compile_missing") unless integrity_workflow
 fail!("federation_certifier_release_ref_guard_missing") unless File.read(WORKFLOWS.join("omega-release-federation-certifier.yml"), encoding: "UTF-8").include?('re.fullmatch(r"release/[A-Za-z0-9._/-]+",ref)')
 certifier = File.read(WORKFLOWS.join("omega-release-federation-certifier.yml"), encoding: "UTF-8")
 fail!("federation_certifier_actions_write_missing") unless certifier.include?("actions: write")
-fail!("federation_second_proof_exact_sha_dispatch_missing") unless certifier.include?('gh workflow run omega-federation-v3-peer-bridge.yml -R "$CONTROL_REPOSITORY" --ref "$PROMOTED_HEAD_SHA"') && certifier.include?("OMEGA_RELEASE_FEDERATION_SECOND_PROOF_DISPATCHED") && certifier.include?("OMEGA_RELEASE_FEDERATION_SECOND_PROOF_REF_INVALID")
+fail!("federation_second_proof_exact_sha_dispatch_missing") unless certifier.include?('gh workflow run omega-federation-v3-peer-bridge.yml -R "$CONTROL_REPOSITORY" --ref main') && certifier.include?('current_main="$(gh api "/repos/$CONTROL_REPOSITORY/git/ref/heads/main" --jq') && certifier.include?('[ "$current_main" = "$PROMOTED_HEAD_SHA" ]') && certifier.include?("OMEGA_RELEASE_FEDERATION_SECOND_PROOF_DISPATCHED") && certifier.include?("OMEGA_RELEASE_FEDERATION_SECOND_PROOF_REF_INVALID")
 fail!("federation_recovery_dispatch_missing") unless certifier.include?('gh workflow run omega-hosted-recovery-failover.yml -R "$CONTROL_REPOSITORY" --ref main') && certifier.include?("OMEGA_RELEASE_FINAL_RECOVERY_DISPATCHED")
 fail!("promoter_must_not_trigger_from_signer") if promoter.include?('workflows:\n      - "OMEGA Canonical Android Signer"')
 fail!("promoter_must_not_trigger_from_private_bridge") if promoter.include?('workflows:\n      - "OMEGA Private PR Hosted Bridge"')
