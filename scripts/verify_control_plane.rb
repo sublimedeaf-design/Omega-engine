@@ -217,6 +217,8 @@ fail!("google_one_click_must_not_write_control_contents") if google_one_click.in
 fail!("google_one_click_status_reconciler_missing") unless google_one_click.include?('context="omega/google-one-click"') && google_one_click.include?("workflow_dispatch:") && google_one_click.include?("schedule:")
 fail!("google_one_click_oidc_missing") unless google_one_click.include?("id-token: write") && google_one_click.include?("google-github-actions/auth@")
 fail!("google_one_click_exact_source_missing") unless google_one_click.include?('commits/main" --jq .sha') && google_one_click.include?("OMEGA_GOOGLE_PRE_GATES_PASS")
+fail!("google_one_click_generation_fence_missing") unless google_one_click.include?("OMEGA_GOOGLE_STALE_GENERATION_NOOP") && google_one_click.include?("generation_id") && google_one_click.include?('epoch_prefix="epoch=')
+fail!("google_internal_sharing_must_not_certify_primary_distribution") unless google_one_click.include?("Internal App Sharing cannot certify canonical Play distribution") && google_one_click.include?("OMEGA_GOOGLE_DIAGNOSTIC_FALLBACK_ONLY")
 play_builder = File.read(WORKFLOWS.join("omega-play-content-addressed-builder.yml"), encoding: "UTF-8")
 fail!("legacy_play_builder_wrong_package_identity") if play_builder.include?("com.omega.app")
 fail!("legacy_play_builder_must_not_autostart") if play_builder.include?("push:")
@@ -234,6 +236,7 @@ fail!("resilience_must_not_gate_on_signer") if resilience_required_segment.inclu
   retryable
   max_attempts
   next_action
+  github_state
 ].each do |field|
   fail!("gate_classifier_decision_field_missing:#{field}") unless classifier.include?(field)
 end
@@ -255,6 +258,8 @@ router = File.read(router_path, encoding: "UTF-8")
   fail!("gate_failure_router_workflow_missing:#{workflow_name}") unless router.include?(workflow_name)
 end
 fail!("gate_failure_router_classifier_missing") unless router.include?("scripts/omega_gate_classifier.py")
+fail!("gate_classifier_not_executed_pending_missing") unless classifier.include?('if normalized in {"PENDING", "NOT_EXECUTED"}') && classifier.include?('return "pending"')
+fail!("gate_failure_router_canonical_github_state_missing") unless router.include?("steps.classify.outputs.github_state") && router.include?("gen=${SOURCE_SHA:0:12}")
 fail!("gate_failure_router_incident_missing") unless router.include?("incident_id")
 fail!("gate_failure_router_execution_identity_missing") unless router.include?("omega_execution_id") && router.include?("evidence_root") && router.include?("execution-envelope.json")
 fail!("gate_failure_router_missing_envelope_guard_missing") unless router.include?("envelope-api.json") && router.include?('payload.get("content")') && router.include?('write_text("{}\\n",encoding="utf-8")') && router.include?("base64.b64decode") && router.include?("validate=True")
@@ -357,6 +362,9 @@ fail!("promoter_coldstart_trigger_missing") unless promoter.include?('- "OMEGA A
 # Immutable release-epoch contract: the public control authority owns the epoch,
 # while private federation peers are read-only during rollover.
 rollover_workflow = File.read(WORKFLOWS.join("omega-release-federation-rollover.yml"), encoding: "UTF-8")
+fail!("federation_rollover_must_be_controller_dispatch_only") if rollover_workflow.include?("workflow_run:")
+fail!("federation_rollover_generation_inputs_missing") unless rollover_workflow.include?("source_sha:") && rollover_workflow.include?("source_ref:") && rollover_workflow.include?("OMEGA_RELEASE_FEDERATION_STALE_GENERATION")
+fail!("federation_rollover_private_main_fence_missing") unless rollover_script.include?("OMEGA_RELEASE_FEDERATION_STALE_GENERATION")
 fail!("release_epoch_control_token_missing") unless rollover_workflow.include?("OMEGA_CONTROL_TOKEN: ${{ github.token }}")
 fail!("release_epoch_control_write_permission_missing") unless rollover_workflow.include?("permissions:\n  contents: write")
 fail!("release_epoch_control_sha_binding_missing") unless rollover_workflow.include?("OMEGA_CONTROL_CONTRACT_SHA: ${{ github.sha }}")
@@ -449,7 +457,7 @@ fail!("release_epoch_monotonic_sequence_missing") unless rollover_script.include
 fail!("release_epoch_unfinished_supersede_missing") unless rollover_script.include?("safe_unfinished_supersede") && rollover_script.include?("OMEGA_RELEASE_EPOCH_SUPERSEDE_UNFINISHED_CONTROL_DEVIATION")
 fail!("release_epoch_certified_pre_live_supersede_missing") unless rollover_script.include?("safe_certified_pre_live_supersede") && rollover_script.include?("OMEGA_RELEASE_EPOCH_SUPERSEDE_CERTIFIED_PRE_LIVE_CONTROL_DEVIATION")
 fail!("release_epoch_live_immutability_missing") unless rollover_script.include?("OMEGA_RELEASE_EPOCH_LIVE_CERTIFIED_IMMUTABLE")
-fail!("release_epoch_supersede_policy_missing") unless rollover_script.include?('"supersedes_unfinished_epoch_on_control_deviation": True') && rollover_script.include?('"supersedes_certified_pre_live_epoch_on_control_deviation": True') && rollover_script.include?('"live_certified_epoch_is_immutable": True')
+fail!("release_epoch_supersede_policy_missing") unless rollover_script.include?('"supersedes_unfinished_epoch_on_control_deviation": True') && rollover_script.include?('"supersedes_unfinished_epoch_on_new_private_generation": True') && rollover_script.include?('"current_private_main_is_generation_fence": True') && rollover_script.include?('"supersedes_certified_pre_live_epoch_on_control_deviation": True') && rollover_script.include?('"live_certified_epoch_is_immutable": True')
 fail!("release_epoch_parent_control_binding_missing") unless rollover_script.include?('"control_contract_sha": prior_control_contract or None') && rollover_script.include?('"parent_sequence": prior_sequence')
 
 epoch_verifier = File.read(ROOT.join("scripts", "verify_federation_epoch.py"), encoding: "UTF-8")
@@ -475,7 +483,10 @@ fail!("release_orchestrator_actions_write_missing") unless orchestrator.include?
 fail!("release_orchestrator_schedule_missing") unless orchestrator.include?('cron: "3,18,33,48 * * * *"')
 fail!("release_orchestrator_explicit_rollover_missing") unless orchestrator.include?('gh workflow run "$ROLLOVER_WORKFLOW" -R "$GITHUB_REPOSITORY" --ref main')
 fail!("release_orchestrator_duplicate_guard_missing") unless orchestrator.include?("OMEGA_RELEASE_ORCHESTRATOR_ROLLOVER_ALREADY_ACTIVE") && orchestrator.include?("status=queued") && orchestrator.include?("status=in_progress")
-fail!("release_orchestrator_control_deviation_missing") unless orchestrator.include?("pre-live-control-deviation") && orchestrator.include?("live-certified-epoch-immutable") && orchestrator.include?('omega/live-certified')
+fail!("release_orchestrator_control_deviation_missing") unless orchestrator.include?("pre-live-control-deviation") && orchestrator.include?("live-certified-generation-immutable") && orchestrator.include?('omega/live-certified')
+fail!("release_orchestrator_private_main_reconcile_missing") unless orchestrator.include?('commits/main" --jq .sha') && orchestrator.include?('source_ref="release/auto-') && orchestrator.include?("OMEGA_RELEASE_CONTROLLER_REF_CREATED")
+fail!("release_orchestrator_trigger_file_authority_forbidden") if orchestrator.include?("read -r marker candidate source_ref")
+fail!("release_orchestrator_generation_inputs_missing") unless orchestrator.include?('-f source_sha="$SOURCE_SHA" -f source_ref="$SOURCE_REF"')
 fail!("release_orchestrator_state_only_drift_missing") unless orchestrator.include?("state-only-control-head-advance") && orchestrator.include?('path.startswith("federation/epochs/")') && orchestrator.include?("bootstrap/omega/")
 fail!("release_orchestrator_compare_guard_missing") unless orchestrator.include?("/compare/$contract...$control_main") && orchestrator.include?("control-diff-too-large") && orchestrator.include?("control-history-")
 fail!("release_orchestrator_must_not_mutate_epoch") if orchestrator.include?("/contents/federation/epochs/current.json") && orchestrator.include?("--method PUT")

@@ -75,6 +75,18 @@ def _jobs_all_prestep(jobs: Any) -> bool:
             return False
     return True
 
+def github_state_for(state: str) -> str:
+    normalized = str(state or "").upper()
+    if normalized == "PASS":
+        return "success"
+    if normalized == "FAIL":
+        return "failure"
+    if normalized in {"PENDING", "NOT_EXECUTED"}:
+        return "pending"
+    if normalized == "BLOCKED":
+        return "error"
+    return "pending"
+
 def _diagnostic_sha256(log: str) -> str:
     interesting = []
     needles = ("OMEGA_", "FAILED ", "ERROR", "MISMATCH", "MISSING", "BLOCKED", "NOT_EXECUTED")
@@ -122,6 +134,7 @@ def _decorate(payload: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]
         "retryable": retryable,
         "max_attempts": max_attempts,
         "next_action": next_action,
+        "github_state": github_state_for(str(result.get("state") or "")),
     })
     return result
 
@@ -284,6 +297,12 @@ def _self_test() -> None:
     })
     if diag_a["incident_id"] == diag_b["incident_id"]:
         raise SystemExit("SELF_TEST_FAIL distinct_diagnostics_must_not_collide")
+    if github_state_for("NOT_EXECUTED") != "pending":
+        raise SystemExit("SELF_TEST_FAIL not_executed_must_be_pending")
+    if github_state_for("BLOCKED") != "error":
+        raise SystemExit("SELF_TEST_FAIL blocked_must_be_error")
+    if classify({"status":"completed","conclusion":"skipped","jobs":[{"steps":[]}],"gate":"evidence-root"})["github_state"] != "pending":
+        raise SystemExit("SELF_TEST_FAIL skipped_not_executed_must_be_pending")
     print("OMEGA_GATE_CLASSIFIER_SELF_TEST_PASS")
 
 def main() -> int:

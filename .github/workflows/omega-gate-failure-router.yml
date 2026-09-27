@@ -211,6 +211,7 @@ jobs:
           echo "retryable=$(jq -r .retryable "$RUNNER_TEMP/classification.json")" >> "$GITHUB_OUTPUT"
           echo "max_attempts=$(jq -r .max_attempts "$RUNNER_TEMP/classification.json")" >> "$GITHUB_OUTPUT"
           echo "next_action=$(jq -r .next_action "$RUNNER_TEMP/classification.json")" >> "$GITHUB_OUTPUT"
+          echo "github_state=$(jq -r .github_state "$RUNNER_TEMP/classification.json")" >> "$GITHUB_OUTPUT"
 
       - name: Publish content-addressed classification
         env:
@@ -223,14 +224,12 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          github_state=error
-          case "$STATE" in
-            PASS) github_state=success ;;
-            FAIL) github_state=failure ;;
-            PENDING) github_state=pending ;;
-            BLOCKED|NOT_EXECUTED) github_state=error ;;
+          github_state="${{ steps.classify.outputs.github_state }}"
+          case "$github_state" in
+            success|failure|pending|error) ;;
+            *) echo "OMEGA_GATE_ROUTER_GITHUB_STATE_INVALID:$github_state" >&2; exit 65 ;;
           esac
-          desc="$FAILURE_CLASS incident=${INCIDENT_ID:0:12}"
+          desc="$FAILURE_CLASS gen=${SOURCE_SHA:0:12} incident=${INCIDENT_ID:0:12}"
           gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$SOURCE_SHA"             -f state="$github_state"             -f context="omega/control-plane/$GATE"             -f description="$desc"             -f target_url="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" >/dev/null
 
       - name: Bounded infrastructure-only retry

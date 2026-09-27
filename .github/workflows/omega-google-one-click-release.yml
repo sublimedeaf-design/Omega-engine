@@ -54,6 +54,18 @@ jobs:
             done
             active=true
           elif [ "$EVENT_NAME" = schedule ]; then
+            epoch_raw="$(GH_TOKEN="$OMEGA_BOOTSTRAP_TOKEN" gh api "/repos/$GITHUB_REPOSITORY/contents/federation/epochs/current.json?ref=main" --jq '.content' | python3 -c 'import base64,sys; print(base64.b64decode("".join(sys.stdin.read().split()),validate=True).decode(),end="")')"
+            readarray -t epoch_meta < <(EPOCH="$epoch_raw" python3 - <<'PY'
+          import json,os
+          d=json.loads(os.environ["EPOCH"]); p=d.get("primary") or {}; rel=d.get("release_epoch") or {}
+          print(str(p.get("source_sha") or ""))
+          print(str(rel.get("id") or ""))
+          print(str(d.get("state") or ""))
+          PY
+            )
+            epoch_source="${epoch_meta[0]:-}"
+            epoch_id="${epoch_meta[1]:-}"
+            epoch_state="${epoch_meta[2]:-}"
             statuses="$(GH_TOKEN="$OMEGA_BOOTSTRAP_TOKEN" gh api "/repos/$PRIVATE_REPOSITORY/commits/$source/status?per_page=100")"
             readarray -t states < <(STATUS_PAYLOAD="$statuses" python3 - <<'PY'
           import json,os
@@ -63,24 +75,29 @@ jobs:
               ctx=str(row.get("context") or "")
               stamp=str(row.get("updated_at") or row.get("created_at") or "")
               if ctx and (ctx not in latest or stamp>latest[ctx][0]):
-                  latest[ctx]=(stamp,str(row.get("state") or ""))
+                  latest[ctx]=(stamp,str(row.get("state") or ""),str(row.get("description") or ""))
           for ctx in ("omega/google-one-click","omega/system-health","omega/live-certified"):
-              print(latest.get(ctx,("", ""))[1])
+              row=latest.get(ctx,("", "", ""))
+              print(row[1])
+              print(row[2])
           PY
             )
             google_state="${states[0]:-}"
-            system_state="${states[1]:-}"
-            live_state="${states[2]:-}"
-            if [ "$live_state" = success ]; then
+            google_desc="${states[1]:-}"
+            system_state="${states[2]:-}"
+            live_state="${states[4]:-}"
+            live_desc="${states[5]:-}"
+            epoch_prefix="epoch=${epoch_id:0:12}"
+            if [ "$live_state" = success ] && [ "$epoch_source" = "$source" ] && [ "$epoch_state" = PASS ] && [[ "$live_desc" == *"$epoch_prefix"* ]]; then
               if [ "$system_state" != success ]; then
                 GH_TOKEN="$OMEGA_BOOTSTRAP_TOKEN" gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$source" \
                   -f state=success -f context="omega/system-health" \
-                  -f description="OMEGA root health PASS: exact-SHA live certification complete" \
+                  -f description="$epoch_prefix root health PASS: current generation LIVE_CERTIFIED" \
                   -f target_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
               fi
             elif [ "$google_state" = pending ]; then
               active=true
-            elif [ "$google_state" = success ]; then
+            elif [ "$google_state" = success ] && [ "$epoch_source" = "$source" ] && [[ "$google_desc" == *"$epoch_prefix"* ]]; then
               post_distribution=true
             fi
           fi
@@ -470,7 +487,7 @@ jobs:
             omega/reports/google-supply-chain.json
             omega/dist/google-play
 
-      - name: Publish exact-SHA Google distribution proof
+      - name: Publish generation-fenced Google distribution proof
         if: steps.config.outputs.configured == 'true'
         env:
           SOURCE_SHA: ${{ steps.trigger.outputs.source_sha }}
@@ -482,34 +499,61 @@ jobs:
         run: |
           set -Eeuo pipefail
           set +x
+          current="$(GH_TOKEN="$OMEGA_BOOTSTRAP_TOKEN" gh api "/repos/$PRIVATE_REPOSITORY/commits/main" --jq .sha)"
+          if [ "$current" != "$SOURCE_SHA" ]; then
+            echo "OMEGA_GOOGLE_STALE_GENERATION_NOOP source=$SOURCE_SHA current=$current"
+            exit 0
+          fi
+          epoch_raw="$(gh api "/repos/$GITHUB_REPOSITORY/contents/federation/epochs/current.json?ref=main" --jq '.content' | python3 -c 'import base64,sys; print(base64.b64decode("".join(sys.stdin.read().split()),validate=True).decode(),end="")')"
+          readarray -t epoch_meta < <(EPOCH="$epoch_raw" SOURCE_SHA="$SOURCE_SHA" python3 - <<'PY'
+          import json,os,re
+          d=json.loads(os.environ["EPOCH"]); p=d.get("primary") or {}; rel=d.get("release_epoch") or {}
+          eid=str(rel.get("id") or "")
+          ok=(str(p.get("source_sha") or "")==os.environ["SOURCE_SHA"] and str(d.get("state") or "")=="PASS" and str(p.get("certification_state") or "")=="PASS" and bool(re.fullmatch(r"[0-9a-f]{64}",eid)))
+          print("true" if ok else "false")
+          print(eid)
+          PY
+          )
+          [ "${epoch_meta[0]:-false}" = true ] || { echo "OMEGA_GOOGLE_EPOCH_NOT_CURRENT_NOOP source=$SOURCE_SHA"; exit 0; }
+          epoch_id="${epoch_meta[1]}"
+          generation_id="$(SOURCE_SHA="$SOURCE_SHA" RELEASE_ID="$RELEASE_ID" EPOCH_ID="$epoch_id" python3 - <<'PY'
+          import hashlib,os
+          print(hashlib.sha256((os.environ["SOURCE_SHA"]+"|"+os.environ["RELEASE_ID"]+"|"+os.environ["EPOCH_ID"]).encode()).hexdigest())
+          PY
+          )"
+          prefix="gen=${generation_id:0:12} rid=${RELEASE_ID:0:12} epoch=${epoch_id:0:12}"
+          target="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          publish() {
+            GH_TOKEN="$OMEGA_BOOTSTRAP_TOKEN" gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$SOURCE_SHA" \
+              -f state="$2" -f context="$1" -f description="$prefix $3" -f target_url="$target" >/dev/null
+          }
+
           mode=""
           if [ "$PLAY_OUTCOME" = success ]; then
             mode=play_internal_testing
             for ctx in omega/google-distribution omega/google-play/internal omega/google-play/app-signing omega/google-one-click omega/signer/continuity; do
-              GH_TOKEN="$OMEGA_BOOTSTRAP_TOKEN" gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$SOURCE_SHA" \
-                -f state=success -f context="$ctx" -f description="Google exact-SHA distribution PASS ($mode)" \
-                -f target_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
+              publish "$ctx" success "Google Play Internal Testing PASS"
             done
-          elif [ "$INTERNAL_SHARING_OUTCOME" = success ]; then
-            mode=play_internal_app_sharing
-            for ctx in omega/google-distribution omega/google-play/internal-app-sharing omega/google-one-click; do
-              GH_TOKEN="$OMEGA_BOOTSTRAP_TOKEN" gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$SOURCE_SHA" \
-                -f state=success -f context="$ctx" -f description="Google exact-SHA fallback distribution PASS ($mode)" \
-                -f target_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
-            done
-          else
-            for ctx in omega/google-distribution omega/google-one-click omega/system-health; do
-              GH_TOKEN="$OMEGA_BOOTSTRAP_TOKEN" gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$SOURCE_SHA" \
-                -f state=failure -f context="$ctx" -f description="Google distribution failed after bounded fallback" \
-                -f target_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
-            done
-            exit 74
+            publish "omega/system-health" pending "distribution PASS; awaiting device canary runtime and LIVE_CERTIFIED"
+            echo "OMEGA_GOOGLE_DISTRIBUTED source=$SOURCE_SHA generation=$generation_id mode=$mode"
+            exit 0
           fi
-          GH_TOKEN="$OMEGA_BOOTSTRAP_TOKEN" gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$SOURCE_SHA" \
-            -f state=pending -f context="omega/system-health" \
-            -f description="distribution PASS; awaiting installed runtime, autosync and LIVE_CERTIFIED" \
-            -f target_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
-          echo "OMEGA_GOOGLE_ONE_CLICK_DISTRIBUTED source=$SOURCE_SHA mode=$mode release_id=$RELEASE_ID"
+
+          if [ "$INTERNAL_SHARING_OUTCOME" = success ]; then
+            mode=play_internal_app_sharing
+            publish "omega/google-play/internal-app-sharing" success "diagnostic fallback artifact available; non-canonical signer"
+            publish "omega/google-distribution" pending "Internal App Sharing cannot certify canonical Play distribution"
+            publish "omega/google-one-click" pending "waiting for canonical Internal Testing/App Signing"
+            publish "omega/system-health" pending "diagnostic fallback only; canonical distribution pending"
+            echo "OMEGA_GOOGLE_DIAGNOSTIC_FALLBACK_ONLY source=$SOURCE_SHA generation=$generation_id"
+            exit 0
+          fi
+
+          publish "omega/google-distribution" failure "canonical Google Play distribution failed"
+          publish "omega/google-one-click" failure "bounded Google distribution path failed"
+          publish "omega/system-health" error "release halted at Google distribution"
+          echo OMEGA_GOOGLE_DISTRIBUTION_FAILED >&2
+          exit 74
 
       - name: Remove ephemeral signing material
         if: always()
