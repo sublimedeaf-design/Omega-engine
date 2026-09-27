@@ -178,7 +178,16 @@ jobs:
         run: |
           set -Eeuo pipefail
           [[ "$PROMOTED_HEAD_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo OMEGA_RELEASE_FEDERATION_SECOND_PROOF_REF_INVALID >&2; exit 66; }
-          gh workflow run omega-federation-v3-peer-bridge.yml -R "$CONTROL_REPOSITORY" --ref "$PROMOTED_HEAD_SHA"
+          # workflow_dispatch accepts a branch/tag ref, not a raw commit SHA.
+          # Dispatch current main; the peer bridge independently rejects any
+          # control-plane drift outside the immutable epoch files and proves
+          # that the epoch's control_contract_sha is an ancestor of its checkout.
+          current_main="$(gh api "/repos/$CONTROL_REPOSITORY/git/ref/heads/main" --jq '.object.sha')"
+          [ "$current_main" = "$PROMOTED_HEAD_SHA" ] || {
+            echo "OMEGA_RELEASE_FEDERATION_SECOND_PROOF_MAIN_MOVED:$current_main!=$PROMOTED_HEAD_SHA" >&2
+            exit 66
+          }
+          gh workflow run omega-federation-v3-peer-bridge.yml -R "$CONTROL_REPOSITORY" --ref main
           echo "OMEGA_RELEASE_FEDERATION_SECOND_PROOF_DISPATCHED control_sha=$PROMOTED_HEAD_SHA"
 
       - name: Trigger exact final-SHA recovery after second PASS bridge
