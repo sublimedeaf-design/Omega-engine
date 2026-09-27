@@ -540,6 +540,7 @@ fail!("limited_distribution_adapter_release_identity_missing") unless adapter.in
 fail!("limited_distribution_adapter_statuses_missing") unless adapter.include?("omega/limited-distribution/apk-signed") && adapter.include?("omega/limited-distribution/signer-continuity") && adapter.include?("omega/limited-distribution/emulator-coldstart") && adapter.include?("omega/limited-distribution/device-install")
 fail!("limited_distribution_adapter_must_not_certify_live") if adapter.include?("omega/limited-distribution/live-certified") || adapter.include?("omega/live-certified")
 fail!("limited_distribution_adapter_device_gate_pending_missing") unless adapter.include?('state=pending -f context="omega/limited-distribution/device-install"')
+fail!("limited_distribution_adapter_runtime_exact_source_missing") unless adapter.include?('gh workflow run omega-android-runtime-certify.yml') && adapter.include?('-f source_sha="$FINAL_SHA"') && adapter.include?('-f allow_private_self_hosted=true')
 
 puts "OMEGA_CONTROL_PLANE_INTEGRITY_GREEN workflows=#{files.length}"
 # support fastpath restack v2 exact-head trigger
