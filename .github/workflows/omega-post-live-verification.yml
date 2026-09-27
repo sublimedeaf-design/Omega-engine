@@ -40,6 +40,7 @@ jobs:
         id: live
         env:
           GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          CONTROL_GH_TOKEN: ${{ github.token }}
           PROMOTER_RUN_ID: ${{ inputs.promoter_run_id || '' }}
           INPUT_FINAL_SHA: ${{ inputs.final_sha || '' }}
         shell: bash
@@ -58,8 +59,19 @@ jobs:
           case "$source_ref" in *..*|/*|-*) echo "OMEGA_POST_LIVE_REF_UNSAFE:$source_ref" >&2; exit 64 ;; esac
           tip="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/$source_ref" --jq .sha)"
           [ "$tip" = "$candidate" ] || { echo "OMEGA_POST_LIVE_RELEASE_BRANCH_MOVED:$tip!=$candidate" >&2; exit 61; }
+          if [ -n "${PROMOTER_RUN_ID:-}" ]; then
+            promoter="$(GH_TOKEN="$CONTROL_GH_TOKEN" gh api "/repos/$CONTROL_REPOSITORY/actions/runs/$PROMOTER_RUN_ID")"
+            PROMOTER="$promoter" python3 <<'PY'
+          import json,os
+          r=json.loads(os.environ["PROMOTER"])
+          if r.get("name")!="OMEGA Final Release Promoter":
+              raise SystemExit("OMEGA_POST_LIVE_PROMOTER_WORKFLOW_MISMATCH")
+          if r.get("status")!="completed" or r.get("conclusion")!="success":
+              raise SystemExit("OMEGA_POST_LIVE_PROMOTER_RUN_NOT_SUCCESS")
+          PY
+          fi
           statuses="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/$candidate/status?per_page=100")"
-          decision="$(STATUS_PAYLOAD="$statuses" PROMOTER_RUN_ID="${PROMOTER_RUN_ID:-}" python3 <<'PY'
+          decision="$(STATUS_PAYLOAD="$statuses" python3 <<'PY'
           import json,os,re
           p=json.loads(os.environ["STATUS_PAYLOAD"]); latest={}
           for row in p.get("statuses",[]):
@@ -72,13 +84,10 @@ jobs:
               print("WAIT")
           else:
               target=str(row.get("target_url") or "")
-              current=os.environ.get("PROMOTER_RUN_ID") or ""
-              if current and target.endswith("/actions/runs/"+current):
+              if re.fullmatch(r"https://github\.com/sublimedeaf-design/Omega-engine/releases/tag/[A-Za-z0-9._-]+",target):
                   print("READY")
-              elif current:
-                  print("STALE")
               else:
-                  print("READY")
+                  print("INVALID_RELEASE_TARGET")
           PY
           )"
           if [ "$decision" != READY ]; then
@@ -94,6 +103,7 @@ jobs:
         if: steps.live.outputs.ready == 'true'
         env:
           GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          CONTROL_GH_TOKEN: ${{ github.token }}
           FINAL_SHA: ${{ steps.live.outputs.final_sha }}
         shell: bash
         run: |
@@ -146,17 +156,23 @@ jobs:
               raise SystemExit("OMEGA_POST_LIVE_FEDERATION_PEER_NOT_PASS")
           PY
 
-          releases="$(gh api "/repos/$PRIVATE_REPOSITORY/releases?per_page=30")"
-          row="$(RELEASES="$releases" FINAL_SHA="$FINAL_SHA" python3 <<'PY'
+          release_url="$(STATUS_PAYLOAD="$statuses" python3 <<'PY'
           import json,os
-          rows=[r for r in json.loads(os.environ["RELEASES"]) if str(r.get("target_commitish") or "")==os.environ["FINAL_SHA"] and not r.get("draft") and not r.get("prerelease")]
-          if len(rows)!=1:
-              raise SystemExit(f"OMEGA_POST_LIVE_RELEASE_COUNT:{len(rows)}")
-          print(rows[0]["tag_name"])
+          p=json.loads(os.environ["STATUS_PAYLOAD"]); latest={}
+          for row in p.get("statuses",[]):
+              ctx=str(row.get("context") or "")
+              stamp=str(row.get("updated_at") or row.get("created_at") or "")
+              if ctx and (ctx not in latest or stamp > str(latest[ctx].get("_stamp") or "")):
+                  latest[ctx]={**row,"_stamp":stamp}
+          print(str((latest.get("omega/release-live") or {}).get("target_url") or ""))
           PY
           )"
-          tag="$row"
-          gh release download "$tag" -R "$PRIVATE_REPOSITORY" -D "$RUNNER_TEMP/post-live/assets"
+          tag="${release_url##*/}"
+          [[ "$tag" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "OMEGA_POST_LIVE_RELEASE_TAG_INVALID:$tag" >&2; exit 71; }
+          release="$(GH_TOKEN="$CONTROL_GH_TOKEN" gh api "/repos/$CONTROL_REPOSITORY/releases/tags/$tag")"
+          [ "$(printf '%s' "$release" | jq -r .draft)" = false ] || { echo OMEGA_POST_LIVE_RELEASE_DRAFT >&2; exit 71; }
+          [ "$(printf '%s' "$release" | jq -r .prerelease)" = false ] || { echo OMEGA_POST_LIVE_RELEASE_PRERELEASE >&2; exit 71; }
+          GH_TOKEN="$CONTROL_GH_TOKEN" gh release download "$tag" -R "$CONTROL_REPOSITORY" -D "$RUNNER_TEMP/post-live/assets"
 
           cd "$RUNNER_TEMP/post-live/assets"
           required=(
