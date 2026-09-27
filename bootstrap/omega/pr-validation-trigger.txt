@@ -1,1 +1,1 @@
-validate-exact-pr dabd81da880f7abcb6cf7932e4042904fd0f40f8 hardening/limited-distribution-installed-runtime limited-distribution-installed-runtime-v1
+validate-exact-pr 20a0cdeab230a6af63d2661eced344cf2363d6cc main final-limited-distribution-v1
