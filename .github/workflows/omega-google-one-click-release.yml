@@ -43,6 +43,7 @@ jobs:
           source="$(GH_TOKEN="$OMEGA_BOOTSTRAP_TOKEN" gh api "/repos/$PRIVATE_REPOSITORY/commits/main" --jq .sha)"
           [[ "$source" =~ ^[0-9a-f]{40}$ ]] || { echo OMEGA_GOOGLE_SOURCE_INVALID >&2; exit 64; }
           active=false
+          post_distribution=false
           if [ "$EVENT_NAME" = workflow_dispatch ]; then
             for ctx in omega/google-one-click omega/system-health; do
               GH_TOKEN="$OMEGA_BOOTSTRAP_TOKEN" gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$source" \
@@ -53,19 +54,53 @@ jobs:
             active=true
           elif [ "$EVENT_NAME" = schedule ]; then
             statuses="$(GH_TOKEN="$OMEGA_BOOTSTRAP_TOKEN" gh api "/repos/$PRIVATE_REPOSITORY/commits/$source/status?per_page=100")"
-            state="$(STATUS_PAYLOAD="$statuses" python3 - <<'PY'
+            readarray -t states < <(STATUS_PAYLOAD="$statuses" python3 - <<'PY'
           import json,os
           rows=json.loads(os.environ["STATUS_PAYLOAD"]).get("statuses",[])
-          matches=[r for r in rows if str(r.get("context") or "")=="omega/google-one-click"]
-          matches.sort(key=lambda r:str(r.get("updated_at") or r.get("created_at") or ""),reverse=True)
-          print(str((matches[0] if matches else {}).get("state") or ""))
+          latest={}
+          for row in rows:
+              ctx=str(row.get("context") or "")
+              stamp=str(row.get("updated_at") or row.get("created_at") or "")
+              if ctx and (ctx not in latest or stamp>latest[ctx][0]):
+                  latest[ctx]=(stamp,str(row.get("state") or ""))
+          for ctx in ("omega/google-one-click","omega/system-health","omega/live-certified"):
+              print(latest.get(ctx,("", ""))[1])
           PY
             )"
-            [ "$state" = pending ] && active=true || true
+            google_state="${states[0]:-}"
+            system_state="${states[1]:-}"
+            live_state="${states[2]:-}"
+            if [ "$live_state" = success ]; then
+              if [ "$system_state" != success ]; then
+                GH_TOKEN="$OMEGA_BOOTSTRAP_TOKEN" gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$source" \
+                  -f state=success -f context="omega/system-health" \
+                  -f description="OMEGA root health PASS: exact-SHA live certification complete" \
+                  -f target_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
+              fi
+            elif [ "$google_state" = pending ]; then
+              active=true
+            elif [ "$google_state" = success ]; then
+              post_distribution=true
+            fi
           fi
           echo "active=$active" >> "$GITHUB_OUTPUT"
+          echo "post_distribution=$post_distribution" >> "$GITHUB_OUTPUT"
           echo "source_sha=$source" >> "$GITHUB_OUTPUT"
-          echo "OMEGA_GOOGLE_RECONCILE source=$source active=$active event=$EVENT_NAME"
+          echo "OMEGA_UNIFIED_RECONCILE source=$source active=$active post_distribution=$post_distribution event=$EVENT_NAME"
+
+      - name: Hold root health at pending until runtime and live evidence complete
+        if: steps.trigger.outputs.post_distribution == 'true'
+        env:
+          SOURCE_SHA: ${{ steps.trigger.outputs.source_sha }}
+          OMEGA_BOOTSTRAP_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          GH_TOKEN="$OMEGA_BOOTSTRAP_TOKEN" gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$SOURCE_SHA" \
+            -f state=pending -f context="omega/system-health" \
+            -f description="Google distribution PASS; awaiting installed runtime, autosync and LIVE_CERTIFIED" \
+            -f target_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
+          echo "OMEGA_UNIFIED_POST_DISTRIBUTION_WAIT source=$SOURCE_SHA"
 
       - name: Require immutable current main and pre-Google gates
         id: gate
@@ -447,14 +482,14 @@ jobs:
           mode=""
           if [ "$PLAY_OUTCOME" = success ]; then
             mode=play_internal_testing
-            for ctx in omega/google-distribution omega/google-play/internal omega/google-play/app-signing omega/google-one-click omega/system-health; do
+            for ctx in omega/google-distribution omega/google-play/internal omega/google-play/app-signing omega/google-one-click omega/signer/continuity; do
               GH_TOKEN="$OMEGA_BOOTSTRAP_TOKEN" gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$SOURCE_SHA" \
                 -f state=success -f context="$ctx" -f description="Google exact-SHA distribution PASS ($mode)" \
                 -f target_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
             done
           elif [ "$INTERNAL_SHARING_OUTCOME" = success ]; then
             mode=play_internal_app_sharing
-            for ctx in omega/google-distribution omega/google-play/internal-app-sharing omega/google-one-click omega/system-health; do
+            for ctx in omega/google-distribution omega/google-play/internal-app-sharing omega/google-one-click; do
               GH_TOKEN="$OMEGA_BOOTSTRAP_TOKEN" gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$SOURCE_SHA" \
                 -f state=success -f context="$ctx" -f description="Google exact-SHA fallback distribution PASS ($mode)" \
                 -f target_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
@@ -467,6 +502,10 @@ jobs:
             done
             exit 74
           fi
+          GH_TOKEN="$OMEGA_BOOTSTRAP_TOKEN" gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$SOURCE_SHA" \
+            -f state=pending -f context="omega/system-health" \
+            -f description="distribution PASS; awaiting installed runtime, autosync and LIVE_CERTIFIED" \
+            -f target_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
           echo "OMEGA_GOOGLE_ONE_CLICK_DISTRIBUTED source=$SOURCE_SHA mode=$mode release_id=$RELEASE_ID"
 
       - name: Remove ephemeral signing material
