@@ -95,22 +95,14 @@ jobs:
           gradle-version: "8.13"
           cache-read-only: true
 
-      - name: Restore fingerprint-bound upload signer from encrypted escrow
-        working-directory: omega
-        env:
-          OMEGA_ANDROID_KEYSTORE_B64: ${{ secrets.OMEGA_ANDROID_KEYSTORE_B64 }}
+      - name: Create disposable build-only signer
         shell: bash
         run: |
           set -Eeuo pipefail
-          set +x
-          test -n "${OMEGA_ANDROID_KEYSTORE_B64:-}" || { echo OMEGA_PLAY_SIGNER_ESCROW_MISSING >&2; exit 34; }
           mkdir -p "$HOME/.android"
-          umask 077
-          printf '%s' "$OMEGA_ANDROID_KEYSTORE_B64" | base64 -d > "$HOME/.android/debug.keystore"
-          expected="$(tr -d '[:space:]' < android/signing-cert.sha256 | tr 'A-F' 'a-f')"
-          actual="$(keytool -list -v -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey 2>/dev/null | sed -n 's/.*SHA256: //p' | head -1 | tr -d ':' | tr 'A-F' 'a-f')"
-          test "$actual" = "$expected" || { echo OMEGA_PLAY_SIGNER_FINGERPRINT_MISMATCH >&2; exit 35; }
-          echo "EXPECTED_FINGERPRINT=$expected" >> "$GITHUB_ENV"
+          rm -f "$HOME/.android/debug.keystore"
+          keytool -genkeypair -noprompt             -keystore "$HOME/.android/debug.keystore"             -storepass android -keypass android             -alias androiddebugkey             -dname "CN=OMEGA Disposable Build,O=OMEGA,C=NL"             -keyalg RSA -keysize 2048 -validity 1
+          echo "OMEGA_DISPOSABLE_BUILD_SIGNER_READY"
 
       - name: Materialize locked build inputs and stable release identity
         working-directory: omega
@@ -124,7 +116,7 @@ jobs:
           echo "RELEASE_ID=$release_id" >> "$GITHUB_ENV"
           python3 scripts/generate_omega_sbom.py --out reports/omega-sbom.spdx.json
 
-      - name: Build exact signed code19 AAB once
+      - name: Build exact code19 AAB once
         working-directory: omega/android
         shell: bash
         run: |
@@ -132,67 +124,85 @@ jobs:
           gradle --no-daemon --max-workers=2 --dependency-verification strict --stacktrace --console=plain :app:bundleRelease
           test -s app/build/outputs/bundle/release/app-release.aab
 
-      - name: Verify artifact identity and emit provenance
+      - name: Strip disposable signature and bind unsigned artifact
         working-directory: omega
         shell: bash
         run: |
           set -Eeuo pipefail
-          cp android/app/build/outputs/bundle/release/app-release.aab dist/OMEGA-Engine-code19.aab
-          aab_sha="$(sha256sum dist/OMEGA-Engine-code19.aab | awk '{print $1}')"
-          printf '%s  OMEGA-Engine-code19.aab\n' "$aab_sha" > dist/OMEGA-Engine-code19.aab.sha256
-          keytool -printcert -jarfile dist/OMEGA-Engine-code19.aab > dist/play-upload-certificate.txt
-          cert="$(sed -n 's/.*SHA256: //p' dist/play-upload-certificate.txt | head -1 | tr -d ':' | tr 'A-F' 'a-f')"
-          test "$cert" = "$EXPECTED_FINGERPRINT" || { echo OMEGA_PLAY_AAB_CERT_MISMATCH >&2; exit 36; }
-          AAB=dist/OMEGA-Engine-code19.aab SOURCE="$SOURCE_SHA" python3 - <<'PY'
-          import os,zipfile
+          mkdir -p dist
+          SOURCE="$SOURCE_SHA" python3 - <<'PY'
+          import os,pathlib,zipfile
+          src=pathlib.Path("android/app/build/outputs/bundle/release/app-release.aab")
+          dst=pathlib.Path("dist/OMEGA-Engine-code19-unsigned.aab")
+          excluded={"META-INF/MANIFEST.MF"}
+          suffixes=(".SF",".RSA",".DSA",".EC")
+          with zipfile.ZipFile(src,"r") as zin, zipfile.ZipFile(dst,"w") as zout:
+              for info in zin.infolist():
+                  upper=info.filename.upper()
+                  if upper in excluded or (upper.startswith("META-INF/") and upper.endswith(suffixes)):
+                      continue
+                  data=zin.read(info.filename)
+                  clone=zipfile.ZipInfo(info.filename, info.date_time)
+                  clone.compress_type=info.compress_type
+                  clone.comment=info.comment
+                  clone.extra=info.extra
+                  clone.internal_attr=info.internal_attr
+                  clone.external_attr=info.external_attr
+                  clone.create_system=info.create_system
+                  zout.writestr(clone,data)
           needle=os.environ["SOURCE"].encode("ascii")
-          with zipfile.ZipFile(os.environ["AAB"]) as z:
+          with zipfile.ZipFile(dst) as z:
               dex=[n for n in z.namelist() if n.endswith(".dex")]
               if not dex or not any(needle in z.read(n) for n in dex):
                   raise SystemExit("OMEGA_PLAY_SOURCE_SHA_NOT_EMBEDDED")
+              bad=[n for n in z.namelist() if n.upper()=="META-INF/MANIFEST.MF" or (n.upper().startswith("META-INF/") and n.upper().endswith(suffixes))]
+              if bad:
+                  raise SystemExit("OMEGA_PLAY_DISPOSABLE_SIGNATURE_REMAINS:"+",".join(bad))
           PY
-          AAB_SHA="$aab_sha" python3 - <<'PY'
+          unsigned_sha="$(sha256sum dist/OMEGA-Engine-code19-unsigned.aab | awk '{print $1}')"
+          printf '%s  OMEGA-Engine-code19-unsigned.aab\n' "$unsigned_sha" > dist/OMEGA-Engine-code19-unsigned.aab.sha256
+          AAB_SHA="$unsigned_sha" python3 - <<'PY'
           import datetime,json,os,pathlib
           p={
-              "schema_version":2,
-              "classification":"GOOGLE_PLAY_INTERNAL_CANDIDATE",
+              "schema_version":3,
+              "classification":"GOOGLE_PLAY_UNSIGNED_CONTENT_ADDRESSED_CANDIDATE",
               "release_id":os.environ["RELEASE_ID"],
               "source_sha":os.environ["SOURCE_SHA"],
-              "aab_sha256":os.environ["AAB_SHA"],
-              "upload_signer_sha256":os.environ["EXPECTED_FINGERPRINT"],
+              "unsigned_aab_sha256":os.environ["AAB_SHA"],
               "package_id":"com.omega.app",
               "version_code":19,
               "version_name":"3.5.4-live.12",
               "builder_repository":os.environ["GITHUB_REPOSITORY"],
               "builder_run_id":os.environ["GITHUB_RUN_ID"],
+              "canonical_signer_required":True,
+              "disposable_build_signature_removed":True,
               "built_at":datetime.datetime.now(datetime.timezone.utc).isoformat(),
           }
-          pathlib.Path("dist/OMEGA-Play.provenance.json").write_text(
+          pathlib.Path("dist/OMEGA-Play.unsigned.provenance.json").write_text(
               json.dumps(p,indent=2,sort_keys=True)+"\n",encoding="utf-8"
           )
           PY
-          echo "AAB_SHA=$aab_sha" >> "$GITHUB_ENV"
+          echo "UNSIGNED_AAB_SHA=$unsigned_sha" >> "$GITHUB_ENV"
 
-      - name: Attest exact AAB with GitHub OIDC provenance
+      - name: Attest exact unsigned AAB with GitHub OIDC provenance
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6
         with:
-          subject-path: omega/dist/OMEGA-Engine-code19.aab
+          subject-path: omega/dist/OMEGA-Engine-code19-unsigned.aab
 
-      - name: Upload immutable Play handoff
+      - name: Upload immutable unsigned Play handoff
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: OMEGA-Play-${{ env.RELEASE_ID }}-code19
+          name: OMEGA-Play-Unsigned-${{ env.RELEASE_ID }}-code19
           retention-days: 30
           if-no-files-found: error
           path: |
-            omega/dist/OMEGA-Engine-code19.aab
-            omega/dist/OMEGA-Engine-code19.aab.sha256
-            omega/dist/OMEGA-Play.provenance.json
+            omega/dist/OMEGA-Engine-code19-unsigned.aab
+            omega/dist/OMEGA-Engine-code19-unsigned.aab.sha256
+            omega/dist/OMEGA-Play.unsigned.provenance.json
             omega/dist/release-identity.json
-            omega/dist/play-upload-certificate.txt
             omega/reports/omega-sbom.spdx.json
 
-      - name: Publish exact private release status
+      - name: Publish exact private unsigned-build status
         if: always()
         env:
           GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
@@ -202,10 +212,9 @@ jobs:
           set +x
           state=failure
           [ "$RESULT" = success ] && state=success
-          description="content-addressed code19 AAB: $RESULT"
-          gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$SOURCE_SHA"             -f state="$state" -f context="omega/play-aab-build"             -f description="$description"             -f target_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
+          gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$SOURCE_SHA"             -f state="$state" -f context="omega/play-aab-build-unsigned"             -f description="content-addressed unsigned code19 AAB: $RESULT"             -f target_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
 
-      - name: Remove signer material from runner
+      - name: Remove disposable signer material
         if: always()
         shell: bash
         run: rm -f "$HOME/.android/debug.keystore" || true
