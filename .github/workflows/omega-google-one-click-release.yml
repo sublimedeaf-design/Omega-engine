@@ -190,6 +190,7 @@ jobs:
           SOURCE_SHA: ${{ steps.trigger.outputs.source_sha }}
           WIF_PROVIDER: ${{ vars.GOOGLE_WIF_PROVIDER }}
           PLAY_SERVICE_ACCOUNT: ${{ vars.GOOGLE_PLAY_SERVICE_ACCOUNT }}
+          CLOUD_PROJECT_NUMBER: ${{ vars.GOOGLE_CLOUD_PROJECT_NUMBER }}
           UPLOAD_CERT_SHA256: ${{ vars.OMEGA_GOOGLE_UPLOAD_CERT_SHA256 }}
           PLAY_APP_SIGNING_CERT_SHA256: ${{ vars.GOOGLE_PLAY_APP_SIGNING_CERT_SHA256 }}
           UPLOAD_KEYSTORE_B64: ${{ secrets.OMEGA_GOOGLE_UPLOAD_KEYSTORE_B64 }}
@@ -201,6 +202,7 @@ jobs:
           missing=()
           [ -n "$WIF_PROVIDER" ] || missing+=(GOOGLE_WIF_PROVIDER)
           [ -n "$PLAY_SERVICE_ACCOUNT" ] || missing+=(GOOGLE_PLAY_SERVICE_ACCOUNT)
+          [[ "$CLOUD_PROJECT_NUMBER" =~ ^[1-9][0-9]{5,}$ ]] || missing+=(GOOGLE_CLOUD_PROJECT_NUMBER)
           [[ "$(printf '%s' "$UPLOAD_CERT_SHA256" | tr -d '[:space:]:' | tr 'A-F' 'a-f')" =~ ^[0-9a-f]{64}$ ]] || missing+=(OMEGA_GOOGLE_UPLOAD_CERT_SHA256)
           [[ "$(printf '%s' "$PLAY_APP_SIGNING_CERT_SHA256" | tr -d '[:space:]:' | tr 'A-F' 'a-f')" =~ ^[0-9a-f]{64}$ ]] || missing+=(GOOGLE_PLAY_APP_SIGNING_CERT_SHA256)
           [ -n "$UPLOAD_KEYSTORE_B64" ] || missing+=(OMEGA_GOOGLE_UPLOAD_KEYSTORE_B64)
@@ -254,6 +256,7 @@ jobs:
           UPLOAD_KEYSTORE_B64: ${{ secrets.OMEGA_GOOGLE_UPLOAD_KEYSTORE_B64 }}
           UPLOAD_KEY_PASSWORD: ${{ secrets.OMEGA_GOOGLE_UPLOAD_KEY_PASSWORD }}
           UPLOAD_KEY_ALIAS: ${{ vars.OMEGA_GOOGLE_UPLOAD_KEY_ALIAS || 'omega-upload' }}
+          OMEGA_PLAY_CLOUD_PROJECT_NUMBER: ${{ vars.GOOGLE_CLOUD_PROJECT_NUMBER }}
         shell: bash
         run: |
           set -Eeuo pipefail
