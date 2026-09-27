@@ -47,7 +47,7 @@ jobs:
   smoke:
     needs: resolve
     runs-on: ubuntu-latest
-    timeout-minutes: 18
+    timeout-minutes: 25
     env:
       CANDIDATE_SHA: ${{ needs.resolve.outputs.candidate_sha }}
     steps:
@@ -71,6 +71,27 @@ jobs:
           set -Eeuo pipefail
           test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
           python scripts/install_locked_ci_deps.py
+
+      - name: Materialize canonical PIT-safe model history
+        working-directory: omega
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          export PYTHONPATH="$PWD/src"
+          python scripts/update_omega_data.py --root data/fabric --db data/omega.db --refresh-hours 24
+          test -s data/fabric/Matches.model.csv
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          model=Path("data/fabric/Matches.model.csv")
+          state=json.loads(Path("data/fabric/last_update.json").read_text(encoding="utf-8"))
+          if state.get("model_history_ready") is not True:
+              raise SystemExit("OMEGA_LIVE_DATA_MODEL_HISTORY_NOT_READY")
+          if int(state.get("model_history_bytes") or 0) != model.stat().st_size:
+              raise SystemExit("OMEGA_LIVE_DATA_MODEL_HISTORY_SIZE_MISMATCH")
+          print(f"OMEGA_LIVE_DATA_MODEL_HISTORY_READY bytes={model.stat().st_size}")
+          PY
 
       - name: Prove current non-synthetic fixture and model path
         working-directory: omega
