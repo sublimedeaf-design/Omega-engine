@@ -132,7 +132,7 @@ jobs:
               "omega/release-evidence-staged","omega/android-release-unsigned",
               "omega/federation-v3-release","omega/hosted-recovery","omega/recovery-attestation",
               "omega/candidate-evidence-root","omega/signer/continuity","omega/android-release-signed",
-              "omega/android-runtime-coldstart",
+              "omega/android-runtime-coldstart","omega/live-data-ready",
           )
           bad=[x for x in required if (latest.get(x) or {}).get("state")!="success"]
           if bad:
