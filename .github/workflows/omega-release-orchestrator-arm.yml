@@ -1,4 +1,4 @@
-# immutable control generation: 2
+# immutable control generation: 3
 name: OMEGA Release Orchestrator Arm
 
 on:
@@ -41,7 +41,7 @@ jobs:
           persist-credentials: false
           fetch-depth: 1
 
-      - name: Decide whether the exact release needs a new control epoch
+      - name: Reconcile current private main into one immutable release generation
         id: decide
         env:
           GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
@@ -49,30 +49,53 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          read -r marker candidate source_ref _ < bootstrap/omega/pr-validation-trigger.txt || true
-          if [ "${marker:-}" != validate-exact-pr ] || [[ ! "${candidate:-}" =~ ^[0-9a-f]{40}$ ]] || [[ ! "${source_ref:-}" =~ ^release/[A-Za-z0-9._/-]+$ ]]; then
+          set +x
+          candidate="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/main" --jq .sha)"
+          [[ "$candidate" =~ ^[0-9a-f]{40}$ ]] || { echo OMEGA_RELEASE_CONTROLLER_MAIN_INVALID >&2; exit 64; }
+          source_ref="release/auto-${candidate:0:12}"
+          statuses="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/$candidate/status?per_page=100")"
+          exact_final="$(STATUS_PAYLOAD="$statuses" python3 - <<'PY'
+          import json,os
+          rows=json.loads(os.environ["STATUS_PAYLOAD"]).get("statuses",[])
+          latest={}
+          for row in rows:
+              ctx=str(row.get("context") or "")
+              stamp=str(row.get("updated_at") or row.get("created_at") or "")
+              if ctx and (ctx not in latest or stamp>latest[ctx][0]):
+                  latest[ctx]=(stamp,str(row.get("state") or ""))
+          print(latest.get("omega/exact-final-validation",("", ""))[1])
+          PY
+          )"
+          if [ "$exact_final" != success ]; then
             echo "dispatch=false" >> "$GITHUB_OUTPUT"
-            echo "OMEGA_RELEASE_ORCHESTRATOR_NO_EXACT_TRIGGER"
+            echo "source_sha=$candidate" >> "$GITHUB_OUTPUT"
+            echo "source_ref=$source_ref" >> "$GITHUB_OUTPUT"
+            gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$candidate" \
+              -f state=pending -f context="omega/control-plane/release-controller" \
+              -f description="controller waiting for exact-final gen=${candidate:0:12}" \
+              -f target_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
+            echo "OMEGA_RELEASE_CONTROLLER_WAIT_EXACT_FINAL source=$candidate"
             exit 0
           fi
-          case "$source_ref" in *..*|/*|-*) echo "OMEGA_RELEASE_ORCHESTRATOR_REF_UNSAFE:$source_ref" >&2; exit 64 ;; esac
 
-          private_tip="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/$source_ref" --jq .sha)"
-          [ "$private_tip" = "$candidate" ] || {
-            echo "dispatch=false" >> "$GITHUB_OUTPUT"
-            echo "OMEGA_RELEASE_ORCHESTRATOR_STALE_TRIGGER candidate=$candidate tip=$private_tip"
-            exit 0
-          }
+          existing="$(gh api "/repos/$PRIVATE_REPOSITORY/git/ref/heads/$source_ref" --jq .object.sha 2>/dev/null || true)"
+          if [ -z "$existing" ]; then
+            gh api --method POST "/repos/$PRIVATE_REPOSITORY/git/refs" \
+              -f ref="refs/heads/$source_ref" -f sha="$candidate" >/dev/null
+            existing="$candidate"
+            echo "OMEGA_RELEASE_CONTROLLER_REF_CREATED ref=$source_ref source=$candidate"
+          fi
+          [ "$existing" = "$candidate" ] || { echo "OMEGA_RELEASE_CONTROLLER_REF_COLLISION:$source_ref:$existing!=$candidate" >&2; exit 68; }
 
           control_main="$(GH_TOKEN="$CONTROL_TOKEN" gh api "/repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)"
           epoch="$(GH_TOKEN="$CONTROL_TOKEN" gh api "/repos/$GITHUB_REPOSITORY/contents/federation/epochs/current.json?ref=main" --jq '.content' | python3 -c 'import base64,sys; print(base64.b64decode("".join(sys.stdin.read().split()),validate=True).decode(),end="")')"
-          candidate_status="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/$candidate/status?per_page=100")"
           contract="$(EPOCH="$epoch" python3 -c 'import json,os; print(str((json.loads(os.environ["EPOCH"]).get("release_epoch") or {}).get("control_contract_sha") or ""))')"
           compare='{"status":"identical","files":[]}'
           if [[ "$contract" =~ ^[0-9a-f]{40}$ ]] && [ "$contract" != "$control_main" ]; then
             compare="$(GH_TOKEN="$CONTROL_TOKEN" gh api "/repos/$GITHUB_REPOSITORY/compare/$contract...$control_main?per_page=100")"
           fi
-          decision="$(EPOCH="$epoch" COMPARE_PAYLOAD="$compare" STATUS_PAYLOAD="$candidate_status" CANDIDATE="$candidate" SOURCE_REF="$source_ref" CONTROL_MAIN="$control_main" python3 <<'PY'
+
+          decision="$(EPOCH="$epoch" COMPARE_PAYLOAD="$compare" STATUS_PAYLOAD="$statuses" CANDIDATE="$candidate" SOURCE_REF="$source_ref" CONTROL_MAIN="$control_main" python3 <<'PY'
           import json,os,re
           d=json.loads(os.environ["EPOCH"])
           compare=json.loads(os.environ["COMPARE_PAYLOAD"])
@@ -94,45 +117,59 @@ jobs:
           state=str(d.get("state") or "")
           certification=str(p.get("certification_state") or "")
           if not re.fullmatch(r"[0-9a-f]{40}",control):
-              raise SystemExit("OMEGA_RELEASE_ORCHESTRATOR_CONTROL_SHA_INVALID")
+              raise SystemExit("OMEGA_RELEASE_CONTROLLER_CONTROL_SHA_INVALID")
           live=(latest.get("omega/live-certified") or {}).get("state")=="success"
           compare_status=str(compare.get("status") or "")
           changed=[str(x.get("filename") or "") for x in compare.get("files",[]) if x.get("filename")]
-          state_only=lambda path: path.startswith("federation/epochs/") or bool(re.fullmatch(r"bootstrap/omega/[A-Za-z0-9._-]*trigger[A-Za-z0-9._-]*\.txt",path))
+          state_only=lambda path: path.startswith("federation/epochs/") or path=="bootstrap/omega/pr-validation-trigger.txt"
           code_drift=any(not state_only(path) for path in changed)
           if len(changed)>=300:
               print("BLOCKED:control-diff-too-large")
           elif contract and contract!=control and compare_status not in ("ahead","identical"):
               print("BLOCKED:control-history-"+compare_status.lower())
           elif epoch_source!=candidate or epoch_ref!=source_ref:
-              print("DISPATCH:release-identity-changed")
+              print("DISPATCH:new-private-generation")
           elif contract==control:
               print("NOOP:control-contract-current")
           elif not code_drift:
               print("NOOP:state-only-control-head-advance")
           elif live:
-              print("NOOP:live-certified-epoch-immutable")
+              print("NOOP:live-certified-generation-immutable")
           elif (state=="PASS" and certification=="PASS") or (state=="NOT_EXECUTED" and certification=="NOT_EXECUTED"):
               print("DISPATCH:pre-live-control-deviation")
           else:
               print("BLOCKED:epoch-state-"+state.lower())
           PY
           )"
+          echo "source_sha=$candidate" >> "$GITHUB_OUTPUT"
+          echo "source_ref=$source_ref" >> "$GITHUB_OUTPUT"
           case "$decision" in
             DISPATCH:*)
               echo "dispatch=true" >> "$GITHUB_OUTPUT"
               echo "reason=${decision#DISPATCH:}" >> "$GITHUB_OUTPUT"
+              gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$candidate" \
+                -f state=pending -f context="omega/control-plane/release-controller" \
+                -f description="reconciling gen=${candidate:0:12} ref=${source_ref#release/}" \
+                -f target_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
               ;;
             NOOP:*)
               echo "dispatch=false" >> "$GITHUB_OUTPUT"
-              echo "OMEGA_RELEASE_ORCHESTRATOR_NOOP reason=${decision#NOOP:}"
+              gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$candidate" \
+                -f state=success -f context="omega/control-plane/release-controller" \
+                -f description="generation reconciled gen=${candidate:0:12}" \
+                -f target_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
+              echo "OMEGA_RELEASE_CONTROLLER_NOOP reason=${decision#NOOP:}"
               ;;
             BLOCKED:*)
               echo "dispatch=false" >> "$GITHUB_OUTPUT"
-              echo "OMEGA_RELEASE_ORCHESTRATOR_BLOCKED reason=${decision#BLOCKED:}"
+              gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$candidate" \
+                -f state=error -f context="omega/control-plane/release-controller" \
+                -f description="halted ${decision#BLOCKED:} gen=${candidate:0:12}" \
+                -f target_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
+              echo "OMEGA_RELEASE_CONTROLLER_BLOCKED reason=${decision#BLOCKED:}"
               ;;
             *)
-              echo "OMEGA_RELEASE_ORCHESTRATOR_DECISION_INVALID:$decision" >&2
+              echo "OMEGA_RELEASE_CONTROLLER_DECISION_INVALID:$decision" >&2
               exit 65
               ;;
           esac
@@ -142,6 +179,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REASON: ${{ steps.decide.outputs.reason }}
+          SOURCE_SHA: ${{ steps.decide.outputs.source_sha }}
+          SOURCE_REF: ${{ steps.decide.outputs.source_ref }}
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -155,5 +194,5 @@ jobs:
             echo "OMEGA_RELEASE_ORCHESTRATOR_ROLLOVER_ALREADY_ACTIVE count=$active reason=$REASON"
             exit 0
           fi
-          gh workflow run "$ROLLOVER_WORKFLOW" -R "$GITHUB_REPOSITORY" --ref main
-          echo "OMEGA_RELEASE_ORCHESTRATOR_ROLLOVER_DISPATCHED reason=$REASON"
+          gh workflow run "$ROLLOVER_WORKFLOW" -R "$GITHUB_REPOSITORY" --ref main -f source_sha="$SOURCE_SHA" -f source_ref="$SOURCE_REF"
+          echo "OMEGA_RELEASE_ORCHESTRATOR_ROLLOVER_DISPATCHED reason=$REASON source=$SOURCE_SHA ref=$SOURCE_REF"
