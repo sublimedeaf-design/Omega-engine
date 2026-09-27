@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
-  "source_sha": "9d6c93d83588297c682093cb5ea491920005da7a",
-  "source_ref": "release/code19-main-9d6c93d8",
+  "source_sha": "6c7dcd5ceac1571f9de80d9b8e74c8b4d8ec8a83",
+  "source_ref": "hardening/status-driven-play-signer-20260927",
   "requested_by": "omega-control-plane",
-  "purpose": "post-merge-content-addressed-code19-build",
-  "attempt": 6
+  "purpose": "status-driven-signer-unsigned-proof",
+  "attempt": 7
 }
