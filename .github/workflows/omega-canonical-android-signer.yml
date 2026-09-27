@@ -30,88 +30,80 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Resolve latest successful unsigned release handoff
+      - name: Resolve exact current private unsigned release handoff
         id: handoff
         env:
-          GH_TOKEN: ${{ github.token }}
+          PRIVATE_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          PUBLIC_TOKEN: ${{ github.token }}
           EVENT_NAME: ${{ github.event_name }}
           EVENT_RUN_ID: ${{ github.event.workflow_run.id }}
           EVENT_WORKFLOW_NAME: ${{ github.event.workflow_run.name }}
         shell: bash
         run: |
           set -Eeuo pipefail
-          read -r marker promotion_candidate promotion_ref _ < bootstrap/omega/pr-validation-trigger.txt || true
-          promotion_ready=true
-          [ "${marker:-}" = validate-exact-pr ] || promotion_ready=false
-          [[ "${promotion_candidate:-}" =~ ^[0-9a-f]{40}$ ]] || promotion_ready=false
-          [[ "${promotion_ref:-}" =~ ^release/[A-Za-z0-9._/-]+$ ]] || promotion_ready=false
-          if [ "$promotion_ready" != true ]; then
-            if [ "$EVENT_NAME" = workflow_run ] && [ "$EVENT_WORKFLOW_NAME" = "OMEGA Recovery Evidence Release Stager" ]; then
-              echo "OMEGA_SIGNER_PROMOTION_GENERATION_NOT_READY" >&2
-              exit 75
-            fi
-            echo "ready=false" >> "$GITHUB_OUTPUT"
-            echo "OMEGA_SIGNER_NO_CURRENT_STAGED_GENERATION"
-            exit 0
-          fi
-          case "$promotion_ref" in *..*|/*|-*) echo "OMEGA_SIGNER_PROMOTION_REF_UNSAFE:$promotion_ref" >&2; exit 64 ;; esac
+          set +x
+          [ -n "${PRIVATE_TOKEN:-}" ] || { echo OMEGA_SIGNER_PRIVATE_AUTH_MISSING >&2; exit 77; }
+          final="$(GH_TOKEN="$PRIVATE_TOKEN" gh api "/repos/$PRIVATE_REPOSITORY/commits/main" --jq .sha)"
+          [[ "$final" =~ ^[0-9a-f]{40}$ ]] || { echo OMEGA_SIGNER_PRIVATE_MAIN_INVALID >&2; exit 64; }
+
           if [ "$EVENT_NAME" = workflow_run ] && [ "$EVENT_WORKFLOW_NAME" = "OMEGA Recovery Evidence Release Stager" ]; then
             runs=("$EVENT_RUN_ID")
           else
-            mapfile -t runs < <(gh api "/repos/${{ github.repository }}/actions/workflows/omega-recovery-evidence-release-stager.yml/runs?status=success&per_page=10" --jq '.workflow_runs[].id')
+            mapfile -t runs < <(GH_TOKEN="$PUBLIC_TOKEN" gh api "/repos/${{ github.repository }}/actions/workflows/omega-recovery-evidence-release-stager.yml/runs?status=success&per_page=30" --jq '.workflow_runs[].id')
           fi
+
           found=""
           for run in "${runs[@]}"; do
             [ -n "$run" ] || continue
-            artifacts="$(gh api "/repos/${{ github.repository }}/actions/runs/$run/artifacts?per_page=100")"
-            row="$(PROMOTION_CANDIDATE="$promotion_candidate" python3 - "$artifacts" <<'PY'
+            artifacts="$(GH_TOKEN="$PUBLIC_TOKEN" gh api "/repos/${{ github.repository }}/actions/runs/$run/artifacts?per_page=100")"
+            row="$(FINAL_SHA="$final" python3 - "$artifacts" <<'PY'
           import json,os,re,sys
-          p=json.loads(sys.argv[1]); wanted=os.environ["PROMOTION_CANDIDATE"]
+          p=json.loads(sys.argv[1]); wanted=os.environ["FINAL_SHA"]
           rows=[]
           for a in p.get("artifacts",[]):
-              n=str(a.get("name") or "")
-              m=re.fullmatch(r"OMEGA-Unsigned-Release-([0-9a-f]{40})",n)
-              if m and m.group(1)==wanted and not a.get("expired"):
-                  rows.append((m.group(1),n))
-          if len(rows)>1: raise SystemExit("OMEGA_SIGNER_UNSIGNED_ARTIFACT_AMBIGUOUS")
-          if rows: print("|".join(rows[0]))
+              name=str(a.get("name") or "")
+              if name==f"OMEGA-Unsigned-Release-{wanted}" and not a.get("expired"):
+                  rows.append((wanted,name))
+          if len(rows)>1:
+              raise SystemExit("OMEGA_SIGNER_UNSIGNED_ARTIFACT_AMBIGUOUS")
+          if rows:
+              print("|".join(rows[0]))
           PY
             )"
-            if [ -n "$row" ]; then found="$run|$row"; break; fi
-          done
-          if [ -z "$found" ]; then
-            if [ "$EVENT_NAME" = workflow_run ] && [ "$EVENT_WORKFLOW_NAME" = "OMEGA Recovery Evidence Release Stager" ]; then
-              echo "OMEGA_SIGNER_NO_UNSIGNED_HANDOFF upstream_run=$EVENT_RUN_ID" >&2
-              exit 75
+            if [ -n "$row" ]; then
+              found="$run|$row"
+              break
             fi
-            echo "OMEGA_SIGNER_NO_UNSIGNED_HANDOFF"
-            echo "ready=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          IFS='|' read -r run final artifact <<<"$found"
-          [[ "$final" =~ ^[0-9a-f]{40}$ ]]
+          done
+
+          [ -n "$found" ] || {
+            echo "OMEGA_SIGNER_CURRENT_MAIN_UNSIGNED_HANDOFF_MISSING:$final" >&2
+            exit 75
+          }
+          IFS='|' read -r run exact artifact <<<"$found"
+          [ "$exact" = "$final" ] || { echo OMEGA_SIGNER_HANDOFF_SOURCE_MISMATCH >&2; exit 65; }
           echo "ready=true" >> "$GITHUB_OUTPUT"
           echo "stager_run_id=$run" >> "$GITHUB_OUTPUT"
           echo "final_sha=$final" >> "$GITHUB_OUTPUT"
           echo "artifact_name=$artifact" >> "$GITHUB_OUTPUT"
+          echo "OMEGA_SIGNER_CURRENT_MAIN_HANDOFF_PASS sha=$final run=$run artifact=$artifact"
 
-      - name: Require unsigned handoff to equal current promotion authority
+      - name: Require unsigned handoff to remain current private main
         if: steps.handoff.outputs.ready == 'true'
         env:
-          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          PRIVATE_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
           FINAL_SHA: ${{ steps.handoff.outputs.final_sha }}
         shell: bash
         run: |
           set -Eeuo pipefail
-          read -r marker candidate source_ref _ < bootstrap/omega/pr-validation-trigger.txt || true
-          [ "${marker:-}" = validate-exact-pr ] || { echo "OMEGA_SIGNER_PROMOTION_TRIGGER_INVALID" >&2; exit 64; }
-          [[ "${candidate:-}" =~ ^[0-9a-f]{40}$ ]] || { echo "OMEGA_SIGNER_PROMOTION_SHA_INVALID" >&2; exit 64; }
-          [[ "${source_ref:-}" =~ ^release/[A-Za-z0-9._/-]+$ ]] || { echo "OMEGA_SIGNER_PROMOTION_REF_INVALID:${source_ref:-missing}" >&2; exit 64; }
-          case "$source_ref" in *..*|/*|-*) echo "OMEGA_SIGNER_PROMOTION_REF_UNSAFE:$source_ref" >&2; exit 64 ;; esac
-          [ "$FINAL_SHA" = "$candidate" ] || { echo "OMEGA_SIGNER_STALE_HANDOFF:$FINAL_SHA!=$candidate" >&2; exit 75; }
-          tip="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/$source_ref" --jq .sha)"
-          [ "$tip" = "$FINAL_SHA" ] || { echo "OMEGA_SIGNER_PROMOTION_REF_MOVED:$tip!=$FINAL_SHA" >&2; exit 75; }
-          echo "OMEGA_SIGNER_CURRENT_PROMOTION_PASS sha=$FINAL_SHA ref=$source_ref"
+          set +x
+          [ -n "${PRIVATE_TOKEN:-}" ] || { echo OMEGA_SIGNER_PRIVATE_AUTH_MISSING >&2; exit 77; }
+          current="$(GH_TOKEN="$PRIVATE_TOKEN" gh api "/repos/$PRIVATE_REPOSITORY/commits/main" --jq .sha)"
+          [ "$current" = "$FINAL_SHA" ] || {
+            echo "OMEGA_SIGNER_PRIVATE_MAIN_MOVED:$current!=$FINAL_SHA" >&2
+            exit 75
+          }
+          echo "OMEGA_SIGNER_CURRENT_PRIVATE_MAIN_PASS sha=$FINAL_SHA"
 
       - name: Verify private exact-SHA handoff status
         id: gate
