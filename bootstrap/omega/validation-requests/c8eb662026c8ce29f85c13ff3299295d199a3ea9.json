@@ -1,0 +1,6 @@
+{
+  "schema_version": 1,
+  "source_sha": "c8eb662026c8ce29f85c13ff3299295d199a3ea9",
+  "source_ref": "hardening/isolated-arm64-canonical-signer",
+  "request_id": "pr310-isolated-arm64-signer-v1"
+}
