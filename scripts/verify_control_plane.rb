@@ -147,7 +147,7 @@ recovery = File.read(recovery_path, encoding: "UTF-8")
 {
   "stale_ref_tip_reconciled" => "OMEGA_RECOVERY_TRIGGER_ADVANCED",
   "stale_ref_tip_base_guard" => "OMEGA_RECOVERY_TRIGGER_NOT_CURRENT_BASE",
-  "serialized_recovery_explicit_supersede" => "cancel-in-progress: ${{ github.event_name == 'push' }}",
+  "serialized_recovery_explicit_supersede" => "OMEGA_RECOVERY_TRIGGER_QUEUED_SUPERSEDE",
   "bounded_recovery_queue" => "queue: single",
   "dynamic_evidence_root_packaging" => 'source=(pathlib.Path(os.environ["OMEGA_STATE"])/"evidence").resolve()',
   "artifact_checksum_verify" => "sha256sum -c",
@@ -164,6 +164,7 @@ recovery = File.read(recovery_path, encoding: "UTF-8")
   fail!("recovery_contract_missing:#{name}") unless recovery.include?(needle)
 end
 fail!("recovery_must_not_continue_on_error") if recovery.include?("continue-on-error: true")
+fail!("recovery_active_proof_must_not_cancel") unless recovery.include?("cancel-in-progress: false")
 fail!("recovery_watchdog_must_not_supersede") unless recovery.include?("Scheduled watchdogs and routine-main never cancel active recovery")
 fail!("recovery_helper_must_not_override_model_url") if recovery.include?("OMEGA_LOCAL_BRAIN_MODEL_URL:")
 fail!("recovery_helper_must_not_override_qa_model_url") if recovery.include?("OMEGA_LOCAL_QA_BRAIN_MODEL_URL:")
