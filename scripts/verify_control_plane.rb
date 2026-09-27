@@ -321,7 +321,7 @@ fail!("federation_rollover_integrity_compile_missing") unless integrity_workflow
 fail!("federation_certifier_release_ref_guard_missing") unless File.read(WORKFLOWS.join("omega-release-federation-certifier.yml"), encoding: "UTF-8").include?('re.fullmatch(r"release/[A-Za-z0-9._/-]+",ref)')
 certifier = File.read(WORKFLOWS.join("omega-release-federation-certifier.yml"), encoding: "UTF-8")
 fail!("federation_certifier_actions_write_missing") unless certifier.include?("actions: write")
-fail!("federation_second_proof_dispatch_missing") unless certifier.include?('gh workflow run omega-federation-v3-peer-bridge.yml -R "$CONTROL_REPOSITORY" --ref main') && certifier.include?("OMEGA_RELEASE_FEDERATION_SECOND_PROOF_DISPATCHED")
+fail!("federation_second_proof_exact_sha_dispatch_missing") unless certifier.include?('gh workflow run omega-federation-v3-peer-bridge.yml -R "$CONTROL_REPOSITORY" --ref "$PROMOTED_HEAD_SHA"') && certifier.include?("OMEGA_RELEASE_FEDERATION_SECOND_PROOF_DISPATCHED") && certifier.include?("OMEGA_RELEASE_FEDERATION_SECOND_PROOF_REF_INVALID")
 fail!("federation_recovery_dispatch_missing") unless certifier.include?('gh workflow run omega-hosted-recovery-failover.yml -R "$CONTROL_REPOSITORY" --ref main') && certifier.include?("OMEGA_RELEASE_FINAL_RECOVERY_DISPATCHED")
 fail!("promoter_must_not_trigger_from_signer") if promoter.include?('workflows:\n      - "OMEGA Canonical Android Signer"')
 fail!("promoter_must_not_trigger_from_private_bridge") if promoter.include?('workflows:\n      - "OMEGA Private PR Hosted Bridge"')
