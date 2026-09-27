@@ -294,7 +294,7 @@ fail!("single_promotion_parent_check_missing") unless stager.include?('parent="$
 fail!("single_promotion_trigger_missing") unless stager.include?('validate-exact-pr $FINAL_SHA $RELEASE_BRANCH')
 fail!("single_promotion_branch_missing") unless stager.include?('release/recovery-evidence-')
 signer = File.read(WORKFLOWS.join("omega-canonical-android-signer.yml"), encoding: "UTF-8")
-fail!("signer_current_promotion_binding_missing") unless signer.include?("OMEGA_SIGNER_CURRENT_PROMOTION_PASS") && signer.include?("OMEGA_SIGNER_STALE_HANDOFF") && signer.include?('bootstrap/omega/pr-validation-trigger.txt')
+fail!("signer_current_promotion_binding_missing") unless signer.include?("OMEGA_SIGNER_CURRENT_MAIN_HANDOFF_PASS") && signer.include?("OMEGA_SIGNER_CURRENT_PRIVATE_MAIN_PASS") && signer.include?("OMEGA_SIGNER_PRIVATE_MAIN_MOVED") && signer.include?("OMEGA_SIGNER_CURRENT_MAIN_UNSIGNED_HANDOFF_MISSING")
 coldstart = File.read(WORKFLOWS.join("omega-android-runtime-coldstart.yml"), encoding: "UTF-8")
 fail!("coldstart_registered_package_missing") unless coldstart.include?("com.sublimedeafdesign.omegaengine")
 fail!("coldstart_legacy_package_forbidden") if coldstart.include?("com.omega.app")
