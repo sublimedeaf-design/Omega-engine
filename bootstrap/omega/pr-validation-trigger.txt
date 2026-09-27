@@ -1,1 +1,1 @@
-validate-exact-pr 2c884a2bb5fac8898790fa6400fabd721d853199 hardening/limited-distribution-live-certifier limited-distribution-live-certifier-v1
+validate-exact-pr e6f39442deaa3584b4e9cf469f007df2108c97dc main final-main-reattest-v1
