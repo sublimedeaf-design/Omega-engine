@@ -1,1 +1,1 @@
-validate-exact-pr 5cb2b5dcfc198f565ac0a1bc8af5cc2122245888 fix/signer-rescue-explicit-dispatch-no-hidden-toggle pr319-integrated-release-hardening-v2
+validate-exact-pr 70e3dc55946f46475d9b81dbfca4b06aab33fa56 fix/signer-rescue-explicit-dispatch-no-hidden-toggle pr319-integrated-release-hardening-final
