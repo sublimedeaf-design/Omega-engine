@@ -64,6 +64,7 @@ jobs:
             # This file is a state-only wake pointer, not release-control code.
             # Its exact private SHA/ref is revalidated by the hosted bridge before use.
             [ "$path" = "bootstrap/omega/pr-validation-trigger.txt" ] && continue
+            [ "$path" = "bootstrap/omega/validation-trigger.txt" ] && continue
             echo "OMEGA_FEDERATION_CONTROL_DRIFT_REQUIRES_NEW_EPOCH:$path" >&2
             exit 67
           done
