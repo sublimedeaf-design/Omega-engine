@@ -82,9 +82,9 @@ jobs:
           print(state)
           PY
             )
-            active="${{f[0]}"
-            source="${{f[1]}"
-            echo "OMEGA_GOOGLE_TRIGGER_LOAD state=${{f[2]} source=$source active=$active"
+            active="${f[0]}"
+            source="${f[1]}"
+            echo "OMEGA_GOOGLE_TRIGGER_LOAD state=${f[2]} source=$source active=$active"
           fi
           echo "active=$active" >> "$GITHUB_OUTPUT"
           echo "source_sha=$source" >> "$GITHUB_OUTPUT"
@@ -188,8 +188,8 @@ jobs:
           [[ "$(printf '%s' "$PLAY_APP_SIGNING_CERT_SHA256" | tr -d ':[:space:]' | tr 'A-F' 'a-f')" =~ ^[0-9a-f]{64}$ ]] || missing+=(GOOGLE_PLAY_APP_SIGNING_CERT_SHA256)
           [ -n "$UPLOAD_KEYSTORE_B64" ] || missing+=(OMEGA_GOOGLE_UPLOAD_KEYSTORE_B64)
           [ -n "$UPLOAD_KEY_PASSWORD" ] || missing+=(OMEGA_GOOGLE_UPLOAD_KEY_PASSWORD)
-          if [ "${{#missing[@]}" -gt 0 ]; then
-            list="$(IFS=,; echo "${{missing[*]}")"
+          if [ "${#missing[@]}" -gt 0 ]; then
+            list="$(IFS=,; echo "${missing[*]}")"
             echo "configured=false" >> "$GITHUB_OUTPUT"
             GH_TOKEN="$OMEGA_BOOTSTRAP_TOKEN" gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$SOURCE_SHA" \
               -f state=pending -f context="omega/google-one-click" \
@@ -321,9 +321,9 @@ jobs:
           print(json.load(open("dist/release-identity.json"))["release_id"])
           PY
           )
-          version_code="${{meta[0]}"
-          version_name="${{meta[1]}"
-          release_id="${{meta[2]}"
+          version_code="${meta[0]}"
+          version_name="${meta[1]}"
+          release_id="${meta[2]}"
           aab_sha="$(sha256sum dist/OMEGA-Engine-upload.aab | awk '{print $1}')"
           printf '%s  OMEGA-Engine-upload.aab\n' "$aab_sha" > dist/OMEGA-Engine-upload.aab.sha256
 
