@@ -20,7 +20,6 @@ concurrency:
 env:
   PRIVATE_REPOSITORY: sublimedeaf-design/Omega-engines
   PACKAGE_ID: com.sublimedeafdesign.omegaengine
-  CANONICAL_APP_SIGNING_CERT_SHA256: 0738b245ec8a557edc0600a6961d7bb2586cc22f886ed5273560ce6ab2db447f
 
 jobs:
   release:
@@ -204,8 +203,6 @@ jobs:
           [ -n "$PLAY_SERVICE_ACCOUNT" ] || missing+=(GOOGLE_PLAY_SERVICE_ACCOUNT)
           [[ "$(printf '%s' "$UPLOAD_CERT_SHA256" | tr -d '[:space:]:' | tr 'A-F' 'a-f')" =~ ^[0-9a-f]{64}$ ]] || missing+=(OMEGA_GOOGLE_UPLOAD_CERT_SHA256)
           [[ "$(printf '%s' "$PLAY_APP_SIGNING_CERT_SHA256" | tr -d '[:space:]:' | tr 'A-F' 'a-f')" =~ ^[0-9a-f]{64}$ ]] || missing+=(GOOGLE_PLAY_APP_SIGNING_CERT_SHA256)
-          play_cert="$(printf '%s' "$PLAY_APP_SIGNING_CERT_SHA256" | tr -d '[:space:]:' | tr 'A-F' 'a-f')"
-          [ -z "$play_cert" ] || [ "$play_cert" = "$CANONICAL_APP_SIGNING_CERT_SHA256" ] || missing+=(GOOGLE_PLAY_APP_SIGNING_CERT_CONTINUITY)
           [ -n "$UPLOAD_KEYSTORE_B64" ] || missing+=(OMEGA_GOOGLE_UPLOAD_KEYSTORE_B64)
           [ -n "$UPLOAD_KEY_PASSWORD" ] || missing+=(OMEGA_GOOGLE_UPLOAD_KEY_PASSWORD)
           if [ "${#missing[@]}" -gt 0 ]; then

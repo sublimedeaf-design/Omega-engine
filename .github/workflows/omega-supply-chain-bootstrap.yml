@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - "bootstrap/omega/supply-chain-trigger.txt"
+      - "bootstrap/omega/supply-chain-bootstrap-trigger.txt"
       - ".github/workflows/omega-supply-chain-bootstrap.yml"
 
 permissions:
@@ -33,7 +33,7 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          read -r marker sha ref _ < bootstrap/omega/supply-chain-trigger.txt
+          read -r marker sha ref _ < bootstrap/omega/supply-chain-bootstrap-trigger.txt
           [ "$marker" = "bootstrap-supply-chain" ]
           [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
           [[ "$ref" =~ ^[A-Za-z0-9._/-]+$ ]]
