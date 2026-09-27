@@ -1,1 +1,1 @@
-validate-exact-pr 42a6b0d0e983aedcc99098a7a6cb300158b6b802 control/repo-local-release-authority-v1 pr321-single-writer-ld-release-authority
+validate-exact-pr 6dd943cb778dab6364ca14758921ea0902e4839f main postmerge-current-main-reconcile
