@@ -256,9 +256,10 @@ release_fifo_workflows.each do |name|
 end
 
 stager = File.read(WORKFLOWS.join("omega-recovery-evidence-release-stager.yml"), encoding: "UTF-8")
-fail!("single_promotion_parent_check_missing") unless stager.include?('parent="$(git rev-parse HEAD^)"') && stager.include?('[ "$parent" = "$SOURCE_SHA" ]')
-fail!("single_promotion_trigger_missing") unless stager.include?('validate-exact-pr $FINAL_SHA $RELEASE_BRANCH')
-fail!("single_promotion_branch_missing") unless stager.include?('release/recovery-evidence-')
+fail!("immutable_stager_read_only_marker_missing") unless stager.include?("OMEGA_RELEASE_STAGED_READ_ONLY")
+fail!("immutable_stager_exact_ref_missing") unless stager.include?('release/code19-${SOURCE_SHA:0:8}') && stager.include?('current" != "$SOURCE_SHA"')
+fail!("immutable_stager_source_mutation_forbidden") if stager.include?("git commit") || stager.include?("gradle_path.write_text") || stager.include?("assembleRelease") || stager.include?("bundleRelease")
+fail!("immutable_stager_legacy_apk_status_forbidden") if stager.include?("omega/android-release-unsigned")
 signer = File.read(WORKFLOWS.join("omega-canonical-android-signer.yml"), encoding: "UTF-8")
 fail!("signer_current_promotion_binding_missing") unless signer.include?("OMEGA_SIGNER_CURRENT_PROMOTION_PASS") && signer.include?("OMEGA_SIGNER_STALE_HANDOFF") && signer.include?('bootstrap/omega/pr-validation-trigger.txt')
 coldstart = File.read(WORKFLOWS.join("omega-android-runtime-coldstart.yml"), encoding: "UTF-8")
@@ -280,9 +281,7 @@ fail!("candidate_root_actions_write_missing") unless candidate_root.include?("ac
 stager_text = File.read(WORKFLOWS.join("omega-recovery-evidence-release-stager.yml"), encoding: "UTF-8")
 fail!("release_stager_must_not_use_workflow_run") if stager_text.include?("workflow_run:")
 fail!("release_stager_exact_evidence_input_missing") unless stager_text.include?("evidence_run_id:") && stager_text.include?("inputs.evidence_run_id")
-%w[acceptance-agents.json latest-agent-promotion.json repo-audit-after-agents.json].each do |artifact|
-  fail!("release_stager_qa_bound_artifact_missing:#{artifact}") unless stager_text.include?(artifact)
-end
+fail!("release_stager_exact_evidence_root_verification_missing") unless stager_text.include?("candidate-evidence-root.json") && stager_text.include?("recovery-attestation.json")
 status_order_files = [
   "omega-candidate-evidence-root.yml",
   "omega-recovery-evidence-release-stager.yml",
@@ -299,8 +298,8 @@ fail!("release_stager_fallback_trigger_forbidden") if stager_text.include?("boot
 fail!("release_stager_explicit_handoff_marker_missing") unless stager_text.include?("OMEGA_RELEASE_STAGER_EXPLICIT_HANDOFF") && stager_text.include?('EVIDENCE_RUN_ID: ${{ inputs.evidence_run_id }}')
 fail!("release_stager_actions_write_missing") unless stager_text.include?("actions: write")
 fail!("stager_explicit_final_dispatch_missing") unless stager_text.include?('gh workflow run omega-private-pr-hosted-bridge.yml') && stager_text.include?('gh workflow run omega-hosted-recovery-failover.yml') && stager_text.include?('-R "$GITHUB_REPOSITORY" --ref main')
-fail!("release_stager_capability_preflight_missing") unless stager_text.include?("OMEGA_RELEASE_CAPABILITY_PASS:private_contents_write") && stager_text.include?("OMEGA_RELEASE_CAPABILITY_MISSING:private_contents_write")
-fail!("release_stager_missing_artifact_must_fail") unless stager_text.include?("OMEGA_RELEASE_STAGE_NOT_EXECUTED_NO_EVIDENCE_ARTIFACT") && stager_text.include?("exit 75")
+fail!("release_stager_private_ref_authority_missing") unless stager_text.include?("/git/refs") && stager_text.include?("OMEGA_RELEASE_STAGER_REF_COLLISION")
+fail!("release_stager_missing_artifact_must_fail") unless stager_text.include?("OMEGA_RELEASE_STAGE_NOT_EXECUTED_NO_EVIDENCE_ARTIFACT")
 fail!("signer_workflow_handoff_must_fail") unless signer.include?("OMEGA_SIGNER_NO_UNSIGNED_HANDOFF upstream_run=") && signer.include?("exit 75")
 postlive = File.read(WORKFLOWS.join("omega-post-live-verification.yml"), encoding: "UTF-8")
 fail!("postlive_must_not_use_workflow_run") if postlive.include?("workflow_run:")
@@ -320,7 +319,7 @@ fail!("federation_rollover_integrity_compile_missing") unless integrity_workflow
 fail!("federation_certifier_release_ref_guard_missing") unless File.read(WORKFLOWS.join("omega-release-federation-certifier.yml"), encoding: "UTF-8").include?('re.fullmatch(r"release/[A-Za-z0-9._/-]+",ref)')
 certifier = File.read(WORKFLOWS.join("omega-release-federation-certifier.yml"), encoding: "UTF-8")
 fail!("federation_certifier_actions_write_missing") unless certifier.include?("actions: write")
-fail!("federation_second_proof_dispatch_missing") unless certifier.include?('gh workflow run omega-federation-v3-peer-bridge.yml -R "$CONTROL_REPOSITORY" --ref main') && certifier.include?("OMEGA_RELEASE_FEDERATION_SECOND_PROOF_DISPATCHED")
+fail!("federation_second_proof_dispatch_missing") unless certifier.include?("gh workflow run omega-federation-v3-peer-bridge.yml") && certifier.include?('-R "$CONTROL_REPOSITORY"') && certifier.include?('--ref "$PROMOTED_HEAD_SHA"') && certifier.include?("OMEGA_RELEASE_FEDERATION_SECOND_PROOF_DISPATCHED")
 fail!("federation_recovery_dispatch_missing") unless certifier.include?('gh workflow run omega-hosted-recovery-failover.yml -R "$CONTROL_REPOSITORY" --ref main') && certifier.include?("OMEGA_RELEASE_FINAL_RECOVERY_DISPATCHED")
 fail!("promoter_must_not_trigger_from_signer") if promoter.include?('workflows:\n      - "OMEGA Canonical Android Signer"')
 fail!("promoter_must_not_trigger_from_private_bridge") if promoter.include?('workflows:\n      - "OMEGA Private PR Hosted Bridge"')
@@ -452,10 +451,12 @@ fail!("release_orchestrator_state_only_drift_missing") unless orchestrator.inclu
 fail!("release_orchestrator_compare_guard_missing") unless orchestrator.include?("/compare/$contract...$control_main") && orchestrator.include?("control-diff-too-large") && orchestrator.include?("control-history-")
 fail!("release_orchestrator_must_not_mutate_epoch") if orchestrator.include?("/contents/federation/epochs/current.json") && orchestrator.include?("--method PUT")
 
-# Supply-chain provenance must survive the unsigned handoff and be verified before
-# any canonical key operation. This is intentionally independent of paid attestation features.
-fail!("release_stager_slsa_statement_missing") unless stager.include?("https://in-toto.io/Statement/v1") && stager.include?("https://slsa.dev/provenance/v1") && stager.include?("resolvedDependencies") && stager.include?("OMEGA-Engine-unsigned.intoto.jsonl")
-fail!("release_stager_builder_binding_missing") unless stager.include?("OMEGA_CONTROL_WORKFLOW_SHA") && stager.include?("github.workflow_sha")
+# Build-once provenance belongs to the content-addressed Play builder.
+play_builder = File.read(WORKFLOWS.join("omega-play-content-addressed-builder.yml"), encoding: "UTF-8")
+fail!("play_builder_attestation_missing") unless play_builder.include?("actions/attest-build-provenance@") && play_builder.include?("release-identity.json")
+fail!("play_builder_content_address_missing") unless play_builder.include?("RELEASE_ID") && play_builder.include?("UNSIGNED_AAB_SHA")
+fail!("play_builder_exact_source_missing") unless play_builder.include?("SOURCE_SHA") && play_builder.include?("git rev-parse HEAD")
+fail!("release_stager_must_be_promotion_only") if stager.include?("gradle ") || stager.include?("assembleRelease") || stager.include?("bundleRelease")
 fail!("signer_slsa_subject_verification_missing") unless signer.include?("OMEGA_SIGNER_SLSA_SUBJECT_MISMATCH") && signer.include?("OMEGA_SIGNER_SLSA_BUILDER_INVALID")
 fail!("signer_slsa_dependency_verification_missing") unless signer.include?("OMEGA_SIGNER_SLSA_DEPENDENCY_MISMATCH") && signer.include?("omega-sbom.spdx.json") && signer.include?("release-stage-supply-chain.json")
 
