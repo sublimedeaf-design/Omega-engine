@@ -74,10 +74,11 @@
   },
   "release_rollover": {
     "source_ref": "release/auto-75e988bb398d",
-    "stage": "CERTIFIED_PASS_PENDING_SECOND_PROOF",
+    "stage": "CERTIFIED_PASS",
     "release_epoch_id": "68dff49532894181c6a5b796c215298daa9f38ff31842abd52cece78646a0efd",
     "immutable_path": "federation/epochs/releases/75e988bb398db0391e2ca8910c585a24af14da15-68dff49532894181.json",
-    "first_peer_bridge_run_id": "36325841101"
+    "first_peer_bridge_run_id": "36325841101",
+    "second_peer_bridge_run_id": "36325890079"
   },
   "release_epoch": {
     "contract_version": 2,
