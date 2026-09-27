@@ -1,1 +1,1 @@
-validate-exact-pr da16f5c7a1fee574d1ce4f69c248165945fd239d hardening/content-addressed-release-state-machine-20260927 release-identity-state-machine-v7-signer
+validate-exact-pr 144a67464cd61fbe9e9c5caf11e7c923955dc4d4 refactor/content-addressed-release-identity release-identity-state-machine-v10
