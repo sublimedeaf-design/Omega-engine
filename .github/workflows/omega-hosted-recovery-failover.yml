@@ -26,7 +26,7 @@ concurrency:
   group: omega-hosted-recovery-v4
   # Clean recovery is a long-lived certification proof. New intent waits behind
   # the active proof; no schedule or push can cancel evidence already in flight.
-  cancel-in-progress: false
+  cancel-in-progress: true
   queue: single
 
 env:
