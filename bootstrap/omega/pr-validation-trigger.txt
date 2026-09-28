@@ -1,1 +1,1 @@
-validate-exact-pr 2c2b955096724cbf4390163681cef8dcbcc102cc agent/orchestrator/standards-enforcement-core pr345-standards-enforcement
+validate-exact-pr 54ddb019c790d938e2f3ab717ccec8268c52edd0 agent/orchestrator/enforce-standards-evidence pr346-standards-evidence
