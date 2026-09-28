@@ -1,1 +1,1 @@
-validate-exact-pr 63178b9abf28c2d35d6a51db05a1cfb998fc983e agent/release_ci/clock-authority-current2 pr350-clock-authority-consolidated
+validate-exact-pr 63178b9abf28c2d35d6a51db05a1cfb998fc983e agent/release_ci/clock-authority-current2 pr350-clock-authority-consolidated-r1
