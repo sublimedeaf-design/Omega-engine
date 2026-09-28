@@ -531,7 +531,7 @@ jobs:
           mode=""
           if [ "$PLAY_OUTCOME" = success ]; then
             mode=play_internal_testing
-            for ctx in omega/google-distribution omega/google-play/internal omega/google-play/app-signing omega/google-one-click omega/signer/continuity; do
+            for ctx in omega/google-distribution omega/google-play/internal omega/google-play/app-signing omega/google-one-click; do
               publish "$ctx" success "Google Play Internal Testing PASS"
             done
             publish "omega/system-health" pending "distribution PASS; awaiting device canary runtime and LIVE_CERTIFIED"
