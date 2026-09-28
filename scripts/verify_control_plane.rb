@@ -188,7 +188,7 @@ fail!("pr_bridge_immutable_dispatch_ref_input_missing") unless pr_bridge.include
 fail!("pr_bridge_immutable_dispatch_guard_missing") unless pr_bridge.include?("OMEGA_HOSTED_PR_DISPATCH_INPUT_PASS") && pr_bridge.include?("OMEGA_HOSTED_PR_DISPATCH_SHA_INVALID") && pr_bridge.include?("OMEGA_HOSTED_PR_DISPATCH_REF_INVALID")
 
 fail!("pr_bridge_stale_ref_rejection_missing") unless pr_bridge.include?("OMEGA_EXACT_TRIGGER_STALE")
-fail!("pr_bridge_stale_schedule_noop_missing") unless pr_bridge.include?("OMEGA_EXACT_TRIGGER_STALE_NOOP") && pr_bridge.include?('[ "$EVENT_NAME" = schedule ]')
+fail!("pr_bridge_stale_automatic_noop_missing") unless pr_bridge.include?("OMEGA_EXACT_TRIGGER_STALE_NOOP") && pr_bridge.include?('[ "$EVENT_NAME" != workflow_dispatch ]')
 fail!("pr_bridge_explicit_stale_fail_closed_missing") unless pr_bridge.include?("OMEGA_EXACT_TRIGGER_STALE requested=") && pr_bridge.include?("exit 68")
 fail!("pr_bridge_stale_ref_base_guard_missing") unless pr_bridge.include?("OMEGA_EXACT_TRIGGER_NOT_CURRENT_BASE")
 fail!("pr_bridge_stale_main_trigger_guard_missing") unless pr_bridge.include?("OMEGA_HOSTED_PR_STALE_TRIGGER_MAIN") && pr_bridge.include?("pr-validation-trigger.txt?ref=main") && pr_bridge.include?(".content // empty")
