@@ -545,6 +545,14 @@ fail!("release_stager_builder_binding_missing") unless stager.include?("OMEGA_CO
 fail!("signer_slsa_subject_verification_missing") unless signer.include?("OMEGA_SIGNER_SLSA_SUBJECT_MISMATCH") && signer.include?("OMEGA_SIGNER_SLSA_BUILDER_INVALID")
 fail!("signer_slsa_dependency_verification_missing") unless signer.include?("OMEGA_SIGNER_SLSA_DEPENDENCY_MISMATCH") && signer.include?("omega-sbom.spdx.json") && signer.include?("release-stage-supply-chain.json")
 
+# Large GitHub API collections must cross process boundaries through files,
+# never environment variables: Linux execve(2) ARG_MAX is finite and status /
+# release history grows over time.
+public_live = File.read(WORKFLOWS.join("omega-limited-distribution-public-live-certifier.yml"), encoding: "UTF-8")
+fail!("limited_distribution_public_status_payload_must_be_file_backed") unless public_live.include?('status-pages.json') && public_live.include?('python3 - "$RUNNER_TEMP/status-pages.json"')
+fail!("limited_distribution_public_release_payload_must_be_file_backed") unless public_live.include?('releases.json') && public_live.include?('python3 - "$RUNNER_TEMP/releases.json"')
+fail!("limited_distribution_public_large_env_regression") if public_live.include?('STATUS_PAYLOAD="$statuses"') || public_live.include?('RELEASES="$releases"')
+
 adapter_path = WORKFLOWS.join("omega-limited-distribution-release-adapter.yml")
 fail!("limited_distribution_adapter_missing") unless adapter_path.exist?
 adapter = File.read(adapter_path, encoding: "UTF-8")
