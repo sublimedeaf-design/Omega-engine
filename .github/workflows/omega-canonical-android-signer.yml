@@ -456,30 +456,28 @@ jobs:
       - name: Request repo-local Samsung ARM64 signer actuation
         if: steps.gate.outputs.need_sign == 'true' && steps.rescue_sign.outputs.available != 'true' && steps.hosted_sign.outputs.available != 'true' && steps.wake.outputs.runtime_available != 'true'
         env:
-          PRIVATE_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
           FINAL_SHA: ${{ steps.handoff.outputs.final_sha }}
         shell: bash
         run: |
           set -Eeuo pipefail
-          set +x
-          [ -n "${PRIVATE_TOKEN:-}" ] || { echo OMEGA_NATIVE_SIGNER_PRIVATE_TOKEN_MISSING >&2; exit 77; }
-
-          current="$(GH_TOKEN="$PRIVATE_TOKEN" gh api "/repos/$PRIVATE_REPOSITORY/commits/main" --jq .sha)"
-          [ "$current" = "$FINAL_SHA" ] || {
-            echo "OMEGA_NATIVE_SIGNER_PRIVATE_MAIN_MOVED:$current!=$FINAL_SHA" >&2
-            exit 75
-          }
-
-          active="$(
-            GH_TOKEN="$PRIVATE_TOKEN" gh api "/repos/$PRIVATE_REPOSITORY/actions/workflows/android-signing-keepalive.yml/runs?per_page=30"               --jq '[.workflow_runs[] | select(.event=="workflow_dispatch" and (.status=="queued" or .status=="in_progress"))] | length'
-          )"
-          if [ "$active" -gt 0 ]; then
-            echo "OMEGA_NATIVE_SIGNER_RESCUE_ALREADY_ACTIVE sha=$FINAL_SHA count=$active"
+          # The private repository owns the Samsung signer and already has a
+          # status-driven actuator with repo-local actions:write. Never require
+          # a cross-repository PAT to dispatch the secret-bearing signer.
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            echo "OMEGA_NATIVE_SIGNER_STATUS_REQUESTED sha=$FINAL_SHA control_run=$GITHUB_RUN_ID"
             exit 0
           fi
 
-          GH_TOKEN="$PRIVATE_TOKEN" gh workflow run android-signing-keepalive.yml             -R "$PRIVATE_REPOSITORY"             --ref main             -f mode=rescue             -f allow_private_self_hosted=true
-          echo "OMEGA_NATIVE_SIGNER_RESCUE_DISPATCHED sha=$FINAL_SHA workflow=android-signing-keepalive.yml"
+          active="$(
+            GH_TOKEN="$GH_TOKEN" gh api "/repos/$GITHUB_REPOSITORY/actions/workflows/omega-canonical-android-signer.yml/runs?per_page=30"               --jq '[.workflow_runs[] | select(.event=="workflow_dispatch" and (.status=="queued" or .status=="in_progress"))] | length'
+          )"
+          if [ "$active" -eq 0 ]; then
+            GH_TOKEN="$GH_TOKEN" gh workflow run omega-canonical-android-signer.yml               -R "$GITHUB_REPOSITORY" --ref main
+            echo "OMEGA_NATIVE_SIGNER_CONTROL_DISPATCHED sha=$FINAL_SHA"
+          else
+            echo "OMEGA_NATIVE_SIGNER_CONTROL_ALREADY_ACTIVE sha=$FINAL_SHA count=$active"
+          fi
 
       - name: Hold certification pending when no canonical signer backend is available
         if: steps.gate.outputs.need_sign == 'true' && steps.rescue_sign.outputs.available != 'true' && steps.hosted_sign.outputs.available != 'true' && steps.wake.outputs.runtime_available != 'true'
