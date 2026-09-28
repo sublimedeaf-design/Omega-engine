@@ -1,1 +1,1 @@
-validate-exact-pr 17daa7f39608158cd3728aaf7deb9f2e3b18796e agent/orchestrator/authority-fencing-enforcement pr347-authority-fencing-rebased
+validate-exact-pr 8183a4bedd802e28f997ccc42398287ad6db8fe5 agent/release_ci/clock-authority-current pr349-clock-authority-r2
