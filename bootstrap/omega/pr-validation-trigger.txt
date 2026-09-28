@@ -1,1 +1,1 @@
-validate-exact-pr 835267d220e8be2c812118dec198847a1470f383 hardening/universal-llm-continuity-20260928 pr-331-llm-continuity
+validate-exact-pr eb91044a0c66de934c2646b435c1f9724ed14dc5 hardening/universal-llm-continuity-20260928 pr-331-llm-continuity-v2
