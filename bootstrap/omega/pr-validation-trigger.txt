@@ -1,1 +1,1 @@
-validate-exact-pr e614c94d9933294a8d98b8c62344ba47606a7eff agent/orchestrator/idempotent-side-effects idempotency-plan-preflight
+validate-exact-pr ce525d060867dbeaf937740b709d5f98b07b54f1 hardening/blocker-must-converge blocker-convergence-governance
