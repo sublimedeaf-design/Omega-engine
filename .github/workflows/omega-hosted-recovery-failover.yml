@@ -24,10 +24,9 @@ concurrency:
   # publish the same canonical recovery contexts and therefore must never run
   # concurrently. The pin job generation-fences stale queued work.
   group: omega-hosted-recovery-v5
-  # Routine schedules never preempt an active proof. Explicit canonical intent
-  # (push trigger or workflow_dispatch from the release controller) supersedes
-  # an older generation so stale recovery work cannot block current-main proof.
-  cancel-in-progress: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'push' }}
+  # Clean recovery is a long-lived certification proof. New intent waits behind
+  # the active proof; no schedule or push can cancel evidence already in flight.
+  cancel-in-progress: false
   queue: single
 
 env:
@@ -243,6 +242,8 @@ jobs:
           mkdir -p "$RUNNER_TEMP/omega-state/evidence" "$RUNNER_TEMP/omega-state/logs"
       - name: Run full exact-SHA pre-recovery acceptance
         working-directory: omega
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -253,7 +254,43 @@ jobs:
           # instead serialize the exact private execution source.
           export OMEGA_GIT_COMMIT="$source_sha"
           export GITHUB_SHA="$source_sha"
-          timeout --signal=TERM --kill-after=30s 50m bash deploy/codespaces/acceptance-test.sh
+
+          # Long recovery proof is self-fenced. We do not cancel active evidence
+          # from another workflow; the proof itself observes canonical authority
+          # and terminates fail-closed if its immutable source is superseded.
+          setsid timeout --signal=TERM --kill-after=30s 50m bash deploy/codespaces/acceptance-test.sh &
+          acceptance_pid=$!
+          stale=false
+          while kill -0 "$acceptance_pid" 2>/dev/null; do
+            sleep 15
+            current="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/main" --jq '.sha')"
+            [[ "$current" =~ ^[0-9a-f]{40}$ ]] || {
+              echo "OMEGA_HOSTED_RECOVERY_AUTHORITY_UNREADABLE" >&2
+              kill -TERM -- "-$acceptance_pid" 2>/dev/null || true
+              wait "$acceptance_pid" 2>/dev/null || true
+              exit 69
+            }
+            if [ "$current" != "$OMEGA_SOURCE_SHA" ]; then
+              stale=true
+              echo "OMEGA_HOSTED_RECOVERY_STALE_GENERATION_ABORT source=$OMEGA_SOURCE_SHA current=$current"
+              kill -TERM -- "-$acceptance_pid" 2>/dev/null || true
+              for _ in 1 2 3 4 5 6; do
+                kill -0 "$acceptance_pid" 2>/dev/null || break
+                sleep 5
+              done
+              kill -KILL -- "-$acceptance_pid" 2>/dev/null || true
+              break
+            fi
+          done
+          set +e
+          wait "$acceptance_pid"
+          acceptance_rc=$?
+          set -e
+          if [ "$stale" = true ]; then
+            exit 78
+          fi
+          [ "$acceptance_rc" -eq 0 ] || exit "$acceptance_rc"
+
           test -s "$OMEGA_STATE/evidence/acceptance-pre-rebuild.json"
           # Acceptance starts both LocalBrains and verifies each file against the
           # exact private manifest before this cache may be published.
