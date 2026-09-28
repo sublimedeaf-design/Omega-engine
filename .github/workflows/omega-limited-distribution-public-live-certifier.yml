@@ -50,11 +50,11 @@ jobs:
             exit 0
           fi
 
-          statuses="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/$source/status?per_page=100")"
+          statuses="$(gh api --paginate --slurp "/repos/$PRIVATE_REPOSITORY/statuses/$source?per_page=100")"
           STATUS_PAYLOAD="$statuses" python3 - <<'PY' > "$RUNNER_TEMP/gates.json"
           import json,os
-          p=json.loads(os.environ["STATUS_PAYLOAD"]); latest={}
-          for row in p.get("statuses",[]):
+          pages=json.loads(os.environ["STATUS_PAYLOAD"]); p=[row for page in pages for row in page]; latest={}
+          for row in p:
               ctx=str(row.get("context") or "")
               stamp=str(row.get("updated_at") or row.get("created_at") or "")
               if ctx and (ctx not in latest or stamp>str(latest[ctx].get("_stamp") or "")):
