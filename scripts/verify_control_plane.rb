@@ -463,6 +463,7 @@ fail!("signer_runner_probe_opt_in_missing") unless runner_authority_probe.includ
 fail!("signer_runner_probe_labels_missing") unless runner_authority_probe.include?("omega-signer-rescue-v2") && runner_authority_probe.include?("self-hosted") && runner_authority_probe.include?("arm64")
 fail!("signer_runner_probe_online_state_missing") unless runner_authority_probe.include?("OMEGA_SIGNER_RUNNER_ONLINE_PASS") && runner_authority_probe.include?("OMEGA_SIGNER_RUNNER_OFFLINE") && runner_authority_probe.include?("OMEGA_SIGNER_RUNNER_REGISTRATION_MISSING")
 fail!("signer_runner_probe_registration_authority_missing") unless runner_authority_probe.include?("OMEGA_SIGNER_RUNNER_AUTHORITY_PASS") && runner_authority_probe.include?("registration-token")
+fail!("signer_runner_probe_failure_containment_missing") unless runner_authority_probe.scan('if: ${{ always() }}').length >= 2
 
 hosted_signer = File.read(WORKFLOWS.join("omega-hosted-signer-readiness.yml"), encoding: "UTF-8")
 fail!("signer_hosted_escrow_optional_state_missing") unless hosted_signer.include?("OMEGA_HOSTED_SIGNER_ESCROW_OPTIONAL") && hosted_signer.include?("alternate signer backends remain eligible")
