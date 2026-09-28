@@ -357,6 +357,7 @@ jobs:
         if: steps.gate.outputs.ready == 'true'
         working-directory: omega
         env:
+          CONTROL_GH_TOKEN: ${{ github.token }}
           FINAL_SHA: ${{ steps.gate.outputs.sha }}
           RECOVERY_RUN_ID: ${{ steps.gate.outputs.recovery_run_id }}
           SIGNER_RUN_ID: ${{ steps.gate.outputs.signer_run_id }}
@@ -376,6 +377,12 @@ jobs:
           signer="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' <<<"$out" | head -1 | tr -d ':' | tr 'A-F' 'a-f')"
           [ "$signer" = "$expected" ] || { echo OMEGA_FINAL_APK_SIGNER_MISMATCH >&2; exit 72; }
           "$ANDROID_HOME/build-tools/36.0.0/zipalign" -c -P 16 -v 4 dist/OMEGA-Engine.apk >/dev/null
+
+          current_epoch="$RUNNER_TEMP/final-current-federation-epoch.json"
+          GH_TOKEN="$CONTROL_GH_TOKEN" gh api \
+            "/repos/$CONTROL_REPOSITORY/contents/federation/epochs/current.json?ref=main" \
+            --jq '.content' | tr -d '\n' | base64 -d > "$current_epoch"
+          test -s "$current_epoch"
 
           python3 - "$RUNNER_TEMP/final-root/candidate-evidence-root.json" "$RUNNER_TEMP/final-root/recovery-attestation.json" <<'PY'
           import hashlib,json,os,pathlib,re,sys
@@ -406,7 +413,7 @@ jobs:
             --json-file evidence/release-stage.json
 
           OMEGA_APK_SHA="$actual" OMEGA_SIGNER_SHA="$signer" \
-          python3 - "$RUNNER_TEMP/final-root/candidate-evidence-root.json" <<'PY'
+          python3 - "$RUNNER_TEMP/final-root/candidate-evidence-root.json" "$RUNNER_TEMP/signed/OMEGA-Engine.signed.provenance.json" "$current_epoch" <<'PY'
           import hashlib,json,os,pathlib,re,subprocess,sys
           def sha(p):
               h=hashlib.sha256()
@@ -414,11 +421,29 @@ jobs:
                   for chunk in iter(lambda:f.read(1<<20),b""): h.update(chunk)
               return h.hexdigest()
           root=json.load(open(sys.argv[1],encoding="utf-8"))
+          signed=json.load(open(sys.argv[2],encoding="utf-8"))
+          current_epoch=json.load(open(sys.argv[3],encoding="utf-8"))
           final=os.environ["FINAL_SHA"]
           stage=json.loads(pathlib.Path("evidence/release-stage.json").read_text(encoding="utf-8"))
           envelope=json.loads(pathlib.Path("evidence/execution-envelope.json").read_text(encoding="utf-8"))
           if stage.get("status")!="T60_EVIDENCE_FINALIZED":
               raise SystemExit("OMEGA_FINAL_RELEASE_STAGE_NOT_FINALIZED")
+          release_id=str(signed.get("release_id") or "")
+          if not re.fullmatch(r"[0-9a-f]{64}",release_id):
+              raise SystemExit("OMEGA_FINAL_RELEASE_ID_INVALID")
+          primary=current_epoch.get("primary") or {}; release=current_epoch.get("release_epoch") or {}; rollover=current_epoch.get("release_rollover") or {}
+          epoch_id=str(release.get("id") or ""); epoch_sequence=release.get("sequence"); epoch_control=str(release.get("control_contract_sha") or "")
+          if current_epoch.get("state")!="PASS" or primary.get("source_sha")!=final or rollover.get("stage")!="CERTIFIED_PASS" or rollover.get("release_epoch_id")!=epoch_id:
+              raise SystemExit("OMEGA_FINAL_RELEASE_EPOCH_NOT_CERTIFIED")
+          if signed.get("classification")!="CANONICAL_SIGNED_RELEASE_CANDIDATE" or signed.get("source_commit")!=final or signed.get("apk_sha256")!=os.environ["OMEGA_APK_SHA"] or signed.get("signer_continuity")!="PASS":
+              raise SystemExit("OMEGA_FINAL_SIGNED_PROVENANCE_IDENTITY_MISMATCH")
+          if (signed.get("release_epoch_id")!=epoch_id or signed.get("release_epoch_sequence")!=epoch_sequence or signed.get("release_epoch_control_contract_sha")!=epoch_control):
+              raise SystemExit("OMEGA_FINAL_SIGNED_RELEASE_EPOCH_STALE")
+          if stage.get("omega_release_id")!=release_id or stage.get("release_epoch_id")!=epoch_id or stage.get("release_epoch_sequence")!=epoch_sequence or stage.get("release_epoch_control_contract_sha")!=epoch_control:
+              raise SystemExit("OMEGA_FINAL_STAGE_RELEASE_IDENTITY_MISMATCH")
+          envelope_release=str(envelope.get("omega_release_id") or envelope.get("release_id") or "")
+          if envelope_release!=release_id:
+              raise SystemExit("OMEGA_FINAL_ENVELOPE_RELEASE_ID_MISMATCH")
           if subprocess.check_output(["git","rev-parse","HEAD"],text=True).strip()!=final:
               raise SystemExit("OMEGA_FINAL_CHECKOUT_SHA_MISMATCH")
           import re
@@ -440,6 +465,10 @@ jobs:
               "classification":"PRODUCTION_FINAL",
               "production_final":True,
               "source_commit":final,
+              "release_id":release_id,
+              "release_epoch_id":epoch_id,
+              "release_epoch_sequence":epoch_sequence,
+              "release_epoch_control_contract_sha":epoch_control,
               "code_source_sha":stage.get("code_source_sha"),
               "application_id":app_id.group(1),
               "android_version":vm.group(1),
