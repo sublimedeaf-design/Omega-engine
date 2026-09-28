@@ -256,8 +256,25 @@ jobs:
           export GITHUB_SHA="$source_sha"
 
           # Long recovery proof is self-fenced. We do not cancel active evidence
-          # from another workflow; the proof itself observes canonical authority
-          # and terminates fail-closed if its immutable source is superseded.
+          # from another workflow; the proof itself observes both canonical source
+          # authority and the immutable release epoch it is proving. A control-plane
+          # rollover for the same source therefore supersedes stale recovery work.
+          epoch_identity() {
+            gh api "/repos/$GITHUB_REPOSITORY/contents/federation/epochs/current.json?ref=main" --jq '.content' |
+              tr -d '\\n' | base64 -d |
+              python3 -c 'import json,re,sys; d=json.load(sys.stdin); p=d.get("primary") or {}; e=d.get("release_epoch") or {}; r=d.get("release_rollover") or {}; source=str(p.get("source_sha") or ""); eid=str(e.get("id") or ""); control=str(e.get("control_contract_sha") or ""); stage=str(r.get("stage") or ""); state=str(d.get("state") or ""); ok=re.fullmatch(r"[0-9a-f]{40}",source) and re.fullmatch(r"[0-9a-f]{64}",eid) and re.fullmatch(r"[0-9a-f]{40}",control) and state=="PASS" and stage=="CERTIFIED_PASS"; print("|".join((source,eid,control,stage,state))) if ok else sys.exit(69)'
+          }
+          expected_epoch="$(epoch_identity)" || {
+            echo "OMEGA_HOSTED_RECOVERY_EPOCH_AUTHORITY_UNREADABLE" >&2
+            exit 69
+          }
+          IFS='|' read -r expected_epoch_source expected_epoch_id expected_epoch_control expected_epoch_stage expected_epoch_state <<<"$expected_epoch"
+          [ "$expected_epoch_source" = "$OMEGA_SOURCE_SHA" ] || {
+            echo "OMEGA_HOSTED_RECOVERY_EPOCH_SOURCE_MISMATCH:$expected_epoch_source!=$OMEGA_SOURCE_SHA" >&2
+            exit 69
+          }
+          echo "OMEGA_HOSTED_RECOVERY_EPOCH_FENCE source=$OMEGA_SOURCE_SHA epoch=$expected_epoch_id control=$expected_epoch_control"
+
           setsid timeout --signal=TERM --kill-after=30s 50m bash deploy/codespaces/acceptance-test.sh &
           acceptance_pid=$!
           stale=false
@@ -273,6 +290,18 @@ jobs:
             if [ "$current" != "$OMEGA_SOURCE_SHA" ]; then
               stale=true
               echo "OMEGA_HOSTED_RECOVERY_STALE_GENERATION_ABORT source=$OMEGA_SOURCE_SHA current=$current"
+            else
+              current_epoch="$(epoch_identity)" || {
+                stale=true
+                echo "OMEGA_HOSTED_RECOVERY_EPOCH_AUTHORITY_UNREADABLE" >&2
+                current_epoch=""
+              }
+              if [ "$stale" != true ] && [ "$current_epoch" != "$expected_epoch" ]; then
+                stale=true
+                echo "OMEGA_HOSTED_RECOVERY_STALE_EPOCH_ABORT expected=$expected_epoch current=$current_epoch"
+              fi
+            fi
+            if [ "$stale" = true ]; then
               kill -TERM -- "-$acceptance_pid" 2>/dev/null || true
               for _ in 1 2 3 4 5 6; do
                 kill -0 "$acceptance_pid" 2>/dev/null || break
