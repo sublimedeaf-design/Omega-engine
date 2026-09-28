@@ -1,1 +1,1 @@
-validate-exact-pr 9ac4f27659a8b7259b0b6f633a503c688ad23d44 agent/release_ci/clock-authority-current pr349-clock-authority-ownership-fix
+validate-exact-pr d1f4604afb3eca81b41c6d613231f195713f44af agent/release_ci/clock-authority-current2 pr350-clock-authority
