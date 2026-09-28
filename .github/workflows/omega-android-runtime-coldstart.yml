@@ -124,6 +124,7 @@ jobs:
         if: steps.artifact.outputs.ready == 'true'
         env:
           GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          CONTROL_GH_TOKEN: ${{ github.token }}
           FINAL_SHA: ${{ steps.artifact.outputs.final_sha }}
         shell: bash
         run: |
@@ -149,14 +150,29 @@ jobs:
           recorded="$(awk '{print $1}' "$sum")"
           [ "$actual" = "$recorded" ]
 
-          expected="$(python3 - "$prov" "$FINAL_SHA" "$actual" <<'PY'
+          current_epoch="$RUNNER_TEMP/android-coldstart/current-federation-epoch.json"
+          GH_TOKEN="$CONTROL_GH_TOKEN" gh api \
+            "/repos/$CONTROL_REPOSITORY/contents/federation/epochs/current.json?ref=main" \
+            --jq '.content' | tr -d '\n' | base64 -d > "$current_epoch"
+          test -s "$current_epoch"
+          expected="$(python3 - "$prov" "$FINAL_SHA" "$actual" "$current_epoch" <<'PY'
           import json,re,sys
           p=json.load(open(sys.argv[1],encoding="utf-8"))
+          epoch=json.load(open(sys.argv[4],encoding="utf-8"))
           signed_digest=p.get("signed_apk_sha256") or p.get("apk_sha256")
           if p.get("source_commit")!=sys.argv[2] or signed_digest!=sys.argv[3]:
               raise SystemExit("OMEGA_ANDROID_COLDSTART_SIGNED_PROVENANCE_MISMATCH")
           if p.get("signer_continuity")!="PASS":
               raise SystemExit("OMEGA_ANDROID_COLDSTART_SIGNER_CONTINUITY_NOT_PASS")
+          release_id=str(p.get("release_id") or "")
+          if not re.fullmatch(r"[0-9a-f]{64}",release_id):
+              raise SystemExit("OMEGA_ANDROID_COLDSTART_RELEASE_ID_INVALID")
+          primary=epoch.get("primary") or {}; release=epoch.get("release_epoch") or {}; rollover=epoch.get("release_rollover") or {}
+          epoch_id=str(release.get("id") or ""); sequence=release.get("sequence"); control=str(release.get("control_contract_sha") or "")
+          if epoch.get("state")!="PASS" or primary.get("source_sha")!=sys.argv[2] or rollover.get("stage")!="CERTIFIED_PASS" or rollover.get("release_epoch_id")!=epoch_id:
+              raise SystemExit("OMEGA_ANDROID_COLDSTART_RELEASE_EPOCH_NOT_CERTIFIED")
+          if (p.get("release_epoch_id")!=epoch_id or p.get("release_epoch_sequence")!=sequence or p.get("release_epoch_control_contract_sha")!=control):
+              raise SystemExit("OMEGA_ANDROID_COLDSTART_RELEASE_EPOCH_STALE")
           fp=str(p.get("signer_certificate_sha256") or "").replace(":","").lower()
           if not re.fullmatch(r"[0-9a-f]{64}",fp):
               raise SystemExit("OMEGA_ANDROID_COLDSTART_SIGNER_FINGERPRINT_INVALID")

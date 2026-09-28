@@ -148,14 +148,23 @@ jobs:
           actual="$(sha256sum OMEGA-Engine.apk | awk '{print $1}')"
           recorded="$(awk '{print $1}' OMEGA-Engine.apk.sha256 | tr 'A-F' 'a-f')"
           [ "$actual" = "$recorded" ] || { echo OMEGA_LD_PUBLIC_APK_DIGEST_MISMATCH >&2; exit 66; }
-          SOURCE_SHA="$SOURCE_SHA" APK_SHA="$actual" python3 - <<'PY'
+          current_epoch="$RUNNER_TEMP/ld-public-current-federation-epoch.json"
+          gh api "/repos/$GITHUB_REPOSITORY/contents/federation/epochs/current.json?ref=main" --jq '.content' | tr -d '\n' | base64 -d > "$current_epoch"
+          test -s "$current_epoch"
+          SOURCE_SHA="$SOURCE_SHA" APK_SHA="$actual" CURRENT_EPOCH_PATH="$current_epoch" python3 - <<'PY'
           import hashlib,json,os,pathlib,re
           def load(n): return json.loads(pathlib.Path(n).read_text(encoding="utf-8"))
           def sha(n): return hashlib.sha256(pathlib.Path(n).read_bytes()).hexdigest()
           p=load("OMEGA-Engine.provenance.json"); ident=load("release-identity.json")
+          epoch=json.loads(pathlib.Path(os.environ["CURRENT_EPOCH_PATH"]).read_text(encoding="utf-8"))
           rid=str(ident.get("release_id") or "")
+          primary=epoch.get("primary") or {}; release=epoch.get("release_epoch") or {}; rollover=epoch.get("release_rollover") or {}
+          eid=str(release.get("id") or ""); eseq=release.get("sequence"); ectrl=str(release.get("control_contract_sha") or "")
           checks={
               "release_id":bool(re.fullmatch(r"[0-9a-f]{64}",rid)) and p.get("release_id")==rid,
+              "epoch_authority":epoch.get("state")=="PASS" and primary.get("source_sha")==os.environ["SOURCE_SHA"] and rollover.get("stage")=="CERTIFIED_PASS" and rollover.get("release_epoch_id")==eid,
+              "identity_epoch":ident.get("release_epoch_id")==eid and ident.get("release_epoch_sequence")==eseq and ident.get("release_epoch_control_contract_sha")==ectrl,
+              "provenance_epoch":p.get("release_epoch_id")==eid and p.get("release_epoch_sequence")==eseq and p.get("release_epoch_control_contract_sha")==ectrl,
               "class":p.get("classification")=="OMEGA_LIMITED_DISTRIBUTION_SIGNED_CANDIDATE",
               "source":p.get("source_sha")==os.environ["SOURCE_SHA"],
               "apk":p.get("apk_sha256")==os.environ["APK_SHA"],
@@ -195,6 +204,9 @@ jobs:
               "source_sha":os.environ["SOURCE_SHA"],
               "release_tag":os.environ["TAG"],
               "release_id":p["release_id"],
+              "release_epoch_id":p["release_epoch_id"],
+              "release_epoch_sequence":p["release_epoch_sequence"],
+              "release_epoch_control_contract_sha":p["release_epoch_control_contract_sha"],
               "package_id":p["package_id"],
               "apk_sha256":sha(base/"OMEGA-Engine.apk"),
               "signer_certificate_sha256":p["signer_certificate_sha256"],
