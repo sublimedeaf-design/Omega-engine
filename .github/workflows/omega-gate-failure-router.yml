@@ -211,6 +211,8 @@ jobs:
           echo "retryable=$(jq -r .retryable "$RUNNER_TEMP/classification.json")" >> "$GITHUB_OUTPUT"
           echo "max_attempts=$(jq -r .max_attempts "$RUNNER_TEMP/classification.json")" >> "$GITHUB_OUTPUT"
           echo "next_action=$(jq -r .next_action "$RUNNER_TEMP/classification.json")" >> "$GITHUB_OUTPUT"
+          echo "repair_scope=$(jq -r .repair_scope "$RUNNER_TEMP/classification.json")" >> "$GITHUB_OUTPUT"
+          echo "reprove_from=$(jq -r .reprove_from "$RUNNER_TEMP/classification.json")" >> "$GITHUB_OUTPUT"
           echo "github_state=$(jq -r .github_state "$RUNNER_TEMP/classification.json")" >> "$GITHUB_OUTPUT"
 
       - name: Publish content-addressed classification
@@ -278,3 +280,109 @@ jobs:
           else
             echo "OMEGA_GATE_ROUTER_RETRY_BUDGET_EXHAUSTED run=$RUN_ID attempt=$attempt max=$MAX_ATTEMPTS"
           fi
+
+
+      - name: Converge classified non-pass state through existing OMEGA routes
+        if: steps.classify.outputs.github_state != 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PRIVATE_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          SOURCE_SHA: ${{ steps.pin.outputs.sha }}
+          STATE: ${{ steps.classify.outputs.state }}
+          FAILURE_CLASS: ${{ steps.classify.outputs.failure_class }}
+          INCIDENT_ID: ${{ steps.classify.outputs.incident_id }}
+          NEXT_ACTION: ${{ steps.classify.outputs.next_action }}
+          REPAIR_SCOPE: ${{ steps.classify.outputs.repair_scope }}
+          REPROVE_FROM: ${{ steps.classify.outputs.reprove_from }}
+          RETRYABLE: ${{ steps.classify.outputs.retryable }}
+          RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          MAX_ATTEMPTS: ${{ steps.classify.outputs.max_attempts }}
+          CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          current="$(GH_TOKEN="$PRIVATE_TOKEN" gh api "/repos/$PRIVATE_REPOSITORY/commits/main" --jq .sha)"
+          if [ "$current" != "$SOURCE_SHA" ]; then
+            echo "OMEGA_GATE_CONVERGENCE_STALE_NOOP source=$SOURCE_SHA current=$current"
+            exit 0
+          fi
+
+          attempt="${RUN_ATTEMPT:-1}"
+          if [ "$RETRYABLE" = true ] && [ "$CONCLUSION" = failure ] && [ "$attempt" -lt "$MAX_ATTEMPTS" ]; then
+            echo "OMEGA_GATE_CONVERGENCE_OWNED_BY_BOUNDED_RETRY incident=$INCIDENT_ID"
+            exit 0
+          fi
+
+          route=""
+          mode=workflow
+          case "$FAILURE_CLASS" in
+            AUTHORIZATION)
+              mode=external
+              route="authorized-writer-capability"
+              ;;
+            CODE_TEST)
+              mode=repair
+              route="code-repair-lane"
+              ;;
+            MODEL_COVERAGE)
+              mode=repair
+              route="model-evidence-repair-lane"
+              ;;
+            UNKNOWN_FAILURE)
+              mode=research
+              route="minimal-isolation-and-classification"
+              ;;
+            *)
+              case "$REPROVE_FROM" in
+                hosted-ci)
+                  route="omega-private-pr-hosted-bridge.yml"
+                  ;;
+                recovery|evidence-root|release-stager)
+                  route="omega-hosted-recovery-failover.yml"
+                  ;;
+                federation)
+                  route="omega-release-orchestrator-arm.yml"
+                  ;;
+                signer|android-runtime)
+                  route="omega-canonical-android-signer.yml"
+                  ;;
+                promotion)
+                  route="omega-final-release-promoter.yml"
+                  ;;
+                post-live)
+                  route="omega-post-live-verification.yml"
+                  ;;
+                t24)
+                  route="omega-hosted-runtime-fallback.yml"
+                  ;;
+                *)
+                  route="omega-release-orchestrator-arm.yml"
+                  ;;
+              esac
+              ;;
+          esac
+
+          if [ "$mode" = workflow ]; then
+            active="$(
+              {
+                gh api "/repos/$GITHUB_REPOSITORY/actions/workflows/$route/runs?status=queued&per_page=20" --jq '.total_count'
+                gh api "/repos/$GITHUB_REPOSITORY/actions/workflows/$route/runs?status=in_progress&per_page=20" --jq '.total_count'
+              } | awk '{s+=$1} END{print s+0}'
+            )"
+            if [ "$active" -eq 0 ]; then
+              if [ "$route" = omega-private-pr-hosted-bridge.yml ]; then
+                gh workflow run "$route" -R "$GITHUB_REPOSITORY" --ref main                   -f source_sha="$SOURCE_SHA" -f source_ref=main
+              else
+                gh workflow run "$route" -R "$GITHUB_REPOSITORY" --ref main
+              fi
+              echo "OMEGA_GATE_CONVERGENCE_DISPATCHED route=$route action=$NEXT_ACTION incident=$INCIDENT_ID"
+            else
+              echo "OMEGA_GATE_CONVERGENCE_ALREADY_ACTIVE route=$route count=$active incident=$INCIDENT_ID"
+            fi
+          else
+            echo "OMEGA_GATE_CONVERGENCE_NONWORKFLOW mode=$mode route=$route action=$NEXT_ACTION incident=$INCIDENT_ID"
+          fi
+
+          desc="action=${NEXT_ACTION:0:42} route=${route:0:42} inc=${INCIDENT_ID:0:12}"
+          GH_TOKEN="$PRIVATE_TOKEN" gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$SOURCE_SHA"             -f state=pending             -f context="omega/control-plane/convergence"             -f description="$desc"             -f target_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
