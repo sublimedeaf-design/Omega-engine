@@ -1,1 +1,1 @@
-validate-exact-pr 18c501855f6c3ca58b045efe003a486a2ced7aa3 main post-merge-exact-main
+validate-exact-pr b316efb12cf1cc8cf4b8fabac7e17242dcb02362 agent/orchestrator/standards-governance-foundation standards-governance-foundation
