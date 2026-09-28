@@ -369,7 +369,7 @@ jobs:
                   raise SystemExit("OMEGA_RELEASE_STAGE_RELEASE_EPOCH_IDENTITY_INVALID:"+label)
           if any(r[k]!=c[k] for k in ("id","sequence","control_contract_sha")):
               raise SystemExit("OMEGA_RELEASE_STAGE_RELEASE_EPOCH_STALE:"+r["id"]+"!="+c["id"])
-          release_id=str(envelope.get("omega_release_id") or "")
+          release_id=str(envelope.get("release_id") or "")
           if envelope.get("source_sha")!=source or not re.fullmatch(r"[0-9a-f]{64}",release_id):
               raise SystemExit("OMEGA_RELEASE_STAGE_RELEASE_ID_INVALID")
           with open(os.environ["GITHUB_ENV"],"a",encoding="utf-8") as fh:
