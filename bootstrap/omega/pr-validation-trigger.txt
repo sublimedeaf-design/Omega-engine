@@ -1,1 +1,1 @@
-validate-exact-pr fe8667c1398922a628c77366b7c6a1e144615f49 agent/orchestrator/authority-fencing-enforcement pr347-authority-fencing
+validate-exact-pr c1a6505adbd2c0852b09c8c892609fa56648e1d3 agent/orchestrator/authority-fencing-enforcement pr347-authority-fencing-fix1
