@@ -1,1 +1,1 @@
-validate-exact-pr c1a6505adbd2c0852b09c8c892609fa56648e1d3 agent/orchestrator/authority-fencing-enforcement pr347-authority-fencing-fix1-serialized
+validate-exact-pr b05d1628db28e624e7ac56e89216f9628004d976 main evidence-time-post-merge
