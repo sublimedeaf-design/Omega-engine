@@ -53,22 +53,25 @@ jobs:
           ref=str(p.get("source_ref") or "")
           state=str(d.get("state") or "")
           rollover=d.get("release_rollover") or {}
+          release_epoch=d.get("release_epoch") or {}
+          epoch_id=str(release_epoch.get("id") or "")
           if not re.fullmatch(r"[0-9a-f]{40}",source):
               raise SystemExit("OMEGA_RELEASE_CERTIFIER_SOURCE_INVALID")
           safe=bool(re.fullmatch(r"release/[A-Za-z0-9._/-]+",ref)) and ".." not in ref and not ref.startswith("/") and not ref.startswith("-")
-          if not safe:
-              print("false||||")
+          if not safe or not re.fullmatch(r"[0-9a-f]{64}",epoch_id):
+              print("false|||||")
           else:
-              print("|".join(("true",state,source,ref,str(rollover.get("stage") or ""))))
+              print("|".join(("true",state,source,ref,str(rollover.get("stage") or ""),epoch_id)))
           PY
           )"
-          IFS='|' read -r release_epoch state source source_ref stage <<<"$parsed"
+          IFS='|' read -r release_epoch state source source_ref stage release_epoch_id <<<"$parsed"
           echo "release_epoch=$release_epoch" >> "$GITHUB_OUTPUT"
           [ "$release_epoch" = true ] || { echo "OMEGA_RELEASE_CERTIFIER_NON_RELEASE_EPOCH"; exit 0; }
           echo "state=$state" >> "$GITHUB_OUTPUT"
           echo "source_sha=$source" >> "$GITHUB_OUTPUT"
           echo "source_ref=$source_ref" >> "$GITHUB_OUTPUT"
           echo "stage=$stage" >> "$GITHUB_OUTPUT"
+          echo "release_epoch_id=$release_epoch_id" >> "$GITHUB_OUTPUT"
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         if: steps.epoch.outputs.release_epoch == 'true'
@@ -138,6 +141,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           SOURCE_SHA: ${{ steps.epoch.outputs.source_sha }}
           SOURCE_REF: ${{ steps.epoch.outputs.source_ref }}
+          RELEASE_EPOCH_ID: ${{ steps.epoch.outputs.release_epoch_id }}
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -207,7 +211,8 @@ jobs:
             -f target_url="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" >/dev/null
 
           path="bootstrap/omega/recovery-trigger.txt"
-          desired="recover-exact $SOURCE_SHA $SOURCE_REF release-federation-second-proof"
+          [[ "$RELEASE_EPOCH_ID" =~ ^[0-9a-f]{64}$ ]] || { echo "OMEGA_RELEASE_RECOVERY_EPOCH_ID_INVALID" >&2; exit 64; }
+          desired="recover-exact $SOURCE_SHA $SOURCE_REF release-federation-second-proof-$RELEASE_EPOCH_ID"
           meta="$(gh api "/repos/$CONTROL_REPOSITORY/contents/$path?ref=main")"
           current="$(printf '%s' "$meta" | jq -r '.content' | python3 -c 'import base64,sys; print(base64.b64decode("".join(sys.stdin.read().split()),validate=True).decode(),end="")' | tr -d '\r\n')"
           if [ "$current" = "$desired" ]; then

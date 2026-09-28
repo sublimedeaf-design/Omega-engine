@@ -394,6 +394,7 @@ certifier = File.read(WORKFLOWS.join("omega-release-federation-certifier.yml"), 
 fail!("federation_certifier_actions_write_missing") unless certifier.include?("actions: write")
 fail!("federation_second_proof_exact_sha_dispatch_missing") unless certifier.include?('gh workflow run omega-federation-v3-peer-bridge.yml -R "$CONTROL_REPOSITORY" --ref main') && certifier.include?('current_main="$(gh api "/repos/$CONTROL_REPOSITORY/git/ref/heads/main" --jq') && certifier.include?('[ "$current_main" = "$PROMOTED_HEAD_SHA" ]') && certifier.include?("OMEGA_RELEASE_FEDERATION_SECOND_PROOF_DISPATCHED") && certifier.include?("OMEGA_RELEASE_FEDERATION_SECOND_PROOF_REF_INVALID")
 fail!("federation_recovery_dispatch_missing") unless certifier.include?('gh workflow run omega-hosted-recovery-failover.yml -R "$CONTROL_REPOSITORY" --ref main') && certifier.include?("OMEGA_RELEASE_FINAL_RECOVERY_DISPATCHED")
+fail!("federation_recovery_trigger_epoch_identity_missing") unless certifier.include?("release_epoch_id=$release_epoch_id") && certifier.include?("OMEGA_RELEASE_RECOVERY_EPOCH_ID_INVALID") && certifier.include?("release-federation-second-proof-$RELEASE_EPOCH_ID")
 fail!("promoter_must_not_trigger_from_signer") if promoter.include?('workflows:\n      - "OMEGA Canonical Android Signer"')
 fail!("promoter_must_not_trigger_from_private_bridge") if promoter.include?('workflows:\n      - "OMEGA Private PR Hosted Bridge"')
 fail!("promoter_coldstart_trigger_missing") unless promoter.include?('- "OMEGA Android Runtime Cold Start"')
