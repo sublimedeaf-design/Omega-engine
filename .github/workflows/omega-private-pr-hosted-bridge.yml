@@ -106,8 +106,8 @@ jobs:
           [[ "$ref_tip" =~ ^[0-9a-f]{40}$ ]] || { echo "OMEGA_EXACT_TRIGGER_REF_TIP_INVALID:$source_ref" >&2; exit 67; }
           if [ "$ref_tip" != "$requested_sha" ]; then
             echo "found=false" >> "$GITHUB_OUTPUT"
-            if [ "$EVENT_NAME" = schedule ]; then
-              echo "OMEGA_EXACT_TRIGGER_STALE_NOOP requested=$requested_sha current=$ref_tip ref=$source_ref"
+            if [ "$EVENT_NAME" != workflow_dispatch ]; then
+              echo "OMEGA_EXACT_TRIGGER_STALE_NOOP event=$EVENT_NAME requested=$requested_sha current=$ref_tip ref=$source_ref"
               exit 0
             fi
             echo "OMEGA_EXACT_TRIGGER_STALE requested=$requested_sha current=$ref_tip ref=$source_ref" >&2
