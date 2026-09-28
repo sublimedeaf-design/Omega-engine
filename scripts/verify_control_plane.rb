@@ -317,6 +317,8 @@ fail!("candidate_root_recovery_package_contract_missing") unless candidate_root.
 fail!("candidate_root_reconciliation_dispatch_missing") unless candidate_root.include?("workflow_dispatch:") && candidate_root.include?("recovery_run_id:") && candidate_root.include?("github.event_name == 'workflow_dispatch'")
 fail!("candidate_root_reconciliation_run_verification_missing") unless candidate_root.include?("OMEGA_EVIDENCE_ROOT_RECOVERY_RUN_VERIFIED") && candidate_root.include?("OMEGA_EVIDENCE_ROOT_RECOVERY_WORKFLOW_PATH_MISMATCH") && candidate_root.include?("OMEGA_EVIDENCE_ROOT_RECOVERY_RUN_NOT_SUCCESS")
 fail!("candidate_root_reconciliation_artifact_binding_missing") unless candidate_root.include?("OMEGA_EVIDENCE_ROOT_RECOVERY_ARTIFACTS_VERIFIED") && candidate_root.include?("omega-recovery-attestation-") && candidate_root.include?("omega-hosted-recovery-")
+fail!("candidate_root_release_epoch_fence_missing") unless candidate_root.include?("OMEGA_EVIDENCE_ROOT_RELEASE_EPOCH_STALE") && candidate_root.include?("CURRENT_FEDERATION_EPOCH") && candidate_root.include?("federation/epochs/current.json?ref=main") && candidate_root.include?("control_contract_sha")
+fail!("candidate_root_control_generation_fence_missing") unless candidate_root.include?("OMEGA_EVIDENCE_ROOT_CONTROL_GENERATION_STALE") && candidate_root.include?("federation/epochs/") && candidate_root.include?("bootstrap/omega/")
 fail!("candidate_root_actions_write_missing") unless candidate_root.include?("actions: write")
 stager_text = File.read(WORKFLOWS.join("omega-recovery-evidence-release-stager.yml"), encoding: "UTF-8")
 fail!("release_stager_must_not_use_workflow_run") if stager_text.include?("workflow_run:")
