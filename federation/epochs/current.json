@@ -8,10 +8,10 @@
   ],
   "primary": {
     "repository": "sublimedeaf-design/Omega-engines",
-    "source_sha": "9b23b32f1392ae8308714106c8989577843df6db",
+    "source_sha": "bd2d93a21a9eb95987e9bd840119cf813d503539",
     "pull_request": null,
     "certification_state": "NOT_EXECUTED",
-    "source_ref": "release/auto-9b23b32f1392"
+    "source_ref": "release/auto-bd2d93a21a9e"
   },
   "peers": [
     {
@@ -75,20 +75,20 @@
     "integral_optimization_policy": "omega-integral-optimization-v1"
   },
   "release_rollover": {
-    "source_ref": "release/auto-9b23b32f1392",
+    "source_ref": "release/auto-bd2d93a21a9e",
     "stage": "IMMUTABLE_EPOCH_STAGED_PENDING_READ_ONLY_PEER_PROOF",
-    "release_epoch_id": "cd5b88f76582ef360ea0e52a25ce8ae592958937de2a341f3139c6997e37e326",
-    "immutable_path": "federation/epochs/releases/9b23b32f1392ae8308714106c8989577843df6db-cd5b88f76582ef36.json"
+    "release_epoch_id": "02e3add856ebc64e5b193cded92e5936265f4a1736c9b32b6a347b9abb5af8a6",
+    "immutable_path": "federation/epochs/releases/bd2d93a21a9eb95987e9bd840119cf813d503539-02e3add856ebc64e.json"
   },
   "release_epoch": {
     "contract_version": 2,
-    "id": "cd5b88f76582ef360ea0e52a25ce8ae592958937de2a341f3139c6997e37e326",
-    "sequence": 91,
-    "immutable_path": "federation/epochs/releases/9b23b32f1392ae8308714106c8989577843df6db-cd5b88f76582ef36.json",
-    "control_contract_sha": "ac65ff7bdb795b5e31198029c135f0b623ca5626",
-    "parent_epoch_id": "cca93396458c20fd817ff3e577b42af61ca6437cd0999eaff1893e9537eb38f2",
-    "parent_control_contract_sha": "4ed9d9ee0ed2702f4f4b6e90afc80f64859cc79a",
-    "parent_sequence": 90,
+    "id": "02e3add856ebc64e5b193cded92e5936265f4a1736c9b32b6a347b9abb5af8a6",
+    "sequence": 92,
+    "immutable_path": "federation/epochs/releases/bd2d93a21a9eb95987e9bd840119cf813d503539-02e3add856ebc64e.json",
+    "control_contract_sha": "f45a213919cd6cd0468804f19d381822f0d629e0",
+    "parent_epoch_id": "cd5b88f76582ef360ea0e52a25ce8ae592958937de2a341f3139c6997e37e326",
+    "parent_control_contract_sha": "ac65ff7bdb795b5e31198029c135f0b623ca5626",
+    "parent_sequence": 91,
     "source_binding_mode": "external_epoch",
     "peer_contract_source_sha": "51fac1413e2177c7c94207a4c24dccd7657a6d3b",
     "new_deviation_requires_new_epoch": true,
