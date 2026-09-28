@@ -1,1 +1,1 @@
-validate-exact-pr b05d1628db28e624e7ac56e89216f9628004d976 main evidence-time-post-merge
+validate-exact-pr 37088d6df70538761a2127dcf440945c29e33dbd agent/release_ci/clock-authority-current pr349-clock-authority
