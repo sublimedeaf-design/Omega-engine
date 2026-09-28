@@ -24,9 +24,10 @@ concurrency:
   # publish the same canonical recovery contexts and therefore must never run
   # concurrently. The pin job generation-fences stale queued work.
   group: omega-hosted-recovery-v5
-  # Clean recovery is a long-lived certification proof. New intent waits behind
-  # the active proof; no schedule or push can cancel evidence already in flight.
-  cancel-in-progress: false
+  # Routine schedules never preempt an active proof. Explicit canonical intent
+  # (push trigger or workflow_dispatch from the release controller) supersedes
+  # an older generation so stale recovery work cannot block current-main proof.
+  cancel-in-progress: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'push' }}
   queue: single
 
 env:
