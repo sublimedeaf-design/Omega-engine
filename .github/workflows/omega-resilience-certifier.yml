@@ -5,6 +5,7 @@ on:
   workflow_run:
     workflows:
       - "OMEGA Hosted Recovery Failover"
+      - "OMEGA Candidate Evidence Root"
       - "OMEGA External Validator Dispatch"
     types: [completed]
   schedule:
