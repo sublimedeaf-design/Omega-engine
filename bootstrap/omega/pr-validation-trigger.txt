@@ -1,1 +1,1 @@
-validate-exact-pr 11dcb072746c55fba5c5fc2d0474fc34c228f887 main standards-governance-post-merge
+validate-exact-pr 2c2b955096724cbf4390163681cef8dcbcc102cc agent/orchestrator/standards-enforcement-core pr345-standards-enforcement
