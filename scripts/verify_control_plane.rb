@@ -293,6 +293,11 @@ release_fifo_workflows.each do |name|
   fail!("release_fifo_queue_max_missing:#{name}") unless text.include?("queue: max")
 end
 
+resilience_workflow = File.read(WORKFLOWS.join("omega-resilience-certifier.yml"), encoding: "UTF-8")
+resilience_certifier = File.read(ROOT.join("control-plane", "certify.mjs"), encoding: "UTF-8")
+fail!("resilience_candidate_root_trigger_missing") unless resilience_workflow.include?('"OMEGA Candidate Evidence Root"')
+fail!("resilience_current_generation_recovery_fence_missing") unless resilience_certifier.include?("recovery_generation_binding") && resilience_certifier.include?('green(map,"omega/candidate-evidence-root",now,1440)') && resilience_certifier.include?('green(map,"omega/recovery-attestation",now,1440)')
+
 stager = File.read(WORKFLOWS.join("omega-recovery-evidence-release-stager.yml"), encoding: "UTF-8")
 fail!("single_promotion_parent_check_missing") unless stager.include?('parent="$(git rev-parse HEAD^)"') && stager.include?('[ "$parent" = "$SOURCE_SHA" ]')
 fail!("single_promotion_trigger_missing") unless stager.include?('validate-exact-pr $FINAL_SHA $RELEASE_BRANCH')
