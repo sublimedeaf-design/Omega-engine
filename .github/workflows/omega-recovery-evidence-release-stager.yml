@@ -266,6 +266,7 @@ jobs:
         env:
           SOURCE_SHA: ${{ steps.pin.outputs.source_sha }}
           OMEGA_EXECUTION_ID: ${{ steps.root.outputs.omega_execution_id }}
+          CONTROL_GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -301,12 +302,84 @@ jobs:
               tf.extractall(dest,members=members,filter="data")
           PY
           ev="$RUNNER_TEMP/recovered/evidence"
-          for name in execution-envelope.json t24-binding.json t60-binding.json qa-binding.json latest-24h.json latest-t60.json coverage-gaps.json acceptance-agents.json latest-agent-promotion.json repo-audit-after-agents.json; do
+          for name in execution-envelope.json federation-epoch.json t24-binding.json t60-binding.json qa-binding.json latest-24h.json latest-t60.json coverage-gaps.json acceptance-agents.json latest-agent-promotion.json repo-audit-after-agents.json; do
             test -s "$ev/$name" || { echo "OMEGA_RELEASE_STAGE_EVIDENCE_MISSING:$name" >&2; exit 52; }
           done
           for name in forecast-ledger.jsonl shadow-ledger.jsonl prematch-intelligence.jsonl; do
             test -e "$ev/$name" || { echo "OMEGA_RELEASE_STAGE_LEDGER_MISSING:$name" >&2; exit 52; }
           done
+
+          # Re-check the immutable release epoch at the point where recovered
+          # evidence crosses into release staging. Source-SHA equality alone is
+          # insufficient because multiple pre-live epochs may bind the same source.
+          current_epoch="$RUNNER_TEMP/current-federation-epoch.json"
+          GH_TOKEN="$CONTROL_GH_TOKEN" gh api \
+            "/repos/$GITHUB_REPOSITORY/contents/federation/epochs/current.json?ref=main" \
+            --jq '.content' | tr -d '\n' | base64 -d > "$current_epoch"
+          test -s "$current_epoch"
+          current_control="$(GH_TOKEN="$CONTROL_GH_TOKEN" gh api "/repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')"
+          contract_control="$(CURRENT_EPOCH_PATH="$current_epoch" python3 - <<'PY'
+          import json,os,re
+          d=json.load(open(os.environ["CURRENT_EPOCH_PATH"],encoding="utf-8"))
+          control=str((d.get("release_epoch") or {}).get("control_contract_sha") or "")
+          if not re.fullmatch(r"[0-9a-f]{40}",control):
+              raise SystemExit("OMEGA_RELEASE_STAGE_CONTROL_CONTRACT_INVALID")
+          print(control)
+          PY
+          )"
+          if [ "$contract_control" != "$current_control" ]; then
+            compare="$(GH_TOKEN="$CONTROL_GH_TOKEN" gh api "/repos/$GITHUB_REPOSITORY/compare/$contract_control...$current_control")"
+            COMPARE_PAYLOAD="$compare" python3 - <<'PY'
+          import json,os
+          p=json.loads(os.environ["COMPARE_PAYLOAD"])
+          if str(p.get("status") or "") not in {"ahead","identical"} or int(p.get("behind_by") or 0)!=0:
+              raise SystemExit("OMEGA_RELEASE_STAGE_CONTROL_GENERATION_STALE:history")
+          changed=[str(x.get("filename") or "") for x in p.get("files") or []]
+          unsafe=[x for x in changed if not (x.startswith("federation/epochs/") or x.startswith("bootstrap/omega/"))]
+          if unsafe:
+              raise SystemExit("OMEGA_RELEASE_STAGE_CONTROL_GENERATION_STALE:"+",".join(unsafe))
+          PY
+          fi
+
+          CURRENT_EPOCH_PATH="$current_epoch" RECOVERED_EPOCH_PATH="$ev/federation-epoch.json" \
+          RECOVERED_ENVELOPE_PATH="$ev/execution-envelope.json" SOURCE_SHA="$SOURCE_SHA" python3 - <<'PY'
+          import json,os,re
+          recovered=json.load(open(os.environ["RECOVERED_EPOCH_PATH"],encoding="utf-8"))
+          current=json.load(open(os.environ["CURRENT_EPOCH_PATH"],encoding="utf-8"))
+          envelope=json.load(open(os.environ["RECOVERED_ENVELOPE_PATH"],encoding="utf-8"))
+          source=os.environ["SOURCE_SHA"]
+          def identity(d):
+              primary=d.get("primary") or {}
+              epoch=d.get("release_epoch") or {}
+              rollover=d.get("release_rollover") or {}
+              return {
+                  "state":str(d.get("state") or ""),
+                  "source_sha":str(primary.get("source_sha") or ""),
+                  "id":str(epoch.get("id") or ""),
+                  "sequence":epoch.get("sequence"),
+                  "control_contract_sha":str(epoch.get("control_contract_sha") or ""),
+                  "rollover_id":str(rollover.get("release_epoch_id") or ""),
+                  "stage":str(rollover.get("stage") or ""),
+              }
+          r=identity(recovered); c=identity(current)
+          for label,row in (("recovery",r),("current",c)):
+              if row["state"]!="PASS" or row["source_sha"]!=source or row["stage"]!="CERTIFIED_PASS":
+                  raise SystemExit("OMEGA_RELEASE_STAGE_RELEASE_EPOCH_NOT_CERTIFIED:"+label)
+              if not row["id"] or row["rollover_id"]!=row["id"] or not isinstance(row["sequence"],int):
+                  raise SystemExit("OMEGA_RELEASE_STAGE_RELEASE_EPOCH_IDENTITY_INVALID:"+label)
+          if any(r[k]!=c[k] for k in ("id","sequence","control_contract_sha")):
+              raise SystemExit("OMEGA_RELEASE_STAGE_RELEASE_EPOCH_STALE:"+r["id"]+"!="+c["id"])
+          release_id=str(envelope.get("omega_release_id") or "")
+          if envelope.get("source_sha")!=source or not re.fullmatch(r"[0-9a-f]{64}",release_id):
+              raise SystemExit("OMEGA_RELEASE_STAGE_RELEASE_ID_INVALID")
+          with open(os.environ["GITHUB_ENV"],"a",encoding="utf-8") as fh:
+              fh.write("OMEGA_RELEASE_ID="+release_id+"\n")
+              fh.write("OMEGA_RELEASE_EPOCH_ID="+c["id"]+"\n")
+              fh.write("OMEGA_RELEASE_EPOCH_SEQUENCE="+str(c["sequence"])+"\n")
+              fh.write("OMEGA_RELEASE_EPOCH_CONTROL_CONTRACT_SHA="+c["control_contract_sha"]+"\n")
+          print("OMEGA_RELEASE_STAGE_RELEASE_EPOCH_PASS id="+c["id"]+" sequence="+str(c["sequence"]))
+          PY
+
           PYTHONPATH="$PWD/omega/src" python3 - "$ev" <<'PY'
           import pathlib,sys
           from omega.live.ledger import verify_ledger
@@ -404,6 +477,10 @@ jobs:
           stage={
               "schema_version":2,
               "omega_execution_id":xid,
+              "omega_release_id":os.environ["OMEGA_RELEASE_ID"],
+              "release_epoch_id":os.environ["OMEGA_RELEASE_EPOCH_ID"],
+              "release_epoch_sequence":int(os.environ["OMEGA_RELEASE_EPOCH_SEQUENCE"]),
+              "release_epoch_control_contract_sha":os.environ["OMEGA_RELEASE_EPOCH_CONTROL_CONTRACT_SHA"],
               "execution_certification_state":envelope.get("certification_state","BLOCKED"),
               "status":"T60_EVIDENCE_FINALIZED",
               "code_source_sha":source,
@@ -558,6 +635,10 @@ jobs:
               "source_commit":source,
               "code_source_sha":code_source,
               "omega_execution_id":stage.get("omega_execution_id"),
+              "omega_release_id":stage.get("omega_release_id"),
+              "release_epoch_id":stage.get("release_epoch_id"),
+              "release_epoch_sequence":stage.get("release_epoch_sequence"),
+              "release_epoch_control_contract_sha":stage.get("release_epoch_control_contract_sha"),
               "candidate_evidence_root_run_id":stage.get("candidate_evidence_root_run_id"),
               "recovery_run_id":stage.get("recovery_run_id"),
               "release_stage_sha256":release_stage_sha,
@@ -587,6 +668,10 @@ jobs:
                           "source_commit":source,
                           "code_source_sha":code_source,
                           "workflow_ref":workflow_ref,
+                          "omega_release_id":payload["omega_release_id"],
+                          "release_epoch_id":payload["release_epoch_id"],
+                          "release_epoch_sequence":payload["release_epoch_sequence"],
+                          "release_epoch_control_contract_sha":payload["release_epoch_control_contract_sha"],
                           "expected_signer_certificate_sha256":payload["expected_signer_certificate_sha256"],
                       },
                       "resolvedDependencies":[

@@ -220,6 +220,7 @@ jobs:
         if: steps.gate.outputs.need_sign == 'true'
         env:
           FINAL_SHA: ${{ steps.handoff.outputs.final_sha }}
+          CONTROL_GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -233,16 +234,65 @@ jobs:
           actual="$(sha256sum "$apk" | awk '{print $1}')"
           recorded="$(awk '{print $1}' "$checksum")"
           [ "$actual" = "$recorded" ]
-          python3 - "$prov" "$intoto" "$sbom" "$supply" "$FINAL_SHA" "$actual" <<'PY' > "$RUNNER_TEMP/signer-artifact.txt"
+
+          current_epoch="$RUNNER_TEMP/signer-current-federation-epoch.json"
+          GH_TOKEN="$CONTROL_GH_TOKEN" gh api \
+            "/repos/$GITHUB_REPOSITORY/contents/federation/epochs/current.json?ref=main" \
+            --jq '.content' | tr -d '\n' | base64 -d > "$current_epoch"
+          test -s "$current_epoch"
+          current_control="$(GH_TOKEN="$CONTROL_GH_TOKEN" gh api "/repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')"
+          contract_control="$(CURRENT_EPOCH_PATH="$current_epoch" python3 - <<'PY'
+          import json,os,re
+          d=json.load(open(os.environ["CURRENT_EPOCH_PATH"],encoding="utf-8"))
+          control=str((d.get("release_epoch") or {}).get("control_contract_sha") or "")
+          if not re.fullmatch(r"[0-9a-f]{40}",control):
+              raise SystemExit("OMEGA_SIGNER_CONTROL_CONTRACT_INVALID")
+          print(control)
+          PY
+          )"
+          if [ "$contract_control" != "$current_control" ]; then
+            compare="$(GH_TOKEN="$CONTROL_GH_TOKEN" gh api "/repos/$GITHUB_REPOSITORY/compare/$contract_control...$current_control")"
+            COMPARE_PAYLOAD="$compare" python3 - <<'PY'
+          import json,os
+          p=json.loads(os.environ["COMPARE_PAYLOAD"])
+          if str(p.get("status") or "") not in {"ahead","identical"} or int(p.get("behind_by") or 0)!=0:
+              raise SystemExit("OMEGA_SIGNER_CONTROL_GENERATION_STALE:history")
+          changed=[str(x.get("filename") or "") for x in p.get("files") or []]
+          unsafe=[x for x in changed if not (x.startswith("federation/epochs/") or x.startswith("bootstrap/omega/"))]
+          if unsafe:
+              raise SystemExit("OMEGA_SIGNER_CONTROL_GENERATION_STALE:"+",".join(unsafe))
+          PY
+          fi
+
+          python3 - "$prov" "$intoto" "$sbom" "$supply" "$FINAL_SHA" "$actual" "$current_epoch" <<'PY' > "$RUNNER_TEMP/signer-artifact.txt"
           import hashlib,json,pathlib,re,sys
           p=json.load(open(sys.argv[1],encoding="utf-8"))
           stmt=json.loads(pathlib.Path(sys.argv[2]).read_text(encoding="utf-8").strip())
           sbom=pathlib.Path(sys.argv[3]); supply=pathlib.Path(sys.argv[4])
           final=sys.argv[5]; digest=sys.argv[6]
+          current_epoch=json.load(open(sys.argv[7],encoding="utf-8"))
           if p.get("classification")!="PRODUCTION_RELEASE_PAYLOAD_UNSIGNED" or p.get("production_final") is not False:
               raise SystemExit("OMEGA_SIGNER_UNSIGNED_CLASSIFICATION_INVALID")
           if p.get("source_commit")!=final or p.get("apk_sha256")!=digest or p.get("signer_state")!="PENDING_CANONICAL_SIGNER":
               raise SystemExit("OMEGA_SIGNER_UNSIGNED_PROVENANCE_MISMATCH")
+          current_primary=current_epoch.get("primary") or {}
+          current_release=current_epoch.get("release_epoch") or {}
+          current_rollover=current_epoch.get("release_rollover") or {}
+          current_id=str(current_release.get("id") or "")
+          current_sequence=current_release.get("sequence")
+          current_contract=str(current_release.get("control_contract_sha") or "")
+          if (current_epoch.get("state")!="PASS"
+              or current_primary.get("source_sha")!=final
+              or current_rollover.get("stage")!="CERTIFIED_PASS"
+              or str(current_rollover.get("release_epoch_id") or "")!=current_id):
+              raise SystemExit("OMEGA_SIGNER_RELEASE_EPOCH_NOT_CERTIFIED")
+          release_id=str(p.get("omega_release_id") or "")
+          if not re.fullmatch(r"[0-9a-f]{64}",release_id):
+              raise SystemExit("OMEGA_SIGNER_RELEASE_ID_INVALID")
+          if (p.get("release_epoch_id")!=current_id
+              or p.get("release_epoch_sequence")!=current_sequence
+              or p.get("release_epoch_control_contract_sha")!=current_contract):
+              raise SystemExit("OMEGA_SIGNER_RELEASE_EPOCH_STALE")
           fp=str(p.get("expected_signer_certificate_sha256") or "").replace(":","").lower()
           if not re.fullmatch(r"[0-9a-f]{64}",fp): raise SystemExit("OMEGA_SIGNER_EXPECTED_FINGERPRINT_INVALID")
           if stmt.get("_type")!="https://in-toto.io/Statement/v1" or stmt.get("predicateType")!="https://slsa.dev/provenance/v1":
@@ -254,6 +304,11 @@ jobs:
           external=definition.get("externalParameters") or {}
           if external.get("source_commit")!=final or external.get("expected_signer_certificate_sha256")!=fp:
               raise SystemExit("OMEGA_SIGNER_SLSA_EXTERNAL_PARAMETERS_MISMATCH")
+          if (external.get("omega_release_id")!=release_id
+              or external.get("release_epoch_id")!=current_id
+              or external.get("release_epoch_sequence")!=current_sequence
+              or external.get("release_epoch_control_contract_sha")!=current_contract):
+              raise SystemExit("OMEGA_SIGNER_SLSA_RELEASE_EPOCH_MISMATCH")
           builder=str((details.get("builder") or {}).get("id") or "")
           if not re.fullmatch(r"https://github\.com/sublimedeaf-design/Omega-engine/\.github/workflows/omega-recovery-evidence-release-stager\.yml@[0-9a-f]{40}",builder):
               raise SystemExit("OMEGA_SIGNER_SLSA_BUILDER_INVALID")
