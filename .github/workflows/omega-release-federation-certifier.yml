@@ -141,7 +141,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           SOURCE_SHA: ${{ steps.epoch.outputs.source_sha }}
           SOURCE_REF: ${{ steps.epoch.outputs.source_ref }}
-          RELEASE_EPOCH_ID: ${{ steps.epoch.outputs.release_epoch_id }}
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -201,6 +200,7 @@ jobs:
           OMEGA_BOOTSTRAP_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
           SOURCE_SHA: ${{ steps.epoch.outputs.source_sha }}
           SOURCE_REF: ${{ steps.epoch.outputs.source_ref }}
+          RELEASE_EPOCH_ID: ${{ steps.epoch.outputs.release_epoch_id }}
         shell: bash
         run: |
           set -Eeuo pipefail
