@@ -1,6 +1,9 @@
 name: OMEGA Canonical Android Signer
 
 on:
+  push:
+    paths:
+      - ".github/workflows/omega-canonical-android-signer.yml"
   workflow_run:
     workflows: ["OMEGA Recovery Evidence Release Stager"]
     types: [completed]
