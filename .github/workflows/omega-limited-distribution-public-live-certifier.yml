@@ -50,10 +50,12 @@ jobs:
             exit 0
           fi
 
-          statuses="$(gh api --paginate --slurp "/repos/$PRIVATE_REPOSITORY/statuses/$source?per_page=100")"
-          STATUS_PAYLOAD="$statuses" python3 - <<'PY' > "$RUNNER_TEMP/gates.json"
-          import json,os
-          pages=json.loads(os.environ["STATUS_PAYLOAD"]); p=[row for page in pages for row in page]; latest={}
+          gh api --paginate --slurp "/repos/$PRIVATE_REPOSITORY/statuses/$source?per_page=100" > "$RUNNER_TEMP/status-pages.json"
+          python3 - "$RUNNER_TEMP/status-pages.json" <<'PY' > "$RUNNER_TEMP/gates.json"
+          import json,sys
+          with open(sys.argv[1],encoding="utf-8") as fh:
+              pages=json.load(fh)
+          p=[row for page in pages for row in page]; latest={}
           for row in p:
               ctx=str(row.get("context") or "")
               stamp=str(row.get("updated_at") or row.get("created_at") or "")
@@ -105,12 +107,14 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          releases="$(gh api "/repos/$GITHUB_REPOSITORY/releases?per_page=100")"
-          RELEASES="$releases" SOURCE_SHA="$SOURCE_SHA" python3 - <<'PY' > "$RUNNER_TEMP/release-row"
-          import json,os,re
+          gh api "/repos/$GITHUB_REPOSITORY/releases?per_page=100" > "$RUNNER_TEMP/releases.json"
+          SOURCE_SHA="$SOURCE_SHA" python3 - "$RUNNER_TEMP/releases.json" <<'PY' > "$RUNNER_TEMP/release-row"
+          import json,os,re,sys
           source=os.environ["SOURCE_SHA"]
+          with open(sys.argv[1],encoding="utf-8") as fh:
+              releases=json.load(fh)
           rows=[]
-          for r in json.loads(os.environ["RELEASES"]):
+          for r in releases:
               tag=str(r.get("tag_name") or "")
               if (
                   r.get("draft") is False
