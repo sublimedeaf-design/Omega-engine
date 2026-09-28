@@ -1,1 +1,1 @@
-validate-exact-pr daf95245eb512b841603aa6dac32c029072b0e4a hardening/universal-llm-continuity pr-332-universal-llm-continuity
+validate-exact-pr 97a124a3468d5f3fd07d9cfcc1ee46e9338ee853 hardening/native-android-no-termux-20260928 pr-335-native-android-no-termux
