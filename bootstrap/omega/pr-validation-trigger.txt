@@ -1,1 +1,1 @@
-validate-exact-pr 8af364fa24e27999c0000774b7ce4f5d941fb85b agent/orchestrator/standards-enforcement-evidence-time pr348-evidence-time
+validate-exact-pr c1a6505adbd2c0852b09c8c892609fa56648e1d3 agent/orchestrator/authority-fencing-enforcement pr347-authority-fencing-fix1-serialized
