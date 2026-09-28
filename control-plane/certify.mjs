@@ -127,7 +127,10 @@ export async function certify({token,targetUrl="",now=Date.now()}={}){
     control_plane:directMode
       ? green(map,"omega/control-plane/direct-dispatch",now,180)
       : green(map,"omega/control-plane/ref-sync",now,180),
-    clean_recovery:green(map,"omega/hosted-recovery",now,1440),
+    clean_recovery:
+      green(map,"omega/hosted-recovery",now,1440) &&
+      green(map,"omega/recovery-attestation",now,1440),
+    recovery_generation_binding:green(map,"omega/candidate-evidence-root",now,1440),
     federation:target.release
       ? green(map,"omega/federation-v3-release",now,1440)
       : federation.every(x=>green(map,x,now,1440)),
