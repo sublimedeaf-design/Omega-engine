@@ -1,1 +1,1 @@
-validate-exact-pr 914032a4a2362d0165a2ca0c84a8305385aaec6f main postmerge-exact-main
+validate-exact-pr 835267d220e8be2c812118dec198847a1470f383 hardening/universal-llm-continuity-20260928 pr-331-llm-continuity
