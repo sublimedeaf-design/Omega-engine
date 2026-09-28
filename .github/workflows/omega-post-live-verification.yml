@@ -147,6 +147,7 @@ jobs:
           PY
 
           authority="$(gh api "/repos/$CONTROL_REPOSITORY/contents/federation/epochs/current.json?ref=main" --jq '.content' | python3 -c 'import base64,sys; print(base64.b64decode("".join(sys.stdin.read().split()),validate=True).decode(),end="")')"
+          printf '%s' "$authority" > "$RUNNER_TEMP/post-live/current-federation-epoch.json"
           AUTHORITY="$authority" FINAL_SHA="$FINAL_SHA" python3 <<'PY'
           import json,os
           d=json.loads(os.environ["AUTHORITY"]); p=d.get("primary") or {}
@@ -190,14 +191,24 @@ jobs:
           recorded="$(awk '{print $1}' OMEGA-Engine.apk.sha256)"
           [ "$actual" = "$recorded" ] || { echo OMEGA_POST_LIVE_APK_CHECKSUM_MISMATCH >&2; exit 72; }
 
-          FINAL_SHA="$FINAL_SHA" APK_SHA="$actual" python3 <<'PY'
+          FINAL_SHA="$FINAL_SHA" APK_SHA="$actual" AUTHORITY_PATH="$RUNNER_TEMP/post-live/current-federation-epoch.json" python3 <<'PY'
           import hashlib,json,os,pathlib,re
           prov=json.loads(pathlib.Path("OMEGA-Engine.provenance.json").read_text(encoding="utf-8"))
           root=json.loads(pathlib.Path("OMEGA-Engine.final-recovery-root.json").read_text(encoding="utf-8"))
+          authority=json.loads(pathlib.Path(os.environ["AUTHORITY_PATH"]).read_text(encoding="utf-8"))
           if prov.get("classification")!="PRODUCTION_FINAL" or prov.get("production_final") is not True:
               raise SystemExit("OMEGA_POST_LIVE_PROVENANCE_CLASS_INVALID")
           if prov.get("source_commit")!=os.environ["FINAL_SHA"] or prov.get("apk_sha256")!=os.environ["APK_SHA"]:
               raise SystemExit("OMEGA_POST_LIVE_PROVENANCE_IDENTITY_MISMATCH")
+          release_id=str(prov.get("release_id") or "")
+          if not re.fullmatch(r"[0-9a-f]{64}",release_id):
+              raise SystemExit("OMEGA_POST_LIVE_RELEASE_ID_INVALID")
+          primary=authority.get("primary") or {}; release=authority.get("release_epoch") or {}; rollover=authority.get("release_rollover") or {}
+          epoch_id=str(release.get("id") or "")
+          if authority.get("state")!="PASS" or primary.get("source_sha")!=os.environ["FINAL_SHA"] or rollover.get("stage")!="CERTIFIED_PASS" or rollover.get("release_epoch_id")!=epoch_id:
+              raise SystemExit("OMEGA_POST_LIVE_RELEASE_EPOCH_NOT_CERTIFIED")
+          if (prov.get("release_epoch_id")!=epoch_id or prov.get("release_epoch_sequence")!=release.get("sequence") or prov.get("release_epoch_control_contract_sha")!=release.get("control_contract_sha")):
+              raise SystemExit("OMEGA_POST_LIVE_RELEASE_EPOCH_STALE")
           if prov.get("signer_continuity")!="PASS":
               raise SystemExit("OMEGA_POST_LIVE_SIGNER_CONTINUITY_NOT_PASS")
           if root.get("state")!="PASS" or root.get("source_sha")!=os.environ["FINAL_SHA"]:
@@ -254,6 +265,10 @@ jobs:
               "schema_version":1,
               "state":"RELEASE_CERTIFIED",
               "source_sha":os.environ["FINAL_SHA"],
+              "release_id":prov.get("release_id"),
+              "release_epoch_id":prov.get("release_epoch_id"),
+              "release_epoch_sequence":prov.get("release_epoch_sequence"),
+              "release_epoch_control_contract_sha":prov.get("release_epoch_control_contract_sha"),
               "apk_sha256":sha("OMEGA-Engine.apk"),
               "provenance_sha256":sha("OMEGA-Engine.provenance.json"),
               "sbom_sha256":sha("OMEGA-Engine.sbom.spdx.json"),
