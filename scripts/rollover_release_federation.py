@@ -317,6 +317,7 @@ existing = control_api(
     f"/repos/{CONTROL}/contents/{urllib.parse.quote(seed_path, safe='/')}?ref=main",
     allow_404=True,
 )
+resume_existing_seed = False
 if existing is not None:
     existing_raw = base64.b64decode(
         str(existing["content"]).replace("\n", ""), validate=True
@@ -343,34 +344,70 @@ if existing is not None:
             )
         )
         raise SystemExit(0)
-    raise SystemExit("OMEGA_RELEASE_EPOCH_SEED_EXISTS_BUT_PROJECTION_MOVED")
 
-if control_head != CONTROL_CONTRACT_SHA:
-    raise SystemExit(
-        f"OMEGA_CONTROL_MAIN_DRIFT:{control_head}!={CONTROL_CONTRACT_SHA}"
+    # GitHub may commit a Contents API mutation and still return a transient
+    # 5xx to the client. Treat an exact matching immutable seed as the durable
+    # side effect and resume projection only when all control-head movement
+    # since the requested contract is state-only.
+    resume_head = control_api("GET", f"/repos/{CONTROL}/git/ref/heads/main")["object"]["sha"]
+    if not HEX40.fullmatch(resume_head):
+        raise SystemExit("OMEGA_RELEASE_EPOCH_RESUME_HEAD_INVALID")
+    compare = control_api(
+        "GET",
+        f"/repos/{CONTROL}/compare/{CONTROL_CONTRACT_SHA}...{resume_head}",
+    )
+    compare_status = str(compare.get("status") or "")
+    behind_by = int(compare.get("behind_by") or 0)
+    if compare_status not in {"ahead", "identical"} or behind_by != 0:
+        raise SystemExit(
+            f"OMEGA_RELEASE_EPOCH_RESUME_HISTORY_INVALID:{compare_status}:behind={behind_by}"
+        )
+    changed = [str(row.get("filename") or "") for row in (compare.get("files") or [])]
+    unsafe = [
+        path for path in changed
+        if not (
+            path == seed_path
+            or path.startswith("federation/epochs/")
+            or path.startswith("bootstrap/omega/")
+        )
+    ]
+    if unsafe:
+        raise SystemExit(
+            "OMEGA_RELEASE_EPOCH_RESUME_UNSAFE_CONTROL_DRIFT:" + ",".join(sorted(unsafe))
+        )
+    resume_existing_seed = True
+    print(
+        f"OMEGA_RELEASE_EPOCH_RESUME_EXISTING_SEED:"
+        f"epoch={epoch_id}:head={resume_head}:files={len(changed)}"
     )
 
-seed_payload = {
-    "message": f"Release epoch: freeze immutable seed {TARGET[:12]} {epoch_id[:12]}",
-    "content": base64.b64encode(
-        (json.dumps(seed, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
-    ).decode(),
-    "branch": "main",
-}
-seed_result = control_api(
-    "PUT",
-    f"/repos/{CONTROL}/contents/{urllib.parse.quote(seed_path, safe='/')}",
-    seed_payload,
-)
-seed_commit = str((seed_result.get("commit") or {}).get("sha") or "")
-if not HEX40.fullmatch(seed_commit):
-    raise SystemExit("OMEGA_RELEASE_EPOCH_SEED_COMMIT_INVALID")
+if not resume_existing_seed:
+    if control_head != CONTROL_CONTRACT_SHA:
+        raise SystemExit(
+            f"OMEGA_CONTROL_MAIN_DRIFT:{control_head}!={CONTROL_CONTRACT_SHA}"
+        )
 
-after_seed_head = control_api("GET", f"/repos/{CONTROL}/git/ref/heads/main")["object"]["sha"]
-if after_seed_head != seed_commit:
-    raise SystemExit(
-        f"OMEGA_RELEASE_EPOCH_CONTROL_DRIFT_AFTER_SEED:{after_seed_head}!={seed_commit}"
+    seed_payload = {
+        "message": f"Release epoch: freeze immutable seed {TARGET[:12]} {epoch_id[:12]}",
+        "content": base64.b64encode(
+            (json.dumps(seed, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
+        ).decode(),
+        "branch": "main",
+    }
+    seed_result = control_api(
+        "PUT",
+        f"/repos/{CONTROL}/contents/{urllib.parse.quote(seed_path, safe='/')}",
+        seed_payload,
     )
+    seed_commit = str((seed_result.get("commit") or {}).get("sha") or "")
+    if not HEX40.fullmatch(seed_commit):
+        raise SystemExit("OMEGA_RELEASE_EPOCH_SEED_COMMIT_INVALID")
+
+    after_seed_head = control_api("GET", f"/repos/{CONTROL}/git/ref/heads/main")["object"]["sha"]
+    if after_seed_head != seed_commit:
+        raise SystemExit(
+            f"OMEGA_RELEASE_EPOCH_CONTROL_DRIFT_AFTER_SEED:{after_seed_head}!={seed_commit}"
+        )
 
 projection = json.loads(json.dumps(epoch))
 projection["state"] = "NOT_EXECUTED"

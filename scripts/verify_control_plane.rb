@@ -383,6 +383,8 @@ fail!("postlive_release_ref_guard_missing") unless postlive.include?("^release/[
 fail!("federation_rollover_release_ref_guard_missing") unless File.read(WORKFLOWS.join("omega-release-federation-rollover.yml"), encoding: "UTF-8").include?("^release/[A-Za-z0-9._/-]+$")
 rollover_script = File.read(ROOT.join("scripts", "rollover_release_federation.py"), encoding: "UTF-8")
 fail!("federation_rollover_script_ref_contract_missing") unless rollover_script.include?("RELEASE_REF") && rollover_script.include?("release/[A-Za-z0-9._/-]+") && rollover_script.include?("OMEGA_RELEASE_FEDERATION_REF_INVALID")
+fail!("federation_rollover_ambiguous_write_resume_missing") unless rollover_script.include?("OMEGA_RELEASE_EPOCH_RESUME_EXISTING_SEED") && rollover_script.include?("OMEGA_RELEASE_EPOCH_RESUME_UNSAFE_CONTROL_DRIFT") && rollover_script.include?("resume_existing_seed") && !rollover_script.include?("OMEGA_RELEASE_EPOCH_SEED_EXISTS_BUT_PROJECTION_MOVED")
+
 fail!("federation_rollover_epoch_cas_missing") unless rollover_script.include?("expected_source") && rollover_script.include?("expected_commit") && rollover_script.include?("OMEGA_PEER_MAIN_DRIFT") && rollover_script.include?("OMEGA_FEDERATION_AUTHORITY_NOT_PASS")
 fail!("federation_rollover_historical_sha_forbidden") if rollover_script.include?("6560946cda03347289a76172b6a6a9b9b39bb1b2")
 integrity_workflow = File.read(WORKFLOWS.join("omega-control-plane-integrity.yml"), encoding: "UTF-8")
