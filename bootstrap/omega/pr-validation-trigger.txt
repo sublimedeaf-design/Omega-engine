@@ -1,1 +1,1 @@
-validate-exact-pr 37661024698b2d6fb247f65f3e0495ee298a6607 cleanup/remove-termux-legacy-20260928 pr-336-remove-termux
+validate-exact-pr 34e5dfa7c580a8ccdfa1b096e9cf15bb8fbb4a84 main post-merge-remove-termux
