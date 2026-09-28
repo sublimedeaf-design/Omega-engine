@@ -1,1 +1,1 @@
-validate-exact-pr 97a124a3468d5f3fd07d9cfcc1ee46e9338ee853 hardening/native-android-no-termux-20260928 pr-335-native-android-no-termux
+validate-exact-pr c5871e1a44909d01c0a492ea69c3fd989d9d421b hardening/native-android-no-termux-20260928 pr-335-native-android-no-termux
