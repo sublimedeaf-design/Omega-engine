@@ -14,6 +14,7 @@ on:
 
 permissions:
   contents: write
+  actions: read
 
 cache-mode: none
 
@@ -23,6 +24,7 @@ concurrency:
   queue: max
 
 env:
+  CONTROL_REPOSITORY: sublimedeaf-design/Omega-engine
   PRIVATE_REPOSITORY: sublimedeaf-design/Omega-engines
   EXPECTED_PACKAGE: com.sublimedeafdesign.omegaengine
   EXPECTED_FINGERPRINT: 0738b245ec8a557edc0600a6961d7bb2586cc22f886ed5273560ce6ab2db447f
@@ -317,9 +319,8 @@ jobs:
           gh workflow run omega-android-runtime-certify.yml \
             -R "$PRIVATE_REPOSITORY" \
             --ref main \
-            -f source_sha="$FINAL_SHA" \
-            -f allow_private_self_hosted=true
-          echo "OMEGA_LD_SAMSUNG_RUNTIME_DISPATCHED source=$FINAL_SHA label=omega-android-runtime-v1"
+            -f source_sha="$FINAL_SHA"
+          echo "OMEGA_LD_NATIVE_RUNTIME_HANDOFF_DISPATCHED source=$FINAL_SHA authority=private-hosted-workflow"
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:

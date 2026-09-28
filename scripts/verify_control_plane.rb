@@ -596,7 +596,11 @@ fail!("limited_distribution_adapter_inherited_generation_missing") unless adapte
 fail!("limited_distribution_adapter_statuses_missing") unless adapter.include?("omega/limited-distribution/apk-signed") && adapter.include?("omega/limited-distribution/signer-continuity") && adapter.include?("omega/limited-distribution/emulator-coldstart") && adapter.include?("omega/limited-distribution/device-install")
 fail!("limited_distribution_adapter_must_not_certify_live") if adapter.include?("omega/limited-distribution/live-certified") || adapter.include?("omega/live-certified")
 fail!("limited_distribution_adapter_device_gate_pending_missing") unless adapter.include?('state=pending -f context="omega/limited-distribution/device-install"')
-fail!("limited_distribution_adapter_runtime_exact_source_missing") unless adapter.include?('gh workflow run omega-android-runtime-certify.yml') && adapter.include?('-f source_sha="$FINAL_SHA"') && adapter.include?('-f allow_private_self_hosted=true')
+fail!("limited_distribution_adapter_runtime_exact_source_missing") unless adapter.include?('gh workflow run omega-android-runtime-certify.yml') && adapter.include?('-R "$PRIVATE_REPOSITORY"') && adapter.include?('-f source_sha="$FINAL_SHA"')
+fail!("limited_distribution_adapter_legacy_self_hosted_opt_in_present") if adapter.include?("allow_private_self_hosted")
+fail!("limited_distribution_adapter_control_repository_missing") unless adapter.include?("CONTROL_REPOSITORY: sublimedeaf-design/Omega-engine")
+fail!("limited_distribution_adapter_actions_read_missing") unless adapter.include?("actions: read")
+fail!("limited_distribution_adapter_hosted_runtime_handoff_marker_missing") unless adapter.include?("OMEGA_LD_NATIVE_RUNTIME_HANDOFF_DISPATCHED")
 
 puts "OMEGA_CONTROL_PLANE_INTEGRITY_GREEN workflows=#{files.length}"
 # support fastpath restack v2 exact-head trigger
