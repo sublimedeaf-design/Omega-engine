@@ -1,1 +1,1 @@
-validate-exact-pr 552b86c52bb4ec23b200cb23749a10f021e88847 agent/backend/top100-ranking-artifact-v2 top100-80pct-rebased
+validate-exact-pr 18c501855f6c3ca58b045efe003a486a2ced7aa3 main post-merge-exact-main
