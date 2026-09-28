@@ -20,6 +20,9 @@ on:
       - ".github/workflows/omega-canonical-android-signer.yml"
       - ".github/workflows/omega-final-release-promoter.yml"
       - ".github/workflows/omega-post-live-verification.yml"
+      - ".github/workflows/omega-resilience-certifier.yml"
+      - "control-plane/certify.mjs"
+      - "control-plane/certify-github.mjs"
       - "scripts/rollover_release_federation.py"
       - "scripts/verify_federation_epoch.py"
 

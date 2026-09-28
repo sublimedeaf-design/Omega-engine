@@ -534,6 +534,7 @@ fail!("federation_certifier_control_binding_missing") unless certifier.include?(
 orchestrator_path = WORKFLOWS.join("omega-release-orchestrator-arm.yml")
 fail!("release_orchestrator_arm_missing") unless orchestrator_path.exist?
 orchestrator = File.read(orchestrator_path, encoding: "UTF-8")
+fail!("release_orchestrator_resilience_trigger_missing") unless orchestrator.include?('".github/workflows/omega-resilience-certifier.yml"') && orchestrator.include?('"control-plane/certify.mjs"') && orchestrator.include?('"control-plane/certify-github.mjs"')
 fail!("release_orchestrator_actions_write_missing") unless orchestrator.include?("actions: write")
 fail!("release_orchestrator_schedule_missing") unless orchestrator.include?('cron: "3,18,33,48 * * * *"')
 fail!("release_orchestrator_exact_proof_event_missing") unless orchestrator.include?("workflow_run:") && orchestrator.include?('OMEGA Private PR Hosted Bridge') && orchestrator.include?("types: [completed]")
