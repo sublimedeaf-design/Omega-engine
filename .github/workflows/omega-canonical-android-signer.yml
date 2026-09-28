@@ -320,12 +320,21 @@ jobs:
           }
           for uri,want in expected_deps.items():
               if deps.get(uri)!=want: raise SystemExit("OMEGA_SIGNER_SLSA_DEPENDENCY_MISMATCH:"+uri)
-          print(fp)
+          print("|".join((fp,release_id,current_id,str(current_sequence),current_contract)))
           PY
-          expected="$(cat "$RUNNER_TEMP/signer-artifact.txt")"
+          IFS='|' read -r expected release_id release_epoch_id release_epoch_sequence release_epoch_control_contract_sha < "$RUNNER_TEMP/signer-artifact.txt"
+          [[ "$expected" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$release_id" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$release_epoch_id" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$release_epoch_sequence" =~ ^[0-9]+$ ]]
+          [[ "$release_epoch_control_contract_sha" =~ ^[0-9a-f]{40}$ ]]
           echo "unsigned_apk=$apk" >> "$GITHUB_OUTPUT"
           echo "unsigned_sha256=$actual" >> "$GITHUB_OUTPUT"
           echo "expected_fingerprint=$expected" >> "$GITHUB_OUTPUT"
+          echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
+          echo "release_epoch_id=$release_epoch_id" >> "$GITHUB_OUTPUT"
+          echo "release_epoch_sequence=$release_epoch_sequence" >> "$GITHUB_OUTPUT"
+          echo "release_epoch_control_contract_sha=$release_epoch_control_contract_sha" >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6
         if: steps.gate.outputs.need_sign == 'true'
@@ -631,6 +640,10 @@ jobs:
           FINAL_SHA: ${{ steps.handoff.outputs.final_sha }}
           EXPECTED_FINGERPRINT: ${{ steps.artifact.outputs.expected_fingerprint }}
           UNSIGNED_SHA256: ${{ steps.artifact.outputs.unsigned_sha256 }}
+          OMEGA_RELEASE_ID: ${{ steps.artifact.outputs.release_id }}
+          OMEGA_RELEASE_EPOCH_ID: ${{ steps.artifact.outputs.release_epoch_id }}
+          OMEGA_RELEASE_EPOCH_SEQUENCE: ${{ steps.artifact.outputs.release_epoch_sequence }}
+          OMEGA_RELEASE_EPOCH_CONTROL_CONTRACT_SHA: ${{ steps.artifact.outputs.release_epoch_control_contract_sha }}
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -646,13 +659,23 @@ jobs:
           import json,os,pathlib,re
           final=os.environ["FINAL_SHA"]; expected=os.environ["EXPECTED_FINGERPRINT"]
           unsigned=os.environ["UNSIGNED_SHA256"]; signed=os.environ["SIGNED_SHA256"]
-          for x,n in ((final,40),(expected,64),(unsigned,64),(signed,64)):
+          release_id=os.environ["OMEGA_RELEASE_ID"]
+          epoch_id=os.environ["OMEGA_RELEASE_EPOCH_ID"]
+          epoch_sequence=os.environ["OMEGA_RELEASE_EPOCH_SEQUENCE"]
+          epoch_control=os.environ["OMEGA_RELEASE_EPOCH_CONTROL_CONTRACT_SHA"]
+          for x,n in ((final,40),(expected,64),(unsigned,64),(signed,64),(release_id,64),(epoch_id,64),(epoch_control,40)):
               if not re.fullmatch(r"[0-9a-f]{%d}"%n,x): raise SystemExit("OMEGA_SIGNED_PROVENANCE_IDENTITY_INVALID")
+          if not re.fullmatch(r"[0-9]+",epoch_sequence):
+              raise SystemExit("OMEGA_SIGNED_PROVENANCE_EPOCH_SEQUENCE_INVALID")
           payload={
               "schema_version":1,
               "classification":"CANONICAL_SIGNED_RELEASE_CANDIDATE",
               "production_final":False,
               "source_commit":final,
+              "release_id":release_id,
+              "release_epoch_id":epoch_id,
+              "release_epoch_sequence":int(epoch_sequence),
+              "release_epoch_control_contract_sha":epoch_control,
               "unsigned_apk_sha256":unsigned,
               "apk_sha256":signed,
               "signer_certificate_sha256":expected,
