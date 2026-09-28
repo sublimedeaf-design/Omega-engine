@@ -1,0 +1,6 @@
+{
+  "schema_version": 1,
+  "request_id": "pr340-c92a3d82b375",
+  "source_sha": "c92a3d82b3753f57becaaaadec0483da63118bd3",
+  "source_ref": "agent/release_ci/t24-scheduled-refresh"
+}
