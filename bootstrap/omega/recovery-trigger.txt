@@ -1,1 +1,1 @@
-recover-exact 9b23b32f1392ae8308714106c8989577843df6db release/auto-9b23b32f1392 release-federation-second-proof-after-stale-clear
+recover-exact 9b23b32f1392ae8308714106c8989577843df6db release/auto-9b23b32f1392 release-federation-second-proof
