@@ -34,6 +34,9 @@ HANDOFF_PUBLIC_KEY = serialization.load_pem_public_key(
     base64.b64decode(os.environ["HANDOFF_PUBLIC_KEY_PEM_B64"])
 )
 APP_NAME = os.environ.get("APP_NAME", "omega-runner-authority")
+PERSIST_MODE = os.environ.get("AUTHORITY_PERSIST_MODE", "").lower() == "true"
+SEAL_KEY = base64.b64decode(os.environ["AUTHORITY_SEAL_KEY_B64"]) if PERSIST_MODE else None
+PERSIST_BLOB = os.environ.get("AUTHORITY_PERSIST_BLOB", "")
 DATA = {
     "stage": "ready_for_authorization",
     "app": None,
@@ -41,7 +44,23 @@ DATA = {
     "handoff": None,
     "runner_name": None,
     "error": None,
+    "runner_active": False,
 }
+
+def _seal_authority(payload):
+    if not SEAL_KEY or len(SEAL_KEY) != 32:
+        raise RuntimeError("AUTHORITY_SEAL_KEY_INVALID")
+    nonce = os.urandom(12)
+    raw = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    ct = AESGCM(SEAL_KEY).encrypt(nonce, raw, b"omega-authority-persist-v1")
+    return base64.urlsafe_b64encode(nonce + ct).decode("ascii")
+
+def _unseal_authority(blob):
+    if not SEAL_KEY or len(SEAL_KEY) != 32:
+        raise RuntimeError("AUTHORITY_SEAL_KEY_INVALID")
+    raw = base64.urlsafe_b64decode(blob.encode("ascii"))
+    payload = AESGCM(SEAL_KEY).decrypt(raw[:12], raw[12:], b"omega-authority-persist-v1")
+    return json.loads(payload.decode("utf-8"))
 
 def _headers(token=None):
     h = {
@@ -131,6 +150,7 @@ def _download_runner(root):
 
 def _runner_worker(registration_token):
     root = pathlib.Path("/tmp/omega-authority-runner")
+    DATA["runner_active"] = True
     try:
         DATA["stage"] = "runner_provisioning"
         print("OMEGA_AUTHORITY_RUNNER_PROVISION_START", flush=True)
@@ -180,8 +200,12 @@ def _runner_worker(registration_token):
         DATA["error"] = code
         print(f"OMEGA_AUTHORITY_RUNNER_ERROR {code}", flush=True)
     finally:
-        revoked = _revoke_installation()
-        DATA["installation_revoked"] = revoked
+        if PERSIST_MODE:
+            DATA["installation_revoked"] = False
+        else:
+            revoked = _revoke_installation()
+            DATA["installation_revoked"] = revoked
+        DATA["runner_active"] = False
         try:
             shutil.rmtree(root)
         except Exception:
@@ -206,7 +230,7 @@ def index():
         "setup_url": PUBLIC_BASE_URL + "/installed",
         "setup_on_update": False,
         "public": False,
-        "description": "One-time OMEGA runner registration authority. Administration write is used only to mint one ephemeral repository runner token; no Android signing key is created or exported.",
+        "description": "Durable OMEGA runner authority. Administration write is used only to mint ephemeral repository runner tokens; no Android signing key is created or exported.",
         "hook_attributes": {"url": PUBLIC_BASE_URL + "/hook", "active": False},
         "default_permissions": {"administration": "write"},
         "default_events": [],
@@ -217,10 +241,10 @@ def index():
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>OMEGA runner authority</title></head>
 <body style="font-family:sans-serif;background:#07111f;color:#eef5ff;max-width:760px;margin:40px auto;padding:24px">
-<h1>OMEGA · one-time runner authority</h1>
-<p>Deze tijdelijke privé GitHub App vraagt alleen <b>Repository Administration: write</b> voor <b>{html.escape(TARGET_OWNER + "/" + TARGET_REPO)}</b>.
+<h1>OMEGA · durable runner authority</h1>
+<p>Deze privé GitHub App vraagt alleen <b>Repository Administration: write</b> voor <b>{html.escape(TARGET_OWNER + "/" + TARGET_REPO)}</b>.
 Dat recht wordt uitsluitend gebruikt om één GitHub self-hosted runner registration token te maken. De canonical Android signing key wordt niet vervangen of geëxporteerd.</p>
-<p>Installeer de App alleen op <b>{html.escape(TARGET_REPO)}</b>. Na de eerste ephemeral runner-job wordt de installatie automatisch weer ingetrokken.</p>
+<p>Installeer de App alleen op <b>{html.escape(TARGET_REPO)}</b>. De App-installatie blijft geautoriseerd zodat OMEGA later automatisch nieuwe disposable runners kan registreren; iedere runner zelf blijft ephemeral.</p>
 <form method="post" action="{action}">
 <input type="hidden" name="manifest" value="{m}">
 <button style="font-size:18px;padding:14px 20px">GitHub-toestemming starten</button>
@@ -300,6 +324,14 @@ def installed():
         }
         DATA["handoff"] = _hybrid_encrypt(payload)
         DATA["installation_id"] = installation_id
+        if PERSIST_MODE:
+            persist_blob = _seal_authority({
+                "app_id": DATA["app"]["id"],
+                "pem": DATA["app"]["pem"],
+                "slug": DATA["app"]["slug"],
+                "installation_id": installation_id,
+            })
+            print(f"OMEGA_AUTHORITY_PERSIST_BLOB={persist_blob}", flush=True)
         DATA["stage"] = "runner_starting"
         threading.Thread(
             target=_runner_worker,
@@ -313,6 +345,67 @@ def installed():
 </body></html>"""
     except Exception as exc:
         return _fail("INSTALLATION_FLOW_FAILED", exc)
+
+def _mint_registration_token():
+    jwt_token = _app_jwt()
+    installation_id = DATA.get("installation_id")
+    token_resp = requests.post(
+        f"{API}/app/installations/{installation_id}/access_tokens",
+        headers=_headers(jwt_token),
+        json={"repositories": [TARGET_REPO], "permissions": {"administration": "write"}},
+        timeout=20,
+    )
+    token_resp.raise_for_status()
+    installation_token = token_resp.json()["token"]
+    reg = requests.post(
+        f"{API}/repos/{TARGET_OWNER}/{TARGET_REPO}/actions/runners/registration-token",
+        headers=_headers(installation_token), timeout=20,
+    )
+    reg.raise_for_status()
+    return reg.json()["token"], installation_token
+
+def _queued_omega_ci(installation_token):
+    runs = requests.get(
+        f"{API}/repos/{TARGET_OWNER}/{TARGET_REPO}/actions/runs?status=queued&per_page=50",
+        headers=_headers(installation_token), timeout=20,
+    )
+    if runs.status_code != 200:
+        return False
+    for run in runs.json().get("workflow_runs", []):
+        jobs = requests.get(run["jobs_url"], headers=_headers(installation_token), timeout=20)
+        if jobs.status_code != 200:
+            continue
+        for job in jobs.json().get("jobs", []):
+            labels = set(job.get("labels") or [])
+            if job.get("status") == "queued" and "self-hosted" in labels and "omega-ci" in labels:
+                return True
+    return False
+
+def _authority_monitor():
+    while PERSIST_MODE:
+        try:
+            if DATA.get("app") and DATA.get("installation_id") and not DATA.get("runner_active"):
+                registration_token, installation_token = _mint_registration_token()
+                if _queued_omega_ci(installation_token):
+                    DATA["stage"] = "runner_starting"
+                    threading.Thread(target=_runner_worker, args=(registration_token,), daemon=True).start()
+                else:
+                    registration_token = ""
+                    DATA["stage"] = "durable_authority_ready"
+        except Exception as exc:
+            DATA["error"] = f"AUTHORITY_MONITOR:{type(exc).__name__}"
+        time.sleep(30)
+
+if PERSIST_MODE and PERSIST_BLOB:
+    try:
+        persisted = _unseal_authority(PERSIST_BLOB)
+        DATA["app"] = {"id": persisted["app_id"], "pem": persisted["pem"], "slug": persisted["slug"]}
+        DATA["installation_id"] = int(persisted["installation_id"])
+        DATA["stage"] = "durable_authority_ready"
+        threading.Thread(target=_authority_monitor, daemon=True).start()
+    except Exception as exc:
+        DATA["stage"] = "error"
+        DATA["error"] = f"AUTHORITY_RESTORE:{type(exc).__name__}"
 
 @app.get("/healthz")
 def healthz():
