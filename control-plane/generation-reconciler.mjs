@@ -4,6 +4,11 @@ const SHA = /^[0-9a-f]{40}$/;
 const RUN_URL = /\/actions\/runs\/([0-9]+)$/;
 const SAFE_CONTROL_DRIFT = ["federation/epochs/", "bootstrap/omega/"];
 const CONTROL_BOUND_CONTEXTS = [
+  // Recovery proof is part of the release generation. A successful recovery from
+  // an older control contract must be re-executed before candidate evidence can
+  // consume it; otherwise mutable latest-status state can point at stale proof.
+  "omega/hosted-recovery",
+  "omega/recovery-attestation",
   "omega/federation-v3-release",
   "omega/candidate-evidence-root",
   "omega/release-evidence-staged",
@@ -407,6 +412,7 @@ export const POLICY = Object.freeze({
   requireCurrentControlContract: true,
   controlDriftAction: "dispatch-release-orchestrator",
   controlBoundStatusRule: "status-run-head-must-be-control-contract-or-safe-descendant",
+  recoveryProofGenerationBound: true,
   stages: [
     "upstream-proof",
     "recovery",

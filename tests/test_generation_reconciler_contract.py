@@ -24,6 +24,9 @@ def test_generation_reconciler_is_level_triggered_and_reads_full_status_history(
     assert 'SAFE_CONTROL_DRIFT = ["federation/epochs/", "bootstrap/omega/"]' in text
     assert 'controlCompatibleStatus' in text
     assert 'generationAwareStatusMap' in text
+    assert '"omega/hosted-recovery"' in text
+    assert '"omega/recovery-attestation"' in text
+    assert 'recoveryProofGenerationBound: true' in text
     assert 'omega/control-plane/generation-reconciler' in text
 
 
