@@ -1,1 +1,1 @@
-validate-exact-pr 6cf85a6a4bada8bb31b3227de4d489b063354b87 hardening/upstream-first-reuse upstream-first-reuse-clock-fixed
+validate-exact-pr 296fd4b5e0cfeaf6e3995940f098194d5864de7d android/command-deck-gui-v1 android-command-deck-gui-v1
