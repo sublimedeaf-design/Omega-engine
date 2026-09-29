@@ -3,7 +3,7 @@ name: OMEGA Ephemeral Render Runner Token Broker
 on:
   push:
     branches:
-      - rescue/render-runner-token-28a3e81-v1
+      - main
 
 permissions:
   contents: read
