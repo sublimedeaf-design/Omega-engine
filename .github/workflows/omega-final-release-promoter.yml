@@ -88,7 +88,7 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          authority="$(GH_TOKEN="$CONTROL_GH_TOKEN" gh api "/repos/$CONTROL_REPOSITORY/contents/federation/epochs/current.json?ref=main" --jq '.content' | python3 -c 'import base64,sys; print(base64.b64decode("".join(sys.stdin.read().split()),validate=True).decode(),end="")')"
+          authority="$(GH_TOKEN="$CONTROL_GH_TOKEN" gh api "/repos/$CONTROL_REPOSITORY/contents/federation/epochs/current.json?ref=$GITHUB_REF_NAME" --jq '.content' | python3 -c 'import base64,sys; print(base64.b64decode("".join(sys.stdin.read().split()),validate=True).decode(),end="")')"
           readarray -t epoch_meta < <(AUTHORITY="$authority" python3 <<'PY'
           import json,os,re
           d=json.loads(os.environ["AUTHORITY"]); p=d.get("primary") or {}; rr=d.get("release_rollover") or {}
@@ -160,7 +160,7 @@ jobs:
           fi
 
           # Re-read the epoch as a compare-and-swap fence immediately before promotion.
-          authority="$(GH_TOKEN="$CONTROL_GH_TOKEN" gh api "/repos/$CONTROL_REPOSITORY/contents/federation/epochs/current.json?ref=main" --jq '.content' | python3 -c 'import base64,sys; print(base64.b64decode("".join(sys.stdin.read().split()),validate=True).decode(),end="")')"
+          authority="$(GH_TOKEN="$CONTROL_GH_TOKEN" gh api "/repos/$CONTROL_REPOSITORY/contents/federation/epochs/current.json?ref=$GITHUB_REF_NAME" --jq '.content' | python3 -c 'import base64,sys; print(base64.b64decode("".join(sys.stdin.read().split()),validate=True).decode(),end="")')"
           AUTHORITY="$authority" CANDIDATE="$candidate" SOURCE_REF="$source_ref" python3 <<'PY'
           import json,os
           d=json.loads(os.environ["AUTHORITY"]); p=d.get("primary") or {}
@@ -380,7 +380,7 @@ jobs:
 
           current_epoch="$RUNNER_TEMP/final-current-federation-epoch.json"
           GH_TOKEN="$CONTROL_GH_TOKEN" gh api \
-            "/repos/$CONTROL_REPOSITORY/contents/federation/epochs/current.json?ref=main" \
+            "/repos/$CONTROL_REPOSITORY/contents/federation/epochs/current.json?ref=$GITHUB_REF_NAME" \
             --jq '.content' | tr -d '\n' | base64 -d > "$current_epoch"
           test -s "$current_epoch"
 
@@ -596,7 +596,7 @@ jobs:
           set -Eeuo pipefail
           gh workflow run omega-post-live-verification.yml \
             -R "$GITHUB_REPOSITORY" \
-            --ref main \
+            --ref "$GITHUB_REF_NAME" \
             -f final_sha="$FINAL_SHA" \
             -f promoter_run_id="$PROMOTER_RUN_ID"
           echo "OMEGA_POST_LIVE_DISPATCHED sha=$FINAL_SHA promoter_run=$PROMOTER_RUN_ID"
