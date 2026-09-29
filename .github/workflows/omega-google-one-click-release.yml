@@ -44,7 +44,7 @@ jobs:
           [[ "$source" =~ ^[0-9a-f]{40}$ ]] || { echo OMEGA_GOOGLE_SOURCE_INVALID >&2; exit 64; }
           active=false
           post_distribution=false
-          if [ "$EVENT_NAME" = workflow_dispatch ]; then
+          if [ "$EVENT_NAME" = workflow_dispatch ] || [ "$EVENT_NAME" = push ]; then
             for ctx in omega/google-one-click omega/system-health; do
               GH_TOKEN="$OMEGA_BOOTSTRAP_TOKEN" gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$source" \
                 -f state=pending -f context="$ctx" \
