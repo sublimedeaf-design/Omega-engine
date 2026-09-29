@@ -87,7 +87,7 @@ jobs:
           [ "$ref_tip" = "$candidate" ] || { echo "OMEGA_EVIDENCE_ROOT_TRIGGER_STALE:$candidate!=$ref_tip" >&2; exit 65; }
 
           artifacts="$(GH_TOKEN="$CONTROL_GH_TOKEN" gh api "/repos/$GITHUB_REPOSITORY/actions/runs/$RECOVERY_RUN_ID/artifacts?per_page=100")"
-          ARTIFACT_PAYLOAD="$artifacts" SOURCE_SHA="$candidate" RECOVERY_RUN_ID="$RECOVERY_RUN_ID" python3 <<'PY'
+          missing="$(ARTIFACT_PAYLOAD="$artifacts" SOURCE_SHA="$candidate" RECOVERY_RUN_ID="$RECOVERY_RUN_ID" python3 <<'PY'
           import json,os
           p=json.loads(os.environ["ARTIFACT_PAYLOAD"])
           sha=os.environ["SOURCE_SHA"]; run=os.environ["RECOVERY_RUN_ID"]
@@ -96,11 +96,36 @@ jobs:
               f"omega-recovery-attestation-{sha}-{run}",
           }
           live={str(a.get("name") or "") for a in p.get("artifacts",[]) if not a.get("expired")}
-          missing=sorted(required-live)
-          if missing:
-              raise SystemExit("OMEGA_EVIDENCE_ROOT_RECOVERY_ARTIFACTS_MISSING:"+",".join(missing))
-          print("OMEGA_EVIDENCE_ROOT_RECOVERY_ARTIFACTS_VERIFIED:"+",".join(sorted(required)))
+          print(",".join(sorted(required-live)))
           PY
+          )"
+          if [ -n "$missing" ]; then
+            run_head="$(printf '%s' "$run_json" | jq -r '.head_sha // empty')"
+            [[ "$run_head" =~ ^[0-9a-f]{40}$ ]] || { echo "OMEGA_EVIDENCE_ROOT_RECOVERY_HEAD_INVALID" >&2; exit 74; }
+            workflow_b64="$(GH_TOKEN="$CONTROL_GH_TOKEN" gh api "/repos/$GITHUB_REPOSITORY/contents/.github/workflows/omega-hosted-recovery-failover.yml?ref=$run_head" --jq '.content // empty' 2>/dev/null || true)"
+            jobs="$(GH_TOKEN="$CONTROL_GH_TOKEN" gh api "/repos/$GITHUB_REPOSITORY/actions/runs/$RECOVERY_RUN_ID/jobs?per_page=100")"
+            stale_contract=false
+            if [ -n "$workflow_b64" ] && printf '%s' "$workflow_b64" | tr -d '\r\n' | base64 -d 2>/dev/null | grep -q 'OMEGA_HOSTED_RECOVERY_STALE_NOOP'; then
+              stale_contract=true
+            fi
+            stale_shape="$(JOBS_PAYLOAD="$jobs" python3 <<'PY'
+          import json,os
+          p=json.loads(os.environ["JOBS_PAYLOAD"])
+          by={str(j.get("name") or ""):str(j.get("conclusion") or "") for j in p.get("jobs",[])}
+          print("true" if by.get("pre_recovery")=="success" and by.get("post_recovery")=="skipped" else "false")
+          PY
+            )"
+            if [ "$stale_contract" = true ] && [ "$stale_shape" = true ]; then
+              echo "sha=$candidate" >> "$GITHUB_OUTPUT"
+              echo "source_ref=$source_ref" >> "$GITHUB_OUTPUT"
+              echo "ready=false" >> "$GITHUB_OUTPUT"
+              echo "OMEGA_EVIDENCE_ROOT_STALE_RECOVERY_NOOP run=$RECOVERY_RUN_ID head=$run_head missing=$missing"
+              exit 0
+            fi
+            echo "OMEGA_EVIDENCE_ROOT_RECOVERY_ARTIFACTS_MISSING:$missing" >&2
+            exit 74
+          fi
+          echo "OMEGA_EVIDENCE_ROOT_RECOVERY_ARTIFACTS_VERIFIED:omega-hosted-recovery-$candidate,omega-recovery-attestation-$candidate-$RECOVERY_RUN_ID"
 
           statuses="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/$candidate/status?per_page=100")"
           set +e
