@@ -78,19 +78,12 @@ function runId(map, context) {
   return match ? match[1] : "";
 }
 
-async function controlCompatibleStatus(controlToken, row, controlContractSha) {
-  if (!row || String(row.state || "") !== "success") return false;
-  const match = RUN_URL.exec(String(row.target_url || ""));
-  if (!match) return false;
-
-  const run = await gh(controlToken, `/repos/${CONTROL_REPO}/actions/runs/${match[1]}`);
-  const head = String(run.head_sha || "");
-  if (!SHA.test(head)) return false;
-  if (head === controlContractSha) return true;
-
+async function safeControlDescendant(controlToken, baseSha, headSha) {
+  if (!SHA.test(baseSha) || !SHA.test(headSha)) return false;
+  if (baseSha === headSha) return true;
   const compare = await gh(
     controlToken,
-    `/repos/${CONTROL_REPO}/compare/${controlContractSha}...${head}?per_page=100`,
+    `/repos/${CONTROL_REPO}/compare/${baseSha}...${headSha}?per_page=100`,
   );
   if (!["ahead", "identical"].includes(String(compare.status || ""))) return false;
   const files = Array.isArray(compare.files) ? compare.files : [];
@@ -98,6 +91,16 @@ async function controlCompatibleStatus(controlToken, row, controlContractSha) {
     const name = String(file.filename || "");
     return SAFE_CONTROL_DRIFT.some(prefix => name.startsWith(prefix));
   });
+}
+
+async function controlCompatibleStatus(controlToken, row, controlContractSha) {
+  if (!row || String(row.state || "") !== "success") return false;
+  const match = RUN_URL.exec(String(row.target_url || ""));
+  if (!match) return false;
+
+  const run = await gh(controlToken, `/repos/${CONTROL_REPO}/actions/runs/${match[1]}`);
+  const head = String(run.head_sha || "");
+  return safeControlDescendant(controlToken, controlContractSha, head);
 }
 
 async function generationAwareStatusMap(controlToken, map, controlContractSha) {
@@ -152,10 +155,10 @@ async function postState(privateToken, sha, state, description, targetUrl) {
 }
 
 async function observedEpoch(controlToken, sourceSha) {
-  const row = await gh(
-    controlToken,
-    `/repos/${CONTROL_REPO}/contents/federation/epochs/current.json?ref=main`,
-  );
+  const [row, controlMain] = await Promise.all([
+    gh(controlToken, `/repos/${CONTROL_REPO}/contents/federation/epochs/current.json?ref=main`),
+    gh(controlToken, `/repos/${CONTROL_REPO}/commits/main`),
+  ]);
   const raw = Buffer.from(String(row.content || "").replace(/\n/g, ""), "base64").toString("utf8");
   const epoch = JSON.parse(raw);
   const primary = epoch.primary || {};
@@ -164,21 +167,29 @@ async function observedEpoch(controlToken, sourceSha) {
   const id = String(releaseEpoch.id || "");
   const source = String(primary.source_sha || "");
   const controlContractSha = String(releaseEpoch.control_contract_sha || "");
+  const controlMainSha = String(controlMain.sha || "");
   const rolloverStage = String(rollover.stage || "");
-  const pass =
+  const controlCurrent = await safeControlDescendant(controlToken, controlContractSha, controlMainSha);
+  const sourceCurrent = source === sourceSha;
+  const certified =
     epoch.state === "PASS" &&
     primary.certification_state === "PASS" &&
-    source === sourceSha &&
     /^[0-9a-f]{64}$/.test(id) &&
     SHA.test(controlContractSha) &&
     ["CERTIFIED_PASS", "LIVE_CERTIFIED"].includes(rolloverStage) &&
     String(rollover.release_epoch_id || "") === id;
+  const pass = certified && sourceCurrent && controlCurrent;
   return {
     pass,
+    certified,
+    sourceCurrent,
+    controlCurrent,
+    needsRollover: !sourceCurrent || !controlCurrent,
     source,
     id,
     sequence: Number(releaseEpoch.sequence || 0),
     controlContractSha,
+    controlMainSha,
     rolloverStage,
   };
 }
@@ -289,7 +300,41 @@ export async function reconcileGeneration({ privateToken, controlToken, targetUr
 
   const epoch = await observedEpoch(controlToken, sha);
   if (!epoch.pass) {
-    await postState(privateToken, sha, "pending", "epoch not bound to current private main", targetUrl);
+    if (epoch.needsRollover) {
+      const rolloverActive =
+        (await activeRuns(controlToken, "omega-release-federation-rollover.yml")) +
+        (await activeRuns(controlToken, "omega-release-orchestrator-arm.yml"));
+      let result;
+      if (rolloverActive > 0) {
+        result = { dispatched: false, reason: "already_active", active: rolloverActive };
+      } else {
+        result = await dispatch(controlToken, "omega-release-orchestrator-arm.yml", {});
+      }
+      await postState(
+        privateToken,
+        sha,
+        "pending",
+        `epoch-rollover:${result.reason} control=${epoch.controlMainSha.slice(0, 12)}`,
+        targetUrl,
+      );
+      return {
+        ok: true,
+        source_sha: sha,
+        observed_generation: null,
+        action: result.reason,
+        stage: "epoch-rollover",
+        workflow: "omega-release-orchestrator-arm.yml",
+        active: result.active,
+        epoch,
+      };
+    }
+    await postState(
+      privateToken,
+      sha,
+      "pending",
+      `wait-epoch-certification stage=${epoch.rolloverStage || "none"}`,
+      targetUrl,
+    );
     return { ok: true, source_sha: sha, observed_generation: null, action: "wait_epoch", epoch };
   }
 
@@ -359,6 +404,8 @@ export const POLICY = Object.freeze({
   staleStatusSource: "full-status-history-newest-per-context",
   generationFields: ["source_sha", "release_epoch_id", "control_contract_sha"],
   requireCertifiedRollover: true,
+  requireCurrentControlContract: true,
+  controlDriftAction: "dispatch-release-orchestrator",
   controlBoundStatusRule: "status-run-head-must-be-control-contract-or-safe-descendant",
   stages: [
     "upstream-proof",
