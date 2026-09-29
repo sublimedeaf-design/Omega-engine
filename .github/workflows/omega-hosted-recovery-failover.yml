@@ -12,6 +12,7 @@ on:
 
 permissions:
   contents: read
+  actions: write
 
 # Recovery consumes caches as untrusted acceleration only. Never allow this
 # proof workflow to publish/overwrite cache entries; model bytes are still
@@ -893,6 +894,28 @@ jobs:
             -f context="omega/recovery-attestation" \
             -f description="$attest_desc" \
             -f target_url="$target" >/dev/null
+
+      - name: Dispatch Candidate Evidence Root for exact successful recovery
+        if: ${{ success() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          workflow=omega-candidate-evidence-root.yml
+          active="$(
+            {
+              gh api "/repos/$GITHUB_REPOSITORY/actions/workflows/$workflow/runs?status=queued&per_page=20" --jq '.total_count'
+              gh api "/repos/$GITHUB_REPOSITORY/actions/workflows/$workflow/runs?status=in_progress&per_page=20" --jq '.total_count'
+            } | awk '{s+=$1} END{print s+0}'
+          )"
+          if [ "$active" -gt 0 ]; then
+            echo "OMEGA_RECOVERY_EVIDENCE_ROOT_ALREADY_ACTIVE count=$active recovery_run=$GITHUB_RUN_ID"
+            exit 0
+          fi
+          gh workflow run "$workflow" -R "$GITHUB_REPOSITORY" --ref main \
+            -f recovery_run_id="$GITHUB_RUN_ID"
+          echo "OMEGA_RECOVERY_EVIDENCE_ROOT_DISPATCHED recovery_run_id=$GITHUB_RUN_ID"
 
   pre_recovery_failure_status:
     needs: [pin, pre_recovery]

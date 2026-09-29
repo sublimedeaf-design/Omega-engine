@@ -49,6 +49,9 @@ jobs:
           node --check control-plane/certify.mjs
           node --check control-plane/certify-github.mjs
           node --check control-plane/reconcile.mjs
+          node --check control-plane/generation-reconciler.mjs
+          node --check control-plane/generation-reconciler-github.mjs
+          python3 tests/test_generation_reconciler_contract.py
 
       - name: Publish exact-SHA control-plane integrity
         if: ${{ always() }}

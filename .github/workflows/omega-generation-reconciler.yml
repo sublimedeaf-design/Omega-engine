@@ -1,0 +1,38 @@
+name: OMEGA Generation Reconciler
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "4,14,24,34,44,54 * * * *"
+  push:
+    branches: [main]
+    paths:
+      - "control-plane/generation-reconciler.mjs"
+      - "control-plane/generation-reconciler-github.mjs"
+      - ".github/workflows/omega-generation-reconciler.yml"
+      - ".github/workflows/omega-hosted-recovery-failover.yml"
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: omega-generation-reconciler
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Reconcile exact private generation
+        env:
+          OMEGA_PRIVATE_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          OMEGA_CONTROL_TOKEN: ${{ github.token }}
+          OMEGA_RECONCILER_TARGET_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: node control-plane/generation-reconciler-github.mjs
