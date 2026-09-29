@@ -99,12 +99,22 @@ jobs:
             key="$(mktemp)"
             trap 'rm -f "$key"' EXIT
             umask 077
-            printf '%s' "$OMEGA_ANDROID_KEYSTORE_B64" | base64 -d > "$key" || { echo OMEGA_SIGNER_ESCROW_DECODE_FAILED >&2; exit 32; }
-            actual="$(keytool -list -v -keystore "$key" -storepass android -alias androiddebugkey 2>/dev/null               | sed -n 's/.*SHA256: //p' | head -1 | tr -d ':' | tr 'A-F' 'a-f')"
-            [ "$actual" = "$expected" ] || { echo OMEGA_SIGNER_ESCROW_FINGERPRINT_MISMATCH >&2; exit 33; }
-            publish success "omega/signer/key-availability" "hosted canonical signer escrow available and fingerprint verified"
-            publish success "omega/signer/escrow" "hosted canonical signer escrow fingerprint verified"
-            echo "OMEGA_SIGNER_ARM_HOSTED_ESCROW_READY sha=$sha"
+            if ! printf '%s' "$OMEGA_ANDROID_KEYSTORE_B64" | base64 -d > "$key" 2>/dev/null; then
+              publish pending "omega/signer/key-availability" "hosted escrow unreadable; canonical cache/runtime fallback required"
+              publish pending "omega/signer/escrow" "hosted escrow decode failed; fingerprint-bound fallback remains eligible"
+              echo "OMEGA_SIGNER_ARM_HOSTED_ESCROW_DECODE_INVALID_FALLBACK sha=$sha"
+            else
+              actual="$(keytool -list -v -keystore "$key" -storepass android -alias androiddebugkey 2>/dev/null | sed -n 's/.*SHA256: //p' | head -1 | tr -d ':' | tr 'A-F' 'a-f' || true)"
+              if [ "$actual" = "$expected" ]; then
+                publish success "omega/signer/key-availability" "hosted canonical signer escrow available and fingerprint verified"
+                publish success "omega/signer/escrow" "hosted canonical signer escrow fingerprint verified"
+                echo "OMEGA_SIGNER_ARM_HOSTED_ESCROW_READY sha=$sha"
+              else
+                publish pending "omega/signer/key-availability" "hosted escrow fingerprint invalid; canonical cache/runtime fallback required"
+                publish pending "omega/signer/escrow" "hosted escrow rejected; fingerprint-bound fallback remains eligible"
+                echo "OMEGA_SIGNER_ARM_HOSTED_ESCROW_FINGERPRINT_INVALID_FALLBACK sha=$sha"
+              fi
+            fi
           else
             publish pending "omega/signer/key-availability" "hosted escrow unavailable; canonical alternate signer backends remain eligible"
             publish pending "omega/signer/escrow" "hosted escrow unavailable; exact signer workflow will select a fingerprint-bound fallback"
