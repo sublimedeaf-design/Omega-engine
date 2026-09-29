@@ -126,6 +126,36 @@ jobs:
               mode=exact_candidate
             fi
           fi
+          if [ "$EVENT_NAME" = schedule ]; then
+            epoch_b64="$(gh api "/repos/$GITHUB_REPOSITORY/contents/federation/epochs/current.json?ref=main" --jq '.content // empty' 2>/dev/null || true)"
+            epoch_json="$(printf '%s' "$epoch_b64" | tr -d '\r\n' | base64 -d 2>/dev/null || true)"
+            epoch_admission="$(EPOCH_JSON="$epoch_json" CANDIDATE_SHA="$sha" python3 - <<'PY' 2>/dev/null || true
+          import json,os,re
+          candidate=os.environ.get("CANDIDATE_SHA","")
+          try:
+              d=json.loads(os.environ.get("EPOCH_JSON",""))
+          except Exception:
+              raise SystemExit(0)
+          source=str((d.get("primary") or {}).get("source_sha") or "")
+          stage=str((d.get("release_rollover") or {}).get("stage") or "")
+          state=str(d.get("state") or "")
+          eid=str((d.get("release_epoch") or {}).get("id") or "")
+          control=str((d.get("release_epoch") or {}).get("control_contract_sha") or "")
+          ok=(source==candidate and state=="PASS" and stage=="CERTIFIED_PASS" and
+              re.fullmatch(r"[0-9a-f]{64}",eid) and re.fullmatch(r"[0-9a-f]{40}",control))
+          if ok:
+              print("|".join((source,eid,control,stage,state)))
+          PY
+            )"
+            if [ -z "$epoch_admission" ]; then
+              echo "sha=$sha" >> "$GITHUB_OUTPUT"
+              echo "need_run=false" >> "$GITHUB_OUTPUT"
+              echo "OMEGA_HOSTED_RECOVERY_SCHEDULE_EPOCH_NOT_CERTIFIED_NOOP sha=$sha"
+              exit 0
+            fi
+            echo "OMEGA_HOSTED_RECOVERY_SCHEDULE_EPOCH_ADMITTED sha=$sha epoch=$epoch_admission"
+          fi
+
           if [ "$mode" = main ]; then
             protocol_ok=true
             for required in scripts/install_locked_ci_deps.py scripts/materialize_gradle_verification.py scripts/validate_supply_chain_locks.py deploy/hosted/recovery-contract.json; do
