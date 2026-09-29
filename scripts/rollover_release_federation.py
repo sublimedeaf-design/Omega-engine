@@ -326,7 +326,7 @@ safe_unfinished_supersede = (
         or not same_ref
     )
 )
-safe_certified_pre_live_supersede = (
+certified_pre_live_frozen = (
     authority_pass
     and same_target
     and same_ref
@@ -337,14 +337,36 @@ if not authority_pass and not safe_unfinished_supersede:
     raise SystemExit("OMEGA_FEDERATION_AUTHORITY_NOT_PASS")
 if live_certified and same_target and same_ref and control_deviation:
     raise SystemExit("OMEGA_RELEASE_EPOCH_LIVE_CERTIFIED_IMMUTABLE")
+if certified_pre_live_frozen:
+    current_epoch_id = str(prior_release_epoch.get("id") or "")
+    if not HEX64.fullmatch(current_epoch_id):
+        raise SystemExit("OMEGA_RELEASE_EPOCH_CURRENT_ID_INVALID")
+    print(
+        "OMEGA_RELEASE_EPOCH_CERTIFIED_CONTROL_FREEZE:"
+        f"epoch={current_epoch_id}:"
+        f"contract={prior_control_contract}:"
+        f"new_control={CONTROL_CONTRACT_SHA}"
+    )
+    print(
+        json.dumps(
+            {
+                "ok": True,
+                "already_current": True,
+                "control_frozen": True,
+                "control_drift_staged_for_next_execution": True,
+                "source_sha": TARGET,
+                "source_ref": SOURCE_REF,
+                "release_epoch_id": current_epoch_id,
+                "control_contract_sha": prior_control_contract,
+                "state": prior_state,
+            },
+            sort_keys=True,
+        )
+    )
+    raise SystemExit(0)
 if safe_unfinished_supersede:
     print(
         f"OMEGA_RELEASE_EPOCH_SUPERSEDE_UNFINISHED_CONTROL_DEVIATION:"
-        f"{prior_control_contract}->{CONTROL_CONTRACT_SHA}"
-    )
-if safe_certified_pre_live_supersede:
-    print(
-        f"OMEGA_RELEASE_EPOCH_SUPERSEDE_CERTIFIED_PRE_LIVE_CONTROL_DEVIATION:"
         f"{prior_control_contract}->{CONTROL_CONTRACT_SHA}"
     )
 
@@ -416,7 +438,9 @@ seed_core = {
         "supersedes_unfinished_epoch_on_control_deviation": True,
         "supersedes_unfinished_epoch_on_new_private_generation": True,
         "current_private_main_is_generation_fence": True,
-        "supersedes_certified_pre_live_epoch_on_control_deviation": True,
+        "supersedes_certified_pre_live_epoch_on_control_deviation": False,
+        "certified_control_contract_frozen": True,
+        "control_drift_applies_to_next_execution": True,
         "live_certified_epoch_is_immutable": True,
     },
 }
@@ -558,7 +582,9 @@ projection["release_epoch"] = {
     "supersedes_unfinished_epoch_on_control_deviation": True,
     "supersedes_unfinished_epoch_on_new_private_generation": True,
     "current_private_main_is_generation_fence": True,
-    "supersedes_certified_pre_live_epoch_on_control_deviation": True,
+    "supersedes_certified_pre_live_epoch_on_control_deviation": False,
+        "certified_control_contract_frozen": True,
+        "control_drift_applies_to_next_execution": True,
     "live_certified_epoch_is_immutable": True,
 }
 by_repo = {row["repository"]: row for row in projection["peers"]}
