@@ -115,6 +115,14 @@ jobs:
             -f description="execution-scoped drift measured; immutable 70ef candidate locked" \
             -f target_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/36624919814" >/dev/null
 
+          # Rebind the staged-evidence status to the same immutable stager run.
+          # The signer requires both handoff statuses to identify one provenance run.
+          GH_TOKEN="$PRIVATE_TOKEN" gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$SOURCE_SHA" \
+            -f state=success \
+            -f context="omega/release-evidence-staged" \
+            -f description="canonical staged evidence pinned to immutable unsigned handoff" \
+            -f target_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$LOCK_RUN_ID" >/dev/null
+
           active="$(
             {
               GH_TOKEN="$CONTROL_TOKEN" gh api "/repos/$GITHUB_REPOSITORY/actions/workflows/omega-canonical-android-signer.yml/runs?status=queued&per_page=20" --jq '.total_count'
