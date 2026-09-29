@@ -96,28 +96,34 @@ def _revoke_installation():
         return False
 
 def _download_runner(root):
-    r = requests.get(
-        f"{API}/repos/actions/runner/releases/latest",
-        headers=_headers(),
-        timeout=30,
-    )
-    r.raise_for_status()
-    release = r.json()
-    assets = [
-        a for a in release.get("assets", [])
-        if re.fullmatch(r"actions-runner-linux-x64-[0-9.]+\.tar\.gz", str(a.get("name") or ""))
-    ]
-    if len(assets) != 1:
-        raise RuntimeError("RUNNER_ASSET_INVALID")
+    version = "2.337.0"
+    url = f"https://github.com/actions/runner/releases/download/v{version}/actions-runner-linux-x64-{version}.tar.gz"
+    expected_sha256 = "70920811a4f8ad4328818682bca5c6469c1c942fab52448868071d0063816613"
     with tempfile.NamedTemporaryFile(suffix=".tar.gz", delete=False) as fh:
         archive = pathlib.Path(fh.name)
     try:
-        with requests.get(assets[0]["browser_download_url"], stream=True, timeout=120) as dl:
-            dl.raise_for_status()
+        DATA["stage"] = "runner_download"
+        print(f"OMEGA_AUTHORITY_RUNNER_DOWNLOAD version={version}", flush=True)
+        with requests.get(
+            url,
+            stream=True,
+            timeout=(20, 300),
+            headers={"User-Agent": "OMEGA-Runner-Authority-Broker/1.2"},
+        ) as dl:
+            if dl.status_code != 200:
+                raise RuntimeError(f"RUNNER_DOWNLOAD_HTTP_{dl.status_code}")
+            import hashlib
+            digest = hashlib.sha256()
             with archive.open("wb") as out:
                 for chunk in dl.iter_content(chunk_size=1024 * 1024):
                     if chunk:
                         out.write(chunk)
+                        digest.update(chunk)
+        actual = digest.hexdigest()
+        if actual != expected_sha256:
+            raise RuntimeError(f"RUNNER_ARCHIVE_SHA256_MISMATCH:{actual}")
+        DATA["stage"] = "runner_extract"
+        print(f"OMEGA_AUTHORITY_RUNNER_DOWNLOAD_PASS sha256={actual}", flush=True)
         with tarfile.open(archive, "r:gz") as tf:
             tf.extractall(root, filter="data")
     finally:
