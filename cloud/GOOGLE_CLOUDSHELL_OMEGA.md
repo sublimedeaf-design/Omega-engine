@@ -6,7 +6,7 @@ This performs the missing independent-node proof without changing the canonical 
 
 Set the target Tailscale address and Termux SSH user in the terminal, then run the controller:
 
-```bash
+```sh
 OMEGA_TARGET="<TAILSCALE_IP_OR_MAGICDNS>" \
 OMEGA_SSH_USER="<TERMUX_USER>" \
 bash cloud/google-cloudshell-omega-controller.sh
