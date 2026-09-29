@@ -1,0 +1,125 @@
+name: OMEGA Unsigned Reproducibility Probe
+
+on:
+  push:
+    paths:
+      - ".github/workflows/omega-unsigned-reproducibility-probe.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  SOURCE_SHA: 9980fbd6f0511377b01f799651c6cec351cbf74f
+  BASE_RUN: "36603568959"
+  LATEST_RUN: "36622846035"
+  ARTIFACT: OMEGA-Unsigned-Release-9980fbd6f0511377b01f799651c6cec351cbf74f
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Download both immutable unsigned artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p base latest
+          gh run download "$BASE_RUN" -R "$GITHUB_REPOSITORY" -n "$ARTIFACT" -D base
+          gh run download "$LATEST_RUN" -R "$GITHUB_REPOSITORY" -n "$ARTIFACT" -D latest
+          test -s base/OMEGA-Engine-unsigned.apk
+          test -s latest/OMEGA-Engine-unsigned.apk
+
+      - name: Compare APK bytes and normalized ZIP contents
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          bsha="$(sha256sum base/OMEGA-Engine-unsigned.apk | awk '{print $1}')"
+          lsha="$(sha256sum latest/OMEGA-Engine-unsigned.apk | awk '{print $1}')"
+          echo "OMEGA_REPRO_BASE_SHA=$bsha"
+          echo "OMEGA_REPRO_LATEST_SHA=$lsha"
+
+          python3 - <<'PY'
+          import hashlib,json,zipfile
+          from pathlib import Path
+
+          def load(apk):
+              z=zipfile.ZipFile(apk)
+              rows={}
+              meta={}
+              for info in z.infolist():
+                  data=z.read(info.filename)
+                  rows[info.filename]=hashlib.sha256(data).hexdigest()
+                  meta[info.filename]={
+                      "date_time":info.date_time,
+                      "compress_type":info.compress_type,
+                      "external_attr":info.external_attr,
+                      "CRC":info.CRC,
+                      "file_size":info.file_size,
+                      "compress_size":info.compress_size,
+                  }
+              return rows,meta
+
+          base, bm=load("base/OMEGA-Engine-unsigned.apk")
+          latest, lm=load("latest/OMEGA-Engine-unsigned.apk")
+          names=sorted(set(base)|set(latest))
+          missing_base=[x for x in names if x not in base]
+          missing_latest=[x for x in names if x not in latest]
+          changed=[x for x in names if x in base and x in latest and base[x]!=latest[x]]
+          metadata_only=[
+              x for x in names
+              if x in base and x in latest and base[x]==latest[x] and bm[x]!=lm[x]
+          ]
+          print("OMEGA_REPRO_ENTRY_COUNT_BASE="+str(len(base)))
+          print("OMEGA_REPRO_ENTRY_COUNT_LATEST="+str(len(latest)))
+          print("OMEGA_REPRO_MISSING_BASE="+json.dumps(missing_base))
+          print("OMEGA_REPRO_MISSING_LATEST="+json.dumps(missing_latest))
+          print("OMEGA_REPRO_CHANGED_ENTRIES="+json.dumps(changed))
+          print("OMEGA_REPRO_METADATA_ONLY_COUNT="+str(len(metadata_only)))
+          Path("repro-result.json").write_text(json.dumps({
+              "base_entries":len(base),
+              "latest_entries":len(latest),
+              "missing_base":missing_base,
+              "missing_latest":missing_latest,
+              "changed_entries":changed,
+              "metadata_only_entries":metadata_only,
+          },indent=2,sort_keys=True)+"\n")
+
+          if not changed and not missing_base and not missing_latest:
+              print("OMEGA_REPRO_CONTENT_EQUIVALENT=true")
+          else:
+              print("OMEGA_REPRO_CONTENT_EQUIVALENT=false")
+          PY
+
+      - name: Compare embedded release identity evidence
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          import json,zipfile
+          keys=[
+            "source_sha","code_source_sha","omega_execution_id","omega_release_id",
+            "release_epoch_id","release_epoch_sequence","finalized_at"
+          ]
+          def read(apk):
+              with zipfile.ZipFile(apk) as z:
+                  name="assets/evidence/release-stage.json"
+                  obj=json.loads(z.read(name))
+                  return {k:obj.get(k) for k in keys}
+          b=read("base/OMEGA-Engine-unsigned.apk")
+          l=read("latest/OMEGA-Engine-unsigned.apk")
+          print("OMEGA_REPRO_BASE_RELEASE_STAGE="+json.dumps(b,sort_keys=True))
+          print("OMEGA_REPRO_LATEST_RELEASE_STAGE="+json.dumps(l,sort_keys=True))
+          print("OMEGA_REPRO_RELEASE_STAGE_DIFF="+json.dumps({
+              k:[b.get(k),l.get(k)] for k in keys if b.get(k)!=l.get(k)
+          },sort_keys=True))
+          PY
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: OMEGA-Unsigned-Reproducibility-Probe
+          retention-days: 7
+          path: repro-result.json
