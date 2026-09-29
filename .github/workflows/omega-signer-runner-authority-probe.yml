@@ -1,4 +1,4 @@
-# authority probe generation: 4
+# authority probe generation: 5
 name: OMEGA Signer Runner Authority Probe
 
 on:
@@ -21,19 +21,51 @@ jobs:
     env:
       PRIVATE_REPOSITORY: sublimedeaf-design/Omega-engines
     steps:
+      - name: Detect scoped OMEGA Release App credentials
+        id: release_app_config
+        env:
+          APP_CLIENT_ID: ${{ vars.OMEGA_RELEASE_APP_CLIENT_ID }}
+          APP_PRIVATE_KEY: ${{ secrets.OMEGA_RELEASE_APP_PRIVATE_KEY }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          configured=false
+          if [ -n "${APP_CLIENT_ID:-}" ] && [ -n "${APP_PRIVATE_KEY:-}" ]; then
+            configured=true
+          fi
+          echo "configured=$configured" >> "$GITHUB_OUTPUT"
+          echo "OMEGA_SIGNER_RELEASE_APP_CONFIGURED=$configured"
+
+      - name: Mint repository-scoped OMEGA Release App token
+        id: release_app
+        if: steps.release_app_config.outputs.configured == 'true'
+        continue-on-error: true
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          client-id: ${{ vars.OMEGA_RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.OMEGA_RELEASE_APP_PRIVATE_KEY }}
+          owner: sublimedeaf-design
+          repositories: Omega-engines
+
       - name: Probe registered ARM64 signer runner
         env:
+          RELEASE_APP_TOKEN: ${{ steps.release_app.outputs.token }}
           OMEGA_BOOTSTRAP_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
         shell: bash
         run: |
           set -Eeuo pipefail
           set +x
+          token="${RELEASE_APP_TOKEN:-${OMEGA_BOOTSTRAP_TOKEN:-}}"
+          [ -n "$token" ] || { echo "OMEGA_SIGNER_AUTH_TOKEN_MISSING" >&2; exit 78; }
+          source=bootstrap
+          [ -n "${RELEASE_APP_TOKEN:-}" ] && source=release_app
+          echo "OMEGA_SIGNER_AUTH_SOURCE=$source"
           runners_json="$(mktemp)"
           trap 'rm -f "$runners_json"' EXIT
           code="$(curl -sS -o "$runners_json" -w '%{http_code}' \
             -H 'Accept: application/vnd.github+json' \
             -H 'X-GitHub-Api-Version: 2022-11-28' \
-            -H "Authorization: Bearer $OMEGA_BOOTSTRAP_TOKEN" \
+            -H "Authorization: Bearer $token" \
             "https://api.github.com/repos/$PRIVATE_REPOSITORY/actions/runners?per_page=100" || true)"
           if [ "$code" != 200 ]; then
             echo "OMEGA_SIGNER_RUNNER_LIST_AUTH_BLOCKED http=$code" >&2
@@ -67,17 +99,23 @@ jobs:
       - name: Probe private self-hosted signer opt-in
         if: ${{ always() }}
         env:
+          RELEASE_APP_TOKEN: ${{ steps.release_app.outputs.token }}
           OMEGA_BOOTSTRAP_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
         shell: bash
         run: |
           set -Eeuo pipefail
           set +x
+          token="${RELEASE_APP_TOKEN:-${OMEGA_BOOTSTRAP_TOKEN:-}}"
+          [ -n "$token" ] || { echo "OMEGA_SIGNER_AUTH_TOKEN_MISSING" >&2; exit 78; }
+          source=bootstrap
+          [ -n "${RELEASE_APP_TOKEN:-}" ] && source=release_app
+          echo "OMEGA_SIGNER_AUTH_SOURCE=$source"
           variable_json="$(mktemp)"
           trap 'rm -f "$variable_json"' EXIT
           code="$(curl -sS -o "$variable_json" -w '%{http_code}' \
             -H 'Accept: application/vnd.github+json' \
             -H 'X-GitHub-Api-Version: 2022-11-28' \
-            -H "Authorization: Bearer $OMEGA_BOOTSTRAP_TOKEN" \
+            -H "Authorization: Bearer $token" \
             "https://api.github.com/repos/$PRIVATE_REPOSITORY/actions/variables/OMEGA_ENABLE_PRIVATE_SELF_HOSTED" || true)"
           if [ "$code" != 200 ]; then
             echo "OMEGA_SIGNER_RUNNER_CONFIG_AUTH_BLOCKED http=$code" >&2
@@ -98,17 +136,23 @@ jobs:
       - name: Probe private self-hosted runner registration authority
         if: ${{ always() }}
         env:
+          RELEASE_APP_TOKEN: ${{ steps.release_app.outputs.token }}
           OMEGA_BOOTSTRAP_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
         shell: bash
         run: |
           set -Eeuo pipefail
           set +x
+          token="${RELEASE_APP_TOKEN:-${OMEGA_BOOTSTRAP_TOKEN:-}}"
+          [ -n "$token" ] || { echo "OMEGA_SIGNER_AUTH_TOKEN_MISSING" >&2; exit 78; }
+          source=bootstrap
+          [ -n "${RELEASE_APP_TOKEN:-}" ] && source=release_app
+          echo "OMEGA_SIGNER_AUTH_SOURCE=$source"
           tmp="$(mktemp)"
           trap 'rm -f "$tmp"' EXIT
           code="$(curl -sS -o "$tmp" -w '%{http_code}' -X POST \
             -H 'Accept: application/vnd.github+json' \
             -H 'X-GitHub-Api-Version: 2022-11-28' \
-            -H "Authorization: Bearer $OMEGA_BOOTSTRAP_TOKEN" \
+            -H "Authorization: Bearer $token" \
             "https://api.github.com/repos/$PRIVATE_REPOSITORY/actions/runners/registration-token" || true)"
           rm -f "$tmp"
           if [ "$code" = 201 ]; then
