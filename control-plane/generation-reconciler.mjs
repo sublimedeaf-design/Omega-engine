@@ -2,6 +2,27 @@ const PRIVATE_REPO = "sublimedeaf-design/Omega-engines";
 const CONTROL_REPO = "sublimedeaf-design/Omega-engine";
 const SHA = /^[0-9a-f]{40}$/;
 const RUN_URL = /\/actions\/runs\/([0-9]+)$/;
+const SAFE_CONTROL_DRIFT = ["federation/epochs/", "bootstrap/omega/"];
+const CONTROL_BOUND_CONTEXTS = [
+  "omega/federation-v3-release",
+  "omega/candidate-evidence-root",
+  "omega/release-evidence-staged",
+  "omega/android-release-unsigned",
+  "omega/resilience-certified",
+  "omega/signer/continuity",
+  "omega/android-release-signed",
+  "omega/android-runtime-coldstart",
+  "omega/release-live",
+  "omega/release-certified",
+  "omega/limited-distribution/apk-signed",
+  "omega/limited-distribution/signer-continuity",
+  "omega/limited-distribution/emulator-coldstart",
+  "omega/limited-distribution/device-install",
+  "omega/limited-distribution/android-installed-runtime",
+  "omega/limited-distribution/evidence-autosync-scheduled",
+  "omega/limited-distribution/evidence-autosync-live",
+  "omega/limited-distribution/live-certified",
+];
 
 function headers(token) {
   return {
@@ -57,6 +78,44 @@ function runId(map, context) {
   return match ? match[1] : "";
 }
 
+async function controlCompatibleStatus(controlToken, row, controlContractSha) {
+  if (!row || String(row.state || "") !== "success") return false;
+  const match = RUN_URL.exec(String(row.target_url || ""));
+  if (!match) return false;
+
+  const run = await gh(controlToken, `/repos/${CONTROL_REPO}/actions/runs/${match[1]}`);
+  const head = String(run.head_sha || "");
+  if (!SHA.test(head)) return false;
+  if (head === controlContractSha) return true;
+
+  const compare = await gh(
+    controlToken,
+    `/repos/${CONTROL_REPO}/compare/${controlContractSha}...${head}?per_page=100`,
+  );
+  if (!["ahead", "identical"].includes(String(compare.status || ""))) return false;
+  const files = Array.isArray(compare.files) ? compare.files : [];
+  return files.every(file => {
+    const name = String(file.filename || "");
+    return SAFE_CONTROL_DRIFT.some(prefix => name.startsWith(prefix));
+  });
+}
+
+async function generationAwareStatusMap(controlToken, map, controlContractSha) {
+  const effective = { ...map };
+  const freshness = {};
+  for (const context of CONTROL_BOUND_CONTEXTS) {
+    const row = map[context];
+    if (!row || String(row.state || "") !== "success") {
+      freshness[context] = false;
+      continue;
+    }
+    const fresh = await controlCompatibleStatus(controlToken, row, controlContractSha);
+    freshness[context] = fresh;
+    if (!fresh) effective[context] = { ...row, state: "stale-control-generation" };
+  }
+  return { effective, freshness };
+}
+
 async function activeRuns(controlToken, workflow) {
   const counts = await Promise.all(["queued", "in_progress"].map(async status => {
     const row = await gh(
@@ -101,14 +160,27 @@ async function observedEpoch(controlToken, sourceSha) {
   const epoch = JSON.parse(raw);
   const primary = epoch.primary || {};
   const releaseEpoch = epoch.release_epoch || {};
+  const rollover = epoch.release_rollover || {};
   const id = String(releaseEpoch.id || "");
   const source = String(primary.source_sha || "");
+  const controlContractSha = String(releaseEpoch.control_contract_sha || "");
+  const rolloverStage = String(rollover.stage || "");
   const pass =
     epoch.state === "PASS" &&
     primary.certification_state === "PASS" &&
     source === sourceSha &&
-    /^[0-9a-f]{64}$/.test(id);
-  return { pass, source, id, sequence: Number(releaseEpoch.sequence || 0) };
+    /^[0-9a-f]{64}$/.test(id) &&
+    SHA.test(controlContractSha) &&
+    ["CERTIFIED_PASS", "LIVE_CERTIFIED"].includes(rolloverStage) &&
+    String(rollover.release_epoch_id || "") === id;
+  return {
+    pass,
+    source,
+    id,
+    sequence: Number(releaseEpoch.sequence || 0),
+    controlContractSha,
+    rolloverStage,
+  };
 }
 
 function chooseStage(map) {
@@ -221,18 +293,34 @@ export async function reconcileGeneration({ privateToken, controlToken, targetUr
     return { ok: true, source_sha: sha, observed_generation: null, action: "wait_epoch", epoch };
   }
 
-  const map = latestStatusMap(await statusHistory(privateToken, sha));
+  const observed = latestStatusMap(await statusHistory(privateToken, sha));
+  const generationView = await generationAwareStatusMap(controlToken, observed, epoch.controlContractSha);
+  const map = generationView.effective;
   const next = chooseStage(map);
   const generation = `${sha}:${epoch.id}`;
 
   if (next.complete) {
     await postState(privateToken, sha, "success", `generation converged epoch=${epoch.id.slice(0, 12)}`, targetUrl);
-    return { ok: true, source_sha: sha, observed_generation: generation, action: "complete", stage: "complete" };
+    return {
+      ok: true,
+      source_sha: sha,
+      observed_generation: generation,
+      action: "complete",
+      stage: "complete",
+      control_freshness: generationView.freshness,
+    };
   }
 
   if (next.blocked) {
     await postState(privateToken, sha, "error", `${next.stage}:${next.reason}`, targetUrl);
-    return { ok: false, source_sha: sha, observed_generation: generation, action: "blocked", ...next };
+    return {
+      ok: false,
+      source_sha: sha,
+      observed_generation: generation,
+      action: "blocked",
+      control_freshness: generationView.freshness,
+      ...next,
+    };
   }
 
   const inputs = { ...(next.inputs || {}) };
@@ -259,6 +347,7 @@ export async function reconcileGeneration({ privateToken, controlToken, targetUr
     workflow: next.workflow,
     inputs,
     active: result.active,
+    control_freshness: generationView.freshness,
   };
 }
 
@@ -268,7 +357,9 @@ export const POLICY = Object.freeze({
   controlRepo: CONTROL_REPO,
   oneActionPerReconcile: true,
   staleStatusSource: "full-status-history-newest-per-context",
-  generationFields: ["source_sha", "release_epoch_id"],
+  generationFields: ["source_sha", "release_epoch_id", "control_contract_sha"],
+  requireCertifiedRollover: true,
+  controlBoundStatusRule: "status-run-head-must-be-control-contract-or-safe-descendant",
   stages: [
     "upstream-proof",
     "recovery",
