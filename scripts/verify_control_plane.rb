@@ -172,6 +172,7 @@ fail!("recovery_epoch_base64_newline_decode_unsafe") if recovery.include?(%q!tr 
 fail!("recovery_epoch_base64_newline_decode_missing") unless recovery.include?(%q!tr -d '\r\n' | base64 -d!)
 fail!("recovery_stale_noop_contract_missing") unless recovery.include?("OMEGA_HOSTED_RECOVERY_STALE_NOOP") && recovery.include?("stale: ${{ steps.acceptance.outputs.stale }}") && recovery.include?("needs.pre_recovery.outputs.stale != 'true'")
 fail!("recovery_stale_exit_failure_forbidden") if recovery.include?("exit 78")
+fail!("recovery_schedule_epoch_admission_missing") unless recovery.include?("OMEGA_HOSTED_RECOVERY_SCHEDULE_EPOCH_NOT_CERTIFIED_NOOP") && recovery.include?("OMEGA_HOSTED_RECOVERY_SCHEDULE_EPOCH_ADMITTED") && recovery.include?('stage=="CERTIFIED_PASS"') && recovery.include?('state=="PASS"') && recovery.include?("CANDIDATE_SHA")
 
 fail!("recovery_active_proof_preservation_missing") unless recovery.include?("no schedule or push can cancel evidence already in flight")
 fail!("recovery_helper_must_not_override_model_url") if recovery.include?("OMEGA_LOCAL_BRAIN_MODEL_URL:")
