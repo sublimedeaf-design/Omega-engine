@@ -77,18 +77,18 @@
   "release_rollover": {
     "source_ref": "release/auto-9980fbd6f051",
     "stage": "IMMUTABLE_EPOCH_STAGED_PENDING_READ_ONLY_PEER_PROOF",
-    "release_epoch_id": "6eb99a7928ff22e488303c65bbcfcaaa1f094f798a0b09c46605568ca684577f",
-    "immutable_path": "federation/epochs/releases/9980fbd6f0511377b01f799651c6cec351cbf74f-6eb99a7928ff22e4.json"
+    "release_epoch_id": "3a221b833f79c9887be340a5bac696a3bc8ffdf8299c97be217963209b40defc",
+    "immutable_path": "federation/epochs/releases/9980fbd6f0511377b01f799651c6cec351cbf74f-3a221b833f79c988.json"
   },
   "release_epoch": {
     "contract_version": 2,
-    "id": "6eb99a7928ff22e488303c65bbcfcaaa1f094f798a0b09c46605568ca684577f",
-    "sequence": 122,
-    "immutable_path": "federation/epochs/releases/9980fbd6f0511377b01f799651c6cec351cbf74f-6eb99a7928ff22e4.json",
-    "control_contract_sha": "3eee48eafd5c066da5ccc078c7205e0cb69ffc80",
-    "parent_epoch_id": "34e8a76214c406ff4b6cc595e8447168e44a64aa31f89ad7717d4cea9cd28732",
-    "parent_control_contract_sha": "346735d993493b664a8176de08f0d1b2712f47e4",
-    "parent_sequence": 121,
+    "id": "3a221b833f79c9887be340a5bac696a3bc8ffdf8299c97be217963209b40defc",
+    "sequence": 123,
+    "immutable_path": "federation/epochs/releases/9980fbd6f0511377b01f799651c6cec351cbf74f-3a221b833f79c988.json",
+    "control_contract_sha": "ad6fb38b7f95a7eddeede8cf2eade00431ad0b69",
+    "parent_epoch_id": "6eb99a7928ff22e488303c65bbcfcaaa1f094f798a0b09c46605568ca684577f",
+    "parent_control_contract_sha": "3eee48eafd5c066da5ccc078c7205e0cb69ffc80",
+    "parent_sequence": 122,
     "source_binding_mode": "external_epoch",
     "peer_contract_source_sha": "51fac1413e2177c7c94207a4c24dccd7657a6d3b",
     "new_deviation_requires_new_epoch": true,
