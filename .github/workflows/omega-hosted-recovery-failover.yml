@@ -338,7 +338,7 @@ jobs:
           # authority and the immutable release epoch it is proving. A control-plane
           # rollover for the same source therefore supersedes stale recovery work.
           epoch_identity() {
-            GH_TOKEN="$PUBLIC_CONTROL_TOKEN" gh api "/repos/$GITHUB_REPOSITORY/contents/federation/epochs/current.json?ref=main" --jq '.content' |
+            GH_TOKEN="$PUBLIC_CONTROL_TOKEN" gh api "/repos/$GITHUB_REPOSITORY/contents/federation/epochs/current.json?ref=$GITHUB_REF_NAME" --jq '.content' |
               tr -d '\r\n' | base64 -d |
               python3 -c 'import json,re,sys; d=json.load(sys.stdin); p=d.get("primary") or {}; e=d.get("release_epoch") or {}; r=d.get("release_rollover") or {}; source=str(p.get("source_sha") or ""); eid=str(e.get("id") or ""); control=str(e.get("control_contract_sha") or ""); stage=str(r.get("stage") or ""); state=str(d.get("state") or ""); ok=re.fullmatch(r"[0-9a-f]{40}",source) and re.fullmatch(r"[0-9a-f]{64}",eid) and re.fullmatch(r"[0-9a-f]{40}",control) and state=="PASS" and stage=="CERTIFIED_PASS"; print("|".join((source,eid,control,stage,state))) if ok else sys.exit(69)'
           }
@@ -929,7 +929,7 @@ jobs:
             echo "OMEGA_RECOVERY_EVIDENCE_ROOT_ALREADY_ACTIVE count=$active recovery_run=$GITHUB_RUN_ID"
             exit 0
           fi
-          gh workflow run "$workflow" -R "$GITHUB_REPOSITORY" --ref main \
+          gh workflow run "$workflow" -R "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME" \
             -f recovery_run_id="$GITHUB_RUN_ID"
           echo "OMEGA_RECOVERY_EVIDENCE_ROOT_DISPATCHED recovery_run_id=$GITHUB_RUN_ID"
 
