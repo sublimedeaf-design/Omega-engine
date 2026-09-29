@@ -314,7 +314,7 @@ jobs:
           # insufficient because multiple pre-live epochs may bind the same source.
           current_epoch="$RUNNER_TEMP/current-federation-epoch.json"
           GH_TOKEN="$CONTROL_GH_TOKEN" gh api \
-            "/repos/$GITHUB_REPOSITORY/contents/federation/epochs/current.json?ref=main" \
+            "/repos/$GITHUB_REPOSITORY/contents/federation/epochs/current.json?ref=$GITHUB_REF_NAME" \
             --jq '.content' | tr -d '\n' | base64 -d > "$current_epoch"
           test -s "$current_epoch"
           current_control="$(GH_TOKEN="$CONTROL_GH_TOKEN" gh api "/repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')"
@@ -552,9 +552,9 @@ jobs:
           # GITHUB_TOKEN-authored content writes do not recursively trigger the
           # push listeners below, so both exact gates must be dispatched explicitly.
           gh workflow run omega-private-pr-hosted-bridge.yml \
-            -R "$GITHUB_REPOSITORY" --ref main
+            -R "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME"
           gh workflow run omega-hosted-recovery-failover.yml \
-            -R "$GITHUB_REPOSITORY" --ref main
+            -R "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME"
 
           echo "OMEGA_FINAL_SHA_VALIDATION_DISPATCHED sha=$FINAL_SHA branch=$RELEASE_BRANCH"
           echo "OMEGA_FINAL_SHA_RECOVERY_DISPATCHED sha=$FINAL_SHA branch=$RELEASE_BRANCH"
@@ -751,6 +751,6 @@ jobs:
             echo "OMEGA_RELEASE_STAGER_SIGNER_ALREADY_ACTIVE count=$active sha=$FINAL_SHA"
             exit 0
           fi
-          gh workflow run "$SIGNER_WORKFLOW" -R "$GITHUB_REPOSITORY" --ref main
+          gh workflow run "$SIGNER_WORKFLOW" -R "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME"
           echo "OMEGA_RELEASE_STAGER_SIGNER_DISPATCHED sha=$FINAL_SHA stager_run=$GITHUB_RUN_ID"
 
