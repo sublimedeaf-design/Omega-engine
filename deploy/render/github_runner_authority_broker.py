@@ -133,6 +133,7 @@ def _runner_worker(registration_token):
     root = pathlib.Path("/tmp/omega-authority-runner")
     try:
         DATA["stage"] = "runner_provisioning"
+        print("OMEGA_AUTHORITY_RUNNER_PROVISION_START", flush=True)
         if root.exists():
             shutil.rmtree(root)
         root.mkdir(parents=True)
@@ -143,6 +144,7 @@ def _runner_worker(registration_token):
         env = os.environ.copy()
         env["RUNNER_ALLOW_RUNASROOT"] = "1"
 
+        print(f"OMEGA_AUTHORITY_RUNNER_CONFIG_START name={runner_name}", flush=True)
         subprocess.run(
             [
                 str(root / "config.sh"),
@@ -161,16 +163,22 @@ def _runner_worker(registration_token):
         )
         registration_token = ""
         DATA["stage"] = "runner_online"
+        print(f"OMEGA_AUTHORITY_RUNNER_CONFIG_PASS name={runner_name}", flush=True)
 
         proc = subprocess.Popen([str(root / "run.sh")], cwd=root, env=env)
         rc = proc.wait()
+        print(f"OMEGA_AUTHORITY_RUNNER_EXIT rc={rc}", flush=True)
         DATA["stage"] = "runner_job_complete" if rc == 0 else "runner_job_failed"
         if rc != 0:
             DATA["error"] = f"RUNNER_EXIT_{rc}"
     except Exception as exc:
         registration_token = ""
         DATA["stage"] = "error"
-        DATA["error"] = f"RUNNER_START_FAILED:{type(exc).__name__}"
+        code = f"RUNNER_START_FAILED:{type(exc).__name__}"
+        if isinstance(exc, subprocess.CalledProcessError):
+            code += f":rc={exc.returncode}"
+        DATA["error"] = code
+        print(f"OMEGA_AUTHORITY_RUNNER_ERROR {code}", flush=True)
     finally:
         revoked = _revoke_installation()
         DATA["installation_revoked"] = revoked
@@ -282,6 +290,7 @@ def installed():
         if reg.status_code != 201:
             return _fail(f"RUNNER_REGISTRATION_HTTP_{reg.status_code}", RuntimeError(reg.text[:200]))
         regj = reg.json()
+        print(f"OMEGA_AUTHORITY_REGISTRATION_TOKEN_MINTED expires_at={regj.get('expires_at','unknown')}", flush=True)
         payload = {
             "repository": f"{TARGET_OWNER}/{TARGET_REPO}",
             "registration_token": regj["token"],
