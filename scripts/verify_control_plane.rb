@@ -386,6 +386,8 @@ fail!("federation_rollover_release_ref_guard_missing") unless File.read(WORKFLOW
 rollover_script = File.read(ROOT.join("scripts", "rollover_release_federation.py"), encoding: "UTF-8")
 fail!("federation_rollover_script_ref_contract_missing") unless rollover_script.include?("RELEASE_REF") && rollover_script.include?("release/[A-Za-z0-9._/-]+") && rollover_script.include?("OMEGA_RELEASE_FEDERATION_REF_INVALID")
 fail!("federation_rollover_ambiguous_write_resume_missing") unless rollover_script.include?("OMEGA_RELEASE_EPOCH_RESUME_EXISTING_SEED") && rollover_script.include?("OMEGA_RELEASE_EPOCH_RESUME_UNSAFE_CONTROL_DRIFT") && rollover_script.include?("resume_existing_seed") && !rollover_script.include?("OMEGA_RELEASE_EPOCH_SEED_EXISTS_BUT_PROJECTION_MOVED")
+fail!("release_epoch_state_only_control_policy_missing") unless rollover_script.include?('STATE_ONLY_CONTROL_PREFIXES = ("federation/epochs/", "bootstrap/omega/")') && rollover_script.include?("classify_control_drift") && rollover_script.include?("OMEGA_RELEASE_EPOCH_STATE_ONLY_CONTROL_DRIFT_NOOP") && rollover_script.include?("OMEGA_RELEASE_EPOCH_SAME_GENERATION_NOOP") && rollover_script.include?("OMEGA_RELEASE_EPOCH_CONTROL_DIFF_TOO_LARGE")
+fail!("release_epoch_state_only_prewrite_guard_missing") unless rollover_script.include?("OMEGA_RELEASE_EPOCH_STATE_ONLY_HEAD_ADVANCE_ALLOWED") && rollover_script.include?("OMEGA_RELEASE_EPOCH_STATE_ONLY_PREWRITE_ADVANCE_ALLOWED") && rollover_script.include?("OMEGA_CONTROL_MAIN_DRIFT")
 
 fail!("federation_rollover_epoch_cas_missing") unless rollover_script.include?("expected_source") && rollover_script.include?("expected_commit") && rollover_script.include?("OMEGA_PEER_MAIN_DRIFT") && rollover_script.include?("OMEGA_FEDERATION_AUTHORITY_NOT_PASS")
 fail!("federation_rollover_historical_sha_forbidden") if rollover_script.include?("6560946cda03347289a76172b6a6a9b9b39bb1b2")
@@ -514,7 +516,9 @@ fail!("federation_certifier_manual_exact_handoff_missing") unless certifier.incl
 fail!("federation_certifier_exact_bridge_api_verification_missing") unless certifier.include?("OMEGA_RELEASE_CERTIFIER_BRIDGE_IDENTITY_MISMATCH") && certifier.include?("/actions/runs/$BRIDGE_RUN_ID")
 
 # TUF-style rollback/freeze semantics for release control identity: every
-# orchestrator deviation creates a new immutable, monotonically sequenced epoch.
+# release-control code/config deviation creates a new immutable, monotonically
+# sequenced epoch. State-only epoch projections and bootstrap wake pointers do
+# not create a new generation.
 fail!("release_epoch_monotonic_sequence_missing") unless rollover_script.include?('"monotonic_epoch_sequence": True') && rollover_script.include?("sequence = prior_sequence + 1")
 fail!("release_epoch_unfinished_supersede_missing") unless rollover_script.include?("safe_unfinished_supersede") && rollover_script.include?("OMEGA_RELEASE_EPOCH_SUPERSEDE_UNFINISHED_CONTROL_DEVIATION")
 fail!("release_epoch_certified_pre_live_supersede_missing") unless rollover_script.include?("safe_certified_pre_live_supersede") && rollover_script.include?("OMEGA_RELEASE_EPOCH_SUPERSEDE_CERTIFIED_PRE_LIVE_CONTROL_DEVIATION")
@@ -530,6 +534,7 @@ fail!("release_epoch_live_bound_verifier_missing") unless epoch_verifier.include
 peer_bridge = File.read(WORKFLOWS.join("omega-federation-v3-peer-bridge.yml"), encoding: "UTF-8")
 fail!("federation_control_rollback_guard_missing") unless peer_bridge.include?("OMEGA_FEDERATION_CONTROL_ROLLBACK_DETECTED") && peer_bridge.include?("git merge-base --is-ancestor")
 fail!("federation_control_drift_guard_missing") unless peer_bridge.include?("OMEGA_FEDERATION_CONTROL_DRIFT_REQUIRES_NEW_EPOCH")
+fail!("federation_peer_state_only_control_policy_missing") unless peer_bridge.include?("federation/epochs/*|bootstrap/omega/*")
 fail!("federation_epoch_sequence_required_missing") unless peer_bridge.include?("OMEGA_FEDERATION_EPOCH_SEQUENCE_REQUIRED")
 fail!("federation_peer_control_binding_missing") unless peer_bridge.include?('"control_contract_sha":control_contract') && peer_bridge.include?('"release_epoch_sequence":sequence')
 
@@ -564,7 +569,8 @@ fail!("release_orchestrator_control_deviation_missing") unless orchestrator.incl
 fail!("release_orchestrator_private_main_reconcile_missing") unless orchestrator.include?('commits/main" --jq .sha') && orchestrator.include?('source_ref="release/auto-') && orchestrator.include?("OMEGA_RELEASE_CONTROLLER_REF_CREATED")
 fail!("release_orchestrator_trigger_file_authority_forbidden") if orchestrator.include?("read -r marker candidate source_ref")
 fail!("release_orchestrator_generation_inputs_missing") unless orchestrator.include?('-f source_sha="$SOURCE_SHA" -f source_ref="$SOURCE_REF"')
-fail!("release_orchestrator_state_only_drift_missing") unless orchestrator.include?("state-only-control-head-advance") && orchestrator.include?('path.startswith("federation/epochs/")') && orchestrator.include?("bootstrap/omega/")
+fail!("release_orchestrator_state_only_drift_missing") unless orchestrator.include?("state-only-control-head-advance") && orchestrator.include?('path.startswith("federation/epochs/")') && orchestrator.include?('path.startswith("bootstrap/omega/")')
+fail!("release_orchestrator_narrow_bootstrap_state_regression") if orchestrator.include?('path=="bootstrap/omega/pr-validation-trigger.txt"')
 fail!("release_orchestrator_compare_guard_missing") unless orchestrator.include?("/compare/$contract...$control_main") && orchestrator.include?("control-diff-too-large") && orchestrator.include?("control-history-")
 fail!("release_orchestrator_missing_ref_json_guard") unless orchestrator.include?('if ref_json="$(gh api "/repos/$PRIVATE_REPOSITORY/git/ref/heads/$source_ref" 2>/dev/null)"; then') && orchestrator.include?("OMEGA_RELEASE_CONTROLLER_REF_RESPONSE_INVALID")
 fail!("release_orchestrator_404_stdout_collision_regression") if orchestrator.include?('--jq .object.sha 2>/dev/null || true')

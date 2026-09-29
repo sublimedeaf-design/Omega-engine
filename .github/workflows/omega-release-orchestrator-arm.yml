@@ -262,7 +262,7 @@ jobs:
           )
           compare_status=str(compare.get("status") or "")
           changed=[str(x.get("filename") or "") for x in compare.get("files",[]) if x.get("filename")]
-          state_only=lambda path: path.startswith("federation/epochs/") or path=="bootstrap/omega/pr-validation-trigger.txt"
+          state_only=lambda path: path.startswith("federation/epochs/") or path.startswith("bootstrap/omega/")
           code_drift=any(not state_only(path) for path in changed)
           if len(changed)>=300:
               print("BLOCKED:control-diff-too-large")
