@@ -241,6 +241,79 @@ jobs:
             echo "OMEGA_LOCAL_BRAIN_THREADS=4"
           } >> "$GITHUB_ENV"
           mkdir -p "$RUNNER_TEMP/omega-state/evidence" "$RUNNER_TEMP/omega-state/logs"
+      - name: Seed authenticated exact GitHub dataset revisions
+        working-directory: omega
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          set +x
+          export PYTHONPATH="$PWD/src"
+          .venv/bin/python - <<'PY'
+          import json
+          import os
+          import pathlib
+          import re
+          import subprocess
+
+          from omega.data.competition_history import (
+              FERRERAS_BRAZIL_SERIE_B_SOURCES,
+              OPENFOOTBALL_TXT_SOURCES,
+          )
+          from omega.data.universal_sources import SOURCES, _github_raw_parts
+
+          exact40 = re.compile(r"^[0-9a-f]{40}$")
+          specs = list(SOURCES)
+          specs += list(FERRERAS_BRAZIL_SERIE_B_SOURCES)
+          specs += [spec for spec, _division in OPENFOOTBALL_TXT_SOURCES]
+
+          resolved = {}
+          state = {}
+          for spec in specs:
+              parts = _github_raw_parts(spec.locator)
+              if parts is None:
+                  continue
+              owner, repo, ref, relpath = parts
+              repository = f"{owner}/{repo}"
+              cache_key = (repository, ref)
+              revision = resolved.get(cache_key)
+              if revision is None:
+                  if exact40.fullmatch(ref):
+                      revision = ref
+                  else:
+                      revision = subprocess.check_output(
+                          ["gh", "api", f"/repos/{repository}/commits/{ref}", "--jq", ".sha"],
+                          text=True,
+                      ).strip().lower()
+                  if not exact40.fullmatch(revision):
+                      raise SystemExit(
+                          f"OMEGA_DATASET_AUTHENTICATED_REF_INVALID:{repository}:{ref}:{revision}"
+                      )
+                  resolved[cache_key] = revision
+              state[spec.key] = {
+                  "source_repository": repository,
+                  "source_ref": ref,
+                  "source_revision": revision,
+                  "source_path": relpath,
+                  "source_resolution": "AUTHENTICATED_CONTROL_PIN",
+              }
+
+          if not state:
+              raise SystemExit("OMEGA_DATASET_AUTHENTICATED_PINSET_EMPTY")
+          target = pathlib.Path("data/fabric/sync_state.json")
+          target.parent.mkdir(parents=True, exist_ok=True)
+          tmp = target.with_name(target.name + ".tmp")
+          tmp.write_text(
+              json.dumps(state, indent=2, sort_keys=True, allow_nan=False) + "\n",
+              encoding="utf-8",
+          )
+          os.replace(tmp, target)
+          print(
+              "OMEGA_DATASET_AUTHENTICATED_PINSET_PASS "
+              f"sources={len(state)} unique_refs={len(resolved)}"
+          )
+          PY
       - name: Run full exact-SHA pre-recovery acceptance
         id: acceptance
         working-directory: omega
