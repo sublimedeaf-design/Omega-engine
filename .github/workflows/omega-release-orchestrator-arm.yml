@@ -21,6 +21,8 @@ on:
       - ".github/workflows/omega-final-release-promoter.yml"
       - ".github/workflows/omega-post-live-verification.yml"
       - ".github/workflows/omega-hosted-recovery-failover.yml"
+      - ".github/workflows/omega-hosted-runtime-fallback.yml"
+      - ".github/workflows/omega-google-one-click-release.yml"
       - ".github/workflows/omega-candidate-evidence-root.yml"
       - ".github/workflows/omega-android-runtime-coldstart.yml"
       - ".github/workflows/omega-limited-distribution-release-adapter.yml"
