@@ -164,6 +164,7 @@ jobs:
     cache-mode: write
     outputs:
       recovery_package_sha256: ${{ steps.package.outputs.sha256 }}
+      stale: ${{ steps.acceptance.outputs.stale }}
     timeout-minutes: 90
     env:
       OMEGA_SOURCE_SHA: ${{ needs.pin.outputs.sha }}
@@ -241,12 +242,14 @@ jobs:
           } >> "$GITHUB_ENV"
           mkdir -p "$RUNNER_TEMP/omega-state/evidence" "$RUNNER_TEMP/omega-state/logs"
       - name: Run full exact-SHA pre-recovery acceptance
+        id: acceptance
         working-directory: omega
         env:
           GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
         shell: bash
         run: |
           set -Eeuo pipefail
+          echo "stale=false" >> "$GITHUB_OUTPUT"
           source_sha="$(git rev-parse HEAD)"
           test "$source_sha" = "$OMEGA_SOURCE_SHA"
           # The workflow executes in the public helper repo, so GitHub's default
@@ -316,7 +319,9 @@ jobs:
           acceptance_rc=$?
           set -e
           if [ "$stale" = true ]; then
-            exit 78
+            echo "stale=true" >> "$GITHUB_OUTPUT"
+            echo "OMEGA_HOSTED_RECOVERY_STALE_NOOP source=$OMEGA_SOURCE_SHA expected_epoch=$expected_epoch"
+            exit 0
           fi
           [ "$acceptance_rc" -eq 0 ] || exit "$acceptance_rc"
 
@@ -327,13 +332,14 @@ jobs:
           test -s "$OMEGA_STATE/model-cache/omega-qwen2.5-coder-0.5b-instruct-q4_k_m.gguf"
 
       - name: Publish verified content-addressed model cache for clean recovery
-        if: ${{ success() && steps.model_cache.outputs.cache-hit != 'true' }}
+        if: ${{ success() && steps.acceptance.outputs.stale != 'true' && steps.model_cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
           path: ${{ runner.temp }}/omega-state/model-cache
           key: ${{ steps.model_cache.outputs.cache-primary-key }}
 
       - name: Record source and VM identity
+        if: ${{ success() && steps.acceptance.outputs.stale != 'true' }}
         working-directory: omega
         shell: bash
         run: |
@@ -352,7 +358,7 @@ jobs:
           (state/"hosted-pre-recovery.json").write_text(json.dumps(payload,indent=2)+"\n",encoding="utf-8")
           PY
       - name: Materialize complete bound evidence set for release handoff
-        if: ${{ success() }}
+        if: ${{ success() && steps.acceptance.outputs.stale != 'true' }}
         working-directory: omega
         shell: bash
         run: |
@@ -459,7 +465,7 @@ jobs:
 
       - name: Package recovery state with hard integrity manifest
         id: package
-        if: ${{ success() }}
+        if: ${{ success() && steps.acceptance.outputs.stale != 'true' }}
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -478,7 +484,7 @@ jobs:
             echo "sha256=$digest" >> "$GITHUB_OUTPUT"
           )
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-        if: ${{ success() }}
+        if: ${{ success() && steps.acceptance.outputs.stale != 'true' }}
         with:
           name: omega-hosted-recovery-${{ needs.pin.outputs.sha }}
           path: |
@@ -500,7 +506,7 @@ jobs:
 
   post_recovery:
     needs: [pin, pre_recovery]
-    if: ${{ always() && needs.pin.outputs.need_run == 'true' && needs.pre_recovery.result == 'success' }}
+    if: ${{ always() && needs.pin.outputs.need_run == 'true' && needs.pre_recovery.result == 'success' && needs.pre_recovery.outputs.stale != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
@@ -816,7 +822,7 @@ jobs:
 
   pre_recovery_failure_status:
     needs: [pin, pre_recovery]
-    if: ${{ always() && needs.pin.outputs.need_run == 'true' && needs.pre_recovery.result == 'failure' }}
+    if: ${{ always() && needs.pin.outputs.need_run == 'true' && needs.pre_recovery.result == 'failure' && needs.pre_recovery.outputs.stale != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
