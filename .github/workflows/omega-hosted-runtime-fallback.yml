@@ -399,8 +399,17 @@ jobs:
           set +x
           state=failure
           [ "$RESULT" = success ] && state=success
-          gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$OMEGA_SHA" \
-            -f state="$state" \
-            -f context="omega/hosted-runtime-fallback/$OMEGA_MODE" \
-            -f description="public hosted immutable shadow/data handoff: $RESULT" \
-            -f target_url="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" >/dev/null
+          proven_modes=("$OMEGA_MODE")
+          if [ "$RESULT" = success ]; then
+            case "$OMEGA_MODE" in
+              t60) proven_modes=(t24 t60) ;;
+              settlement) proven_modes=(t24 t60 settlement) ;;
+            esac
+          fi
+          for proven_mode in "${proven_modes[@]}"; do
+            gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$OMEGA_SHA" \
+              -f state="$state" \
+              -f context="omega/hosted-runtime-fallback/$proven_mode" \
+              -f description="public hosted immutable shadow/data handoff chain: $RESULT terminal=$OMEGA_MODE" \
+              -f target_url="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" >/dev/null
+          done
