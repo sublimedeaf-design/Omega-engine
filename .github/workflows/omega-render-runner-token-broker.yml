@@ -1,0 +1,73 @@
+name: OMEGA Ephemeral Render Runner Token Broker
+
+on:
+  push:
+    branches:
+      - rescue/render-runner-token-28a3e81
+    paths:
+      - .github/workflows/omega-render-runner-token-broker.yml
+
+permissions:
+  contents: read
+
+jobs:
+  broker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+      TARGET_REPOSITORY: sublimedeaf-design/Omega-engines
+    steps:
+      - name: Mint one-hour private-repository runner token
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          set +x
+          [ -n "${GH_TOKEN:-}" ] || { echo OMEGA_RENDER_BROKER_AUTH_MISSING >&2; exit 77; }
+          response="$(gh api --method POST "/repos/$TARGET_REPOSITORY/actions/runners/registration-token")"
+          token="$(jq -r '.token // empty' <<<"$response")"
+          expires="$(jq -r '.expires_at // empty' <<<"$response")"
+          [ -n "$token" ] || { echo OMEGA_RENDER_BROKER_TOKEN_EMPTY >&2; exit 78; }
+          printf '%s' "$token" > "$RUNNER_TEMP/runner-token.txt"
+          chmod 600 "$RUNNER_TEMP/runner-token.txt"
+          printf '%s\n' "$expires" > "$RUNNER_TEMP/runner-token.expires"
+          echo "OMEGA_RENDER_BROKER_TOKEN_MINT_PASS expires=$expires"
+
+      - name: Encrypt token to one-time local recovery key
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          set +x
+          cat > "$RUNNER_TEMP/recovery-public.pem" <<'PEM'
+-----BEGIN PUBLIC KEY-----
+MIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAtUl5rBd84HnE0rUdtDX0
+XZpYAzsHoEQ0G+yAQWkdhCbCmAxu33AnqhwzIO5UquYOIrqfKjOzpd1gCe5YelHG
+tYxK0ah1vIARs4nlRclT/b2bncs5zCLdPOdkteX7UsPhhyY682KxCBVLbDkPm+mb
+0neCudkCoiBiKTq0078k49mo2Fz63yHUtU+v7QL8em6jUN8KgAsaRQ74fezXrkeK
+5/sNUE0zhLKFIJAEYF3YqpY8XNejwTXx+zhbp+j50OmH1PxG4X7sSqi7kxwwSOsy
+hdQunUPxevn9gIb0p/b7q6rlbkj3v7h2fy8YZOT6rsUrbFeNUTdHEqr167LkKId+
+svNgZwUyNnBQnN1AoPLuDQdfS1FyN7+G0BF+VuwRugO2KC0qFCTRC8fodZuGHdJS
+grkCqLE3vb6NJ8O/ashQOvIJHpax7Tn1JC2ShP8rwNm6x36Zhr+/OjpDWvlnlrEY
+Uy/kKcLlw/axE7jT89ZqnOAMNFaJDfk/VHoC+GzhbfYpAgMBAAE=
+-----END PUBLIC KEY-----
+PEM
+          openssl pkeyutl -encrypt -pubin             -inkey "$RUNNER_TEMP/recovery-public.pem"             -pkeyopt rsa_padding_mode:oaep             -pkeyopt rsa_oaep_md:sha256             -in "$RUNNER_TEMP/runner-token.txt"             -out "$RUNNER_TEMP/runner-token.enc"
+          rm -f "$RUNNER_TEMP/runner-token.txt"
+          test -s "$RUNNER_TEMP/runner-token.enc"
+          echo "OMEGA_RENDER_BROKER_ENCRYPT_PASS"
+
+      - name: Upload encrypted one-shot registration capsule
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: OMEGA-Render-Runner-Token-28a3e81
+          retention-days: 1
+          if-no-files-found: error
+          path: |
+            ${{ runner.temp }}/runner-token.enc
+            ${{ runner.temp }}/runner-token.expires
+
+      - name: Erase transient plaintext material
+        if: always()
+        shell: bash
+        run: |
+          rm -f "$RUNNER_TEMP/runner-token.txt" "$RUNNER_TEMP/recovery-public.pem" || true
