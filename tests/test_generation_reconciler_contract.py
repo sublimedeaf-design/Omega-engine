@@ -71,6 +71,10 @@ def test_recovery_explicitly_dispatches_candidate_evidence_root():
     assert "actions: write" in wf
     assert "omega-candidate-evidence-root.yml" in wf
     assert 'recovery_run_id="$GITHUB_RUN_ID"' in wf
+    assert "epoch_identity_retry()" in wf
+    assert "OMEGA_HOSTED_RECOVERY_EPOCH_AUTHORITY_RETRY" in wf
+    assert 'expected_epoch="$(epoch_identity_retry)"' in wf
+    assert 'current_epoch="$(epoch_identity_retry)"' in wf
 
 
 if __name__ == "__main__":

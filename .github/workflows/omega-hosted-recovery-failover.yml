@@ -342,7 +342,23 @@ jobs:
               tr -d '\r\n' | base64 -d |
               python3 -c 'import json,re,sys; d=json.load(sys.stdin); p=d.get("primary") or {}; e=d.get("release_epoch") or {}; r=d.get("release_rollover") or {}; source=str(p.get("source_sha") or ""); eid=str(e.get("id") or ""); control=str(e.get("control_contract_sha") or ""); stage=str(r.get("stage") or ""); state=str(d.get("state") or ""); ok=re.fullmatch(r"[0-9a-f]{40}",source) and re.fullmatch(r"[0-9a-f]{64}",eid) and re.fullmatch(r"[0-9a-f]{40}",control) and state=="PASS" and stage=="CERTIFIED_PASS"; print("|".join((source,eid,control,stage,state))) if ok else sys.exit(69)'
           }
-          expected_epoch="$(epoch_identity)" || {
+          # A transient GitHub/control-plane read must not invalidate an otherwise
+          # valid long-running recovery proof. Retry the observation with bounded
+          # backoff; only persistent unreadability or an actual identity change
+          # may fail closed / mark the generation stale.
+          epoch_identity_retry() {
+            local attempt value
+            for attempt in 1 2 3 4; do
+              if value="$(epoch_identity 2>/dev/null)" && [ -n "$value" ]; then
+                printf '%s\n' "$value"
+                return 0
+              fi
+              echo "OMEGA_HOSTED_RECOVERY_EPOCH_AUTHORITY_RETRY attempt=$attempt" >&2
+              sleep $((attempt * 2))
+            done
+            return 69
+          }
+          expected_epoch="$(epoch_identity_retry)" || {
             echo "OMEGA_HOSTED_RECOVERY_EPOCH_AUTHORITY_UNREADABLE" >&2
             exit 69
           }
@@ -369,7 +385,7 @@ jobs:
               stale=true
               echo "OMEGA_HOSTED_RECOVERY_STALE_GENERATION_ABORT source=$OMEGA_SOURCE_SHA current=$current"
             else
-              current_epoch="$(epoch_identity)" || {
+              current_epoch="$(epoch_identity_retry)" || {
                 stale=true
                 echo "OMEGA_HOSTED_RECOVERY_EPOCH_AUTHORITY_UNREADABLE" >&2
                 current_epoch=""
