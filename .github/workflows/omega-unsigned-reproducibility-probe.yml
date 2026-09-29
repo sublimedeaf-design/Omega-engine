@@ -14,6 +14,8 @@ env:
   SOURCE_SHA: 9980fbd6f0511377b01f799651c6cec351cbf74f
   BASE_RUN: "36603568959"
   LATEST_RUN: "36622846035"
+  BASE_ARTIFACT_ID: "11049424026"
+  LATEST_ARTIFACT_ID: "11058677837"
   ARTIFACT: OMEGA-Unsigned-Release-9980fbd6f0511377b01f799651c6cec351cbf74f
 
 jobs:
@@ -28,10 +30,13 @@ jobs:
         run: |
           set -Eeuo pipefail
           mkdir -p base latest
-          gh run download "$BASE_RUN" -R "$GITHUB_REPOSITORY" -n "$ARTIFACT" -D base
-          gh run download "$LATEST_RUN" -R "$GITHUB_REPOSITORY" -n "$ARTIFACT" -D latest
+          gh api "/repos/$GITHUB_REPOSITORY/actions/artifacts/$BASE_ARTIFACT_ID/zip" > base.zip
+          gh api "/repos/$GITHUB_REPOSITORY/actions/artifacts/$LATEST_ARTIFACT_ID/zip" > latest.zip
+          unzip -q base.zip -d base
+          unzip -q latest.zip -d latest
           test -s base/OMEGA-Engine-unsigned.apk
           test -s latest/OMEGA-Engine-unsigned.apk
+          echo "OMEGA_REPRO_ARTIFACT_DOWNLOAD_PASS base=$BASE_ARTIFACT_ID latest=$LATEST_ARTIFACT_ID"
 
       - name: Compare APK bytes and normalized ZIP contents
         shell: bash
