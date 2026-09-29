@@ -168,6 +168,8 @@ fail!("recovery_active_proof_must_not_cancel") unless recovery.include?("cancel-
 fail!("recovery_single_writer_lane_missing") unless recovery.include?("group: omega-hosted-recovery-v5") && recovery.include?("queue: single")
 fail!("recovery_split_writer_lane_forbidden") if recovery.include?("omega-hosted-recovery-v4-") || recovery.include?("omega-hosted-recovery-v3-")
 fail!("recovery_epoch_self_fence_missing") unless recovery.include?("OMEGA_HOSTED_RECOVERY_STALE_EPOCH_ABORT") && recovery.include?("OMEGA_HOSTED_RECOVERY_EPOCH_FENCE") && recovery.include?("federation/epochs/current.json?ref=main") && recovery.include?("expected_epoch_id") && recovery.include?("expected_epoch_control")
+fail!("recovery_epoch_base64_newline_decode_unsafe") if recovery.include?(%q!tr -d '\\n' | base64 -d!)
+fail!("recovery_epoch_base64_newline_decode_missing") unless recovery.include?(%q!tr -d '\r\n' | base64 -d!)
 
 fail!("recovery_active_proof_preservation_missing") unless recovery.include?("no schedule or push can cancel evidence already in flight")
 fail!("recovery_helper_must_not_override_model_url") if recovery.include?("OMEGA_LOCAL_BRAIN_MODEL_URL:")

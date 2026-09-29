@@ -261,7 +261,7 @@ jobs:
           # rollover for the same source therefore supersedes stale recovery work.
           epoch_identity() {
             gh api "/repos/$GITHUB_REPOSITORY/contents/federation/epochs/current.json?ref=main" --jq '.content' |
-              tr -d '\\n' | base64 -d |
+              tr -d '\r\n' | base64 -d |
               python3 -c 'import json,re,sys; d=json.load(sys.stdin); p=d.get("primary") or {}; e=d.get("release_epoch") or {}; r=d.get("release_rollover") or {}; source=str(p.get("source_sha") or ""); eid=str(e.get("id") or ""); control=str(e.get("control_contract_sha") or ""); stage=str(r.get("stage") or ""); state=str(d.get("state") or ""); ok=re.fullmatch(r"[0-9a-f]{40}",source) and re.fullmatch(r"[0-9a-f]{64}",eid) and re.fullmatch(r"[0-9a-f]{40}",control) and state=="PASS" and stage=="CERTIFIED_PASS"; print("|".join((source,eid,control,stage,state))) if ok else sys.exit(69)'
           }
           expected_epoch="$(epoch_identity)" || {
