@@ -18,12 +18,33 @@ concurrency:
 
 env:
   PRIVATE_REPOSITORY: sublimedeaf-design/Omega-engines
-  CANDIDATE_SHA: 8e77abb8b66e7cdd6423809223597ea35b49c7cf
 
 jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      candidate_sha: ${{ steps.pin.outputs.sha }}
+    steps:
+      - name: Pin current private main
+        id: pin
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [ -n "${GH_TOKEN:-}" ] || { echo OMEGA_PROVIDER_SMOKE_PRIVATE_AUTH_MISSING >&2; exit 77; }
+          sha="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/main" --jq .sha)"
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "OMEGA_PROVIDER_SMOKE_SHA_INVALID:$sha" >&2; exit 64; }
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "OMEGA_PROVIDER_SMOKE_PIN sha=$sha"
+
   smoke:
+    needs: resolve
     runs-on: ubuntu-latest
     timeout-minutes: 12
+    env:
+      CANDIDATE_SHA: ${{ needs.resolve.outputs.candidate_sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -38,7 +59,7 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: Probe independent zero-account fixture routes
+      - name: Probe current zero-account fallback chain
         working-directory: omega
         shell: bash
         run: |
@@ -47,24 +68,24 @@ jobs:
           export PYTHONPATH="$PWD/src"
           python - <<'PY'
           import json
+          import os
           from datetime import datetime, timezone
           from pathlib import Path
 
           from omega.live.espn_provider import discover as espn_discover
-          from omega.live.thesportsdb_provider import discover as tsdb_discover
-          from omega.live.worldcup26_provider import discover as worldcup26_discover
-          from omega.live.openfoot_provider import discover as openfoot_discover
+          from omega.live.openligadb import discover as openliga_discover
 
           now=datetime.now(timezone.utc)
+          horizon_hours=72
           providers={}
           all_rows=[]
 
-          for name,fn in (("espn",espn_discover),("worldcup26",worldcup26_discover),("thesportsdb",tsdb_discover),("openfoot",openfoot_discover)):
+          for name,fn in (("espn",espn_discover),("openligadb",openliga_discover)):
               try:
-                  rows,meta=fn(now,horizon_hours=30)
+                  rows,meta=fn(now,horizon_hours=horizon_hours)
               except Exception as exc:
                   rows=[]
-                  meta={"provider_health":"SYSTEMIC_FAILURE","exception":f"{type(exc).__name__}:{exc}"}
+                  meta={"provider_health":"SYSTEMIC_FAILURE","provider_errors":[{"reason":f"{type(exc).__name__}:{exc}"}]}
               providers[name]={
                   "health":meta.get("provider_health"),
                   "count":len(rows),
@@ -73,7 +94,7 @@ jobs:
               }
               all_rows.extend((name,row) for row in rows)
 
-          nations=[
+          sample=[
               {
                   "provider":name,
                   "event_id":row.get("event",{}).get("id"),
@@ -82,17 +103,17 @@ jobs:
                   "home":row.get("event",{}).get("home_team"),
                   "away":row.get("event",{}).get("away_team"),
               }
-              for name,row in all_rows
-              if row.get("sport")=="soccer_uefa_nations_league"
+              for name,row in all_rows[:20]
           ]
 
           payload={
-              "schema_version":1,
-              "candidate_sha":"8e77abb8b66e7cdd6423809223597ea35b49c7cf",
+              "schema_version":2,
+              "candidate_sha":os.environ["CANDIDATE_SHA"],
               "observed_at":now.isoformat(),
-              "horizon_hours":30,
+              "horizon_hours":horizon_hours,
               "providers":providers,
-              "nations_league":nations,
+              "fixture_count":len(all_rows),
+              "fixture_sample":sample,
               "synthetic_fixtures":False,
           }
           Path("../free-provider-live-smoke.json").write_text(
@@ -100,14 +121,141 @@ jobs:
           )
           print(json.dumps(payload,indent=2,sort_keys=True))
 
-          real_rows=[row for _,row in all_rows]
-          if not real_rows:
-              raise SystemExit("OMEGA_FREE_PROVIDER_NO_REAL_FIXTURES")
+          # Diagnose already-known provider alternatives without changing the source candidate.
+          # This mirrors the existing ESPN fallback branch and official per-league endpoint shape.
+          import urllib.request
+          from urllib.parse import urlencode
+
+          headers={"User-Agent":"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/140 Safari/537.36","Accept":"application/json,text/plain,*/*","Referer":"https://www.espn.com/"}
+          dates=[]
+          d=now.date()
+          while d <= (now.replace(hour=0,minute=0,second=0,microsecond=0) + __import__("datetime").timedelta(hours=horizon_hours)).date():
+              dates.append(d.strftime("%Y%m%d"))
+              d += __import__("datetime").timedelta(days=1)
+
+          endpoint_probes={}
+          def get_json(url):
+              req=urllib.request.Request(url,headers=headers)
+              with urllib.request.urlopen(req,timeout=15) as r:
+                  raw=r.read(4_000_001)
+                  return json.loads(raw),getattr(r,"status",200),r.geturl()
+
+          # Existing branch agent/backend_prediction/espn-keyless-fallback used site.web.api.
+          # Public ESPN endpoint catalogs document per-league scoreboards.
+          espn_candidates=[
+              ("site_all","https://site.api.espn.com/apis/site/v2/sports/soccer/all/scoreboard"),
+              ("siteweb_all","https://site.web.api.espn.com/apis/site/v2/sports/soccer/all/scoreboard"),
+          ]
+          for slug in ("eng.1","ger.1","esp.1","ita.1","fra.1","ned.1","por.1","bra.1","arg.1"):
+              espn_candidates.append((f"site_{slug}",f"https://site.api.espn.com/apis/site/v2/sports/soccer/{slug}/scoreboard"))
+
+          raw_fixture_count=0
+          for key,base in espn_candidates:
+              ok=0; events=0; errs=[]
+              for ds in dates:
+                  try:
+                      data,status,final=get_json(base+"?"+urlencode({"dates":ds,"limit":1000}))
+                      ev=data.get("events") if isinstance(data,dict) else None
+                      n=len(ev) if isinstance(ev,list) else 0
+                      ok+=1; events+=n
+                  except Exception as exc:
+                      errs.append(type(exc).__name__+":"+str(exc)[:120])
+              endpoint_probes[key]={"success_days":ok,"events":events,"errors":errs[:2]}
+              raw_fixture_count += events
+
+          # OpenLiga raw season diagnosis: distinguish a healthy empty call from a wrong shortcut/season.
+          openliga_raw={}
+          for shortcut in ("bl1","bl2","la1","pl"):
+              for season in (now.year-1,now.year,now.year+1):
+                  key=f"{shortcut}/{season}"
+                  try:
+                      data,status,final=get_json(f"https://api.openligadb.de/getmatchdata/{shortcut}/{season}")
+                      rows=data if isinstance(data,list) else []
+                      upcoming=0
+                      for row in rows:
+                          if not isinstance(row,dict): continue
+                          raw=row.get("matchDateTimeUTC") or row.get("matchDateTime")
+                          try:
+                              from omega.temporal import parse_utc
+                              ko=parse_utc(str(raw or ""),field="probe")
+                              if now <= ko <= now+__import__("datetime").timedelta(hours=horizon_hours):
+                                  upcoming += 1
+                          except Exception:
+                              pass
+                      openliga_raw[key]={"rows":len(rows),"upcoming_72h":upcoming}
+                      raw_fixture_count += upcoming
+                  except Exception as exc:
+                      openliga_raw[key]={"error":type(exc).__name__+":"+str(exc)[:120]}
+
+          payload["endpoint_probes"]=endpoint_probes
+          payload["openligadb_raw"]=openliga_raw
+          payload["raw_candidate_fixture_count"]=raw_fixture_count
+          Path("../free-provider-live-smoke.json").write_text(
+              json.dumps(payload,indent=2,sort_keys=True)+"\n",encoding="utf-8"
+          )
+          print(json.dumps({"endpoint_probes":endpoint_probes,"openligadb_raw":openliga_raw,"raw_candidate_fixture_count":raw_fixture_count},indent=2,sort_keys=True))
+
+          if all(row["health"]=="SYSTEMIC_FAILURE" for row in providers.values()) and raw_fixture_count==0:
+              raise SystemExit("OMEGA_FREE_PROVIDER_ALL_SYSTEMIC_FAILURE")
+          if not all_rows and raw_fixture_count==0:
+              raise SystemExit("OMEGA_FREE_PROVIDER_EMPTY_72H_HORIZON")
+          if not all_rows and raw_fixture_count>0:
+              raise SystemExit("OMEGA_FREE_PROVIDER_IMPLEMENTATION_GAP_RAW_ROUTE_HAS_FIXTURES")
+          PY
+
+      - name: Install locked model dependencies
+        shell: bash
+        working-directory: omega
+        run: python scripts/install_locked_ci_deps.py
+
+      - name: Prove non-empty exact-SHA T24 product path
+        shell: bash
+        working-directory: omega
+        run: |
+          set -Eeuo pipefail
+          export PYTHONPATH="$PWD/src"
+          export OMEGA_GIT_COMMIT="$CANDIDATE_SHA"
+          rm -f ../live-gate-forecast.json ../live-gate-ledger.jsonl ../live-gate-intelligence.jsonl
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from omega.live.forecast24 import run
+
+          report=run(
+              matches_path="data/fabric/Matches.model.csv",
+              report_path="../live-gate-forecast.json",
+              ledger_path="../live-gate-ledger.jsonl",
+              intelligence_ledger_path="../live-gate-intelligence.jsonl",
+              horizon_hours=72,
+              t24_min_lead_hours=0,
+          )
+          summary={
+              "candidate_sha": report.get("git_commit"),
+              "engine_health": report.get("engine_health"),
+              "provider_backend": report.get("provider_backend"),
+              "provider_health": report.get("provider_health"),
+              "provider_discovered_fixtures": report.get("provider_discovered_fixtures"),
+              "predicted": report.get("predicted"),
+              "coverage_rate": report.get("coverage_rate"),
+              "bet_eligible_count": report.get("bet_eligible_count"),
+          }
+          print(json.dumps(summary,indent=2,sort_keys=True))
+          if report.get("engine_health") != "OK":
+              raise SystemExit("OMEGA_LIVE_DATA_ENGINE_NOT_OK")
+          if report.get("provider_health") == "SYSTEMIC_FAILURE":
+              raise SystemExit("OMEGA_LIVE_DATA_PROVIDER_SYSTEMIC_FAILURE")
+          if int(report.get("provider_discovered_fixtures") or 0) < 1:
+              raise SystemExit("OMEGA_LIVE_DATA_NO_REAL_FIXTURES")
+          if int(report.get("predicted") or 0) < 1:
+              raise SystemExit("OMEGA_LIVE_DATA_NO_MODEL_OUTPUT")
           PY
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
         with:
           name: omega-free-provider-live-smoke-${{ env.CANDIDATE_SHA }}
-          path: free-provider-live-smoke.json
-          if-no-files-found: error
+          path: |
+            free-provider-live-smoke.json
+            live-gate-forecast.json
+          if-no-files-found: warn
           retention-days: 7
