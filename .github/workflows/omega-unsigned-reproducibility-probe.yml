@@ -43,18 +43,24 @@ jobs:
             "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/artifacts/$LATEST_ARTIFACT_ID/zip" \
             -o latest.zip
           file base.zip latest.zip
-          unzip -q base.zip -d base
-          unzip -q latest.zip -d latest
-          test -s base/OMEGA-Engine-unsigned.apk
-          test -s latest/OMEGA-Engine-unsigned.apk
+          unzip -l base.zip
+          unzip -l latest.zip
+          unzip -oq base.zip -d base || [ "$?" -eq 1 ]
+          unzip -oq latest.zip -d latest || [ "$?" -eq 1 ]
+          BASE_APK="$(find base -type f -name OMEGA-Engine-unsigned.apk -print -quit)"
+          LATEST_APK="$(find latest -type f -name OMEGA-Engine-unsigned.apk -print -quit)"
+          test -s "$BASE_APK"
+          test -s "$LATEST_APK"
+          echo "BASE_APK=$BASE_APK" >> "$GITHUB_ENV"
+          echo "LATEST_APK=$LATEST_APK" >> "$GITHUB_ENV"
           echo "OMEGA_REPRO_ARTIFACT_DOWNLOAD_PASS base=$BASE_ARTIFACT_ID latest=$LATEST_ARTIFACT_ID"
 
       - name: Compare APK bytes and normalized ZIP contents
         shell: bash
         run: |
           set -Eeuo pipefail
-          bsha="$(sha256sum base/OMEGA-Engine-unsigned.apk | awk '{print $1}')"
-          lsha="$(sha256sum latest/OMEGA-Engine-unsigned.apk | awk '{print $1}')"
+          bsha="$(sha256sum $BASE_APK | awk '{print $1}')"
+          lsha="$(sha256sum $LATEST_APK | awk '{print $1}')"
           echo "OMEGA_REPRO_BASE_SHA=$bsha"
           echo "OMEGA_REPRO_LATEST_SHA=$lsha"
 
@@ -79,8 +85,9 @@ jobs:
                   }
               return rows,meta
 
-          base, bm=load("base/OMEGA-Engine-unsigned.apk")
-          latest, lm=load("latest/OMEGA-Engine-unsigned.apk")
+          import os
+          base, bm=load(os.environ["BASE_APK"])
+          latest, lm=load(os.environ["LATEST_APK"])
           names=sorted(set(base)|set(latest))
           missing_base=[x for x in names if x not in base]
           missing_latest=[x for x in names if x not in latest]
@@ -125,8 +132,9 @@ jobs:
                   name="assets/evidence/release-stage.json"
                   obj=json.loads(z.read(name))
                   return {k:obj.get(k) for k in keys}
-          b=read("base/OMEGA-Engine-unsigned.apk")
-          l=read("latest/OMEGA-Engine-unsigned.apk")
+          import os
+          b=read(os.environ["BASE_APK"])
+          l=read(os.environ["LATEST_APK"])
           print("OMEGA_REPRO_BASE_RELEASE_STAGE="+json.dumps(b,sort_keys=True))
           print("OMEGA_REPRO_LATEST_RELEASE_STAGE="+json.dumps(l,sort_keys=True))
           print("OMEGA_REPRO_RELEASE_STAGE_DIFF="+json.dumps({
