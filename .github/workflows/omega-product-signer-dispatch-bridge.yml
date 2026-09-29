@@ -1,0 +1,36 @@
+name: OMEGA Product Signer Dispatch Bridge
+
+on:
+  push:
+    branches:
+      - omega/product-signer-dispatch-bridge-28a3e81
+    paths:
+      - .github/workflows/omega-product-signer-dispatch-bridge.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Dispatch existing private canonical signer rescue
+        env:
+          PRIVATE_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          API_URL: https://api.github.com/repos/sublimedeaf-design/Omega-engines/actions/workflows/android-signing-keepalive.yml/dispatches
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          set +x
+          [ -n "${PRIVATE_TOKEN:-}" ] || { echo OMEGA_PRIVATE_AUTH_MISSING >&2; exit 77; }
+          code="$(
+            curl --silent --show-error --location               --output "$RUNNER_TEMP/dispatch-body.txt"               --write-out '%{http_code}'               --request POST               --header "Accept: application/vnd.github+json"               --header "Authorization: Bearer $PRIVATE_TOKEN"               --header "X-GitHub-Api-Version: 2022-11-28"               "$API_URL"               --data '{"ref":"main","inputs":{"mode":"rescue","allow_private_self_hosted":"true"}}'
+          )"
+          [ "$code" = "204" ] || {
+            echo "OMEGA_PRIVATE_SIGNER_DISPATCH_FAILED http=$code" >&2
+            cat "$RUNNER_TEMP/dispatch-body.txt" >&2 || true
+            exit 78
+          }
+          echo "OMEGA_PRIVATE_SIGNER_RESCUE_DISPATCHED"
