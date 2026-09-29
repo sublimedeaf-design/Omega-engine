@@ -54,3 +54,11 @@ def test_recovery_explicitly_dispatches_candidate_evidence_root():
     assert "actions: write" in wf
     assert "omega-candidate-evidence-root.yml" in wf
     assert 'recovery_run_id="$GITHUB_RUN_ID"' in wf
+
+
+if __name__ == "__main__":
+    test_generation_reconciler_is_level_triggered_and_reads_full_status_history()
+    test_generation_reconciler_dispatches_exact_handoffs()
+    test_generation_reconciler_serializes_one_reconcile_and_has_schedule_fallback()
+    test_recovery_explicitly_dispatches_candidate_evidence_root()
+    print("OMEGA_GENERATION_RECONCILER_CONTRACT_PASS")
