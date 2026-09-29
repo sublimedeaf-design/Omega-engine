@@ -135,11 +135,13 @@ jobs:
               target=str((latest.get(ctx) or {}).get("target_url") or "")
               if not target.endswith("/actions/runs/"+os.environ["STAGER_RUN_ID"]):
                   raise SystemExit("OMEGA_SIGNER_HANDOFF_RUN_MISMATCH:"+ctx)
+          # Recovery and recovery-attestation are already cryptographically bound
+          # to the exact successful recovery run by Candidate Evidence Root and
+          # Release Stager. Do not let an unrelated later scheduled recovery
+          # overwrite that immutable release-generation proof.
           final_required=(
               "omega/exact-final-validation",
               "omega/federation-v3-release",
-              "omega/hosted-recovery",
-              "omega/recovery-attestation",
               "omega/candidate-evidence-root",
           )
           waiting=[]; blocked=[]
