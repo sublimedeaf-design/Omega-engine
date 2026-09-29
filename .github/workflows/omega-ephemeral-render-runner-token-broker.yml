@@ -54,17 +54,16 @@ jobs:
         run: |
           set -Eeuo pipefail
           set +x
-          cat > broker-public.pem <<'PEM'
------BEGIN PUBLIC KEY-----
-MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAzQ1+LA/QIt2GCvgHpDtP
-H/vu/O4HZ3TmPJef+4IcWgTjERInPo4XQ0u914bBGh07n0wfpWyVFXlJcejKCNqH
-Snb39odwpLXAxlFn8kN1hD2U/AeIrRG6kQhLmNbBJ+pySXYOptX1EmVhNC8hqcjk
-YlEdeRFzhGuV1hPj0e+AnXODJTYmApce8XD8p13ECOVVlPUncqNVZcCEdrPx2V8w
-EhP8IUcLVlTqUQCRDwGLuWtJK3bMAM2cdXT1obKwQ0ks3rU4hoCbNzf2fWFC4qbF
-F7qJnGPfzypr0Dzfj3eV1BTaWiuVR1dRO87kCogi7kTXw7j1oKqy3U/dNBiFhMuo
-/wIDAQAB
------END PUBLIC KEY-----
-PEM
+          printf '%s\n' \
+            '-----BEGIN PUBLIC KEY-----' \
+            'MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAzQ1+LA/QIt2GCvgHpDtP' \
+            'H/vu/O4HZ3TmPJef+4IcWgTjERInPo4XQ0u914bBGh07n0wfpWyVFXlJcejKCNqH' \
+            'Snb39odwpLXAxlFn8kN1hD2U/AeIrRG6kQhLmNbBJ+pySXYOptX1EmVhNC8hqcjk' \
+            'YlEdeRFzhGuV1hPj0e+AnXODJTYmApce8XD8p13ECOVVlPUncqNVZcCEdrPx2V8w' \
+            'EhP8IUcLVlTqUQCRDwGLuWtJK3bMAM2cdXT1obKwQ0ks3rU4hoCbNzf2fWFC4qbF' \
+            'F7qJnGPfzypr0Dzfj3eV1BTaWiuVR1dRO87kCogi7kTXw7j1oKqy3U/dNBiFhMuo' \
+            '/wIDAQAB' \
+            '-----END PUBLIC KEY-----' > broker-public.pem
           openssl pkeyutl -encrypt -pubin -inkey broker-public.pem \
             -pkeyopt rsa_padding_mode:oaep \
             -pkeyopt rsa_oaep_md:sha256 \
