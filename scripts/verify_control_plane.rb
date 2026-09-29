@@ -170,6 +170,7 @@ fail!("recovery_split_writer_lane_forbidden") if recovery.include?("omega-hosted
 fail!("recovery_epoch_self_fence_missing") unless recovery.include?("OMEGA_HOSTED_RECOVERY_STALE_EPOCH_ABORT") && recovery.include?("OMEGA_HOSTED_RECOVERY_EPOCH_FENCE") && recovery.include?("federation/epochs/current.json?ref=main") && recovery.include?("expected_epoch_id") && recovery.include?("expected_epoch_control")
 fail!("recovery_epoch_base64_newline_decode_unsafe") if recovery.include?(%q!tr -d '\\n' | base64 -d!)
 fail!("recovery_epoch_base64_newline_decode_missing") unless recovery.include?(%q!tr -d '\r\n' | base64 -d!)
+fail!("recovery_epoch_public_auth_boundary_missing") unless recovery.include?('PUBLIC_CONTROL_TOKEN: ${{ github.token }}') && recovery.include?('GH_TOKEN="$PUBLIC_CONTROL_TOKEN" gh api "/repos/$GITHUB_REPOSITORY/contents/federation/epochs/current.json?ref=main"')
 fail!("recovery_stale_noop_contract_missing") unless recovery.include?("OMEGA_HOSTED_RECOVERY_STALE_NOOP") && recovery.include?("stale: ${{ steps.acceptance.outputs.stale }}") && recovery.include?("needs.pre_recovery.outputs.stale != 'true'")
 fail!("recovery_stale_exit_failure_forbidden") if recovery.include?("exit 78")
 
