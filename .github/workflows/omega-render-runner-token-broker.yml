@@ -39,19 +39,24 @@ jobs:
           set -Eeuo pipefail
           set +x
           cat > "$RUNNER_TEMP/recovery-public.pem" <<'PEM'
------BEGIN PUBLIC KEY-----
-MIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAtUl5rBd84HnE0rUdtDX0
-XZpYAzsHoEQ0G+yAQWkdhCbCmAxu33AnqhwzIO5UquYOIrqfKjOzpd1gCe5YelHG
-tYxK0ah1vIARs4nlRclT/b2bncs5zCLdPOdkteX7UsPhhyY682KxCBVLbDkPm+mb
-0neCudkCoiBiKTq0078k49mo2Fz63yHUtU+v7QL8em6jUN8KgAsaRQ74fezXrkeK
-5/sNUE0zhLKFIJAEYF3YqpY8XNejwTXx+zhbp+j50OmH1PxG4X7sSqi7kxwwSOsy
-hdQunUPxevn9gIb0p/b7q6rlbkj3v7h2fy8YZOT6rsUrbFeNUTdHEqr167LkKId+
-svNgZwUyNnBQnN1AoPLuDQdfS1FyN7+G0BF+VuwRugO2KC0qFCTRC8fodZuGHdJS
-grkCqLE3vb6NJ8O/ashQOvIJHpax7Tn1JC2ShP8rwNm6x36Zhr+/OjpDWvlnlrEY
-Uy/kKcLlw/axE7jT89ZqnOAMNFaJDfk/VHoC+GzhbfYpAgMBAAE=
------END PUBLIC KEY-----
-PEM
-          openssl pkeyutl -encrypt -pubin             -inkey "$RUNNER_TEMP/recovery-public.pem"             -pkeyopt rsa_padding_mode:oaep             -pkeyopt rsa_oaep_md:sha256             -in "$RUNNER_TEMP/runner-token.txt"             -out "$RUNNER_TEMP/runner-token.enc"
+          -----BEGIN PUBLIC KEY-----
+          MIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAtUl5rBd84HnE0rUdtDX0
+          XZpYAzsHoEQ0G+yAQWkdhCbCmAxu33AnqhwzIO5UquYOIrqfKjOzpd1gCe5YelHG
+          tYxK0ah1vIARs4nlRclT/b2bncs5zCLdPOdkteX7UsPhhyY682KxCBVLbDkPm+mb
+          0neCudkCoiBiKTq0078k49mo2Fz63yHUtU+v7QL8em6jUN8KgAsaRQ74fezXrkeK
+          5/sNUE0zhLKFIJAEYF3YqpY8XNejwTXx+zhbp+j50OmH1PxG4X7sSqi7kxwwSOsy
+          hdQunUPxevn9gIb0p/b7q6rlbkj3v7h2fy8YZOT6rsUrbFeNUTdHEqr167LkKId+
+          svNgZwUyNnBQnN1AoPLuDQdfS1FyN7+G0BF+VuwRugO2KC0qFCTRC8fodZuGHdJS
+          grkCqLE3vb6NJ8O/ashQOvIJHpax7Tn1JC2ShP8rwNm6x36Zhr+/OjpDWvlnlrEY
+          Uy/kKcLlw/axE7jT89ZqnOAMNFaJDfk/VHoC+GzhbfYpAgMBAAE=
+          -----END PUBLIC KEY-----
+          PEM
+          openssl pkeyutl -encrypt -pubin \
+            -inkey "$RUNNER_TEMP/recovery-public.pem" \
+            -pkeyopt rsa_padding_mode:oaep \
+            -pkeyopt rsa_oaep_md:sha256 \
+            -in "$RUNNER_TEMP/runner-token.txt" \
+            -out "$RUNNER_TEMP/runner-token.enc"
           rm -f "$RUNNER_TEMP/runner-token.txt"
           test -s "$RUNNER_TEMP/runner-token.enc"
           echo "OMEGA_RENDER_BROKER_ENCRYPT_PASS"
