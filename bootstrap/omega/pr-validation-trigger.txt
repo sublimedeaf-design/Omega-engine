@@ -1,1 +1,1 @@
-validate-exact-pr 9980fbd6f0511377b01f799651c6cec351cbf74f main
+validate-exact-pr bcab5d4fea47b6c42ef17deddd1cfec0348227df agent/release_ci/release-ref-control-auth-9980fbd6
