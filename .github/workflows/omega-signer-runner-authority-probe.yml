@@ -1,4 +1,4 @@
-# authority probe generation: 3
+# authority probe generation: 4
 name: OMEGA Signer Runner Authority Probe
 
 on:
@@ -7,6 +7,9 @@ on:
     paths:
       - ".github/workflows/omega-signer-runner-authority-probe.yml"
   workflow_dispatch:
+  schedule:
+    # Public control-plane runner: continuously verify the free self-hosted signer fallback.
+    - cron: "17 */6 * * *"
 
 permissions:
   contents: read
