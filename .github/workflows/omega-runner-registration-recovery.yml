@@ -70,3 +70,4 @@ jobs:
 
           echo "OMEGA_RUNNER_REGISTRATION_HTTP=$code token_present=$token_present sha=$private_sha"
           exit "$rc"
+# OMEGA runner-registration probe retrigger: 2026-09-29T21:xx CEST
