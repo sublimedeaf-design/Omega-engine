@@ -128,11 +128,12 @@ jobs:
           fi
           if [ "$EVENT_NAME" = schedule ]; then
             epoch_b64="$(gh api "/repos/$GITHUB_REPOSITORY/contents/federation/epochs/current.json?ref=main" --jq '.content // empty' 2>/dev/null || true)"
-            epoch_admission="$(printf '%s' "$epoch_b64" | tr -d '\r\n' | base64 -d 2>/dev/null | python3 - "$sha" <<'PY' 2>/dev/null || true
-import json,re,sys
-candidate=sys.argv[1]
+            epoch_json="$(printf '%s' "$epoch_b64" | tr -d '\r\n' | base64 -d 2>/dev/null || true)"
+            epoch_admission="$(EPOCH_JSON="$epoch_json" CANDIDATE_SHA="$sha" python3 - <<'PY' 2>/dev/null || true
+import json,os,re
+candidate=os.environ.get("CANDIDATE_SHA","")
 try:
-    d=json.load(sys.stdin)
+    d=json.loads(os.environ.get("EPOCH_JSON",""))
 except Exception:
     raise SystemExit(0)
 source=str((d.get("primary") or {}).get("source_sha") or "")
