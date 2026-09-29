@@ -35,6 +35,7 @@ FILES = [
     "state/source-pin.json",
 ]
 IMMUTABLE_PREFIX = "federation/epochs/releases"
+STATE_ONLY_CONTROL_PREFIXES = ("federation/epochs/", "bootstrap/omega/")
 
 
 def api(token: str, method: str, path: str, payload=None, *, allow_404: bool = False):
@@ -83,6 +84,47 @@ def content(token: str, repo: str, path: str, ref: str):
 
 def latest_main(repo: str) -> str:
     return private_api("GET", f"/repos/{repo}/git/ref/heads/main")["object"]["sha"]
+
+
+def classify_control_drift(
+    base_sha: str,
+    head_sha: str,
+    *,
+    history_error: str = "OMEGA_RELEASE_EPOCH_CONTROL_HISTORY_INVALID",
+) -> dict:
+    """Classify control-repository movement using the existing OMEGA state-only policy."""
+    if not HEX40.fullmatch(base_sha) or not HEX40.fullmatch(head_sha):
+        raise SystemExit("OMEGA_RELEASE_EPOCH_CONTROL_HISTORY_SHA_INVALID")
+    if base_sha == head_sha:
+        return {"changed": [], "unsafe": []}
+
+    compare = control_api(
+        "GET",
+        f"/repos/{CONTROL}/compare/{base_sha}...{head_sha}",
+    )
+    compare_status = str(compare.get("status") or "")
+    behind_by = int(compare.get("behind_by") or 0)
+    if compare_status not in {"ahead", "identical"} or behind_by != 0:
+        raise SystemExit(
+            f"{history_error}:{compare_status}:behind={behind_by}"
+        )
+
+    changed = [
+        str(row.get("filename") or "")
+        for row in (compare.get("files") or [])
+        if row.get("filename")
+    ]
+    # GitHub's compare API caps the changed-file list. Never classify a
+    # truncated comparison as state-only.
+    if len(changed) >= 300:
+        raise SystemExit("OMEGA_RELEASE_EPOCH_CONTROL_DIFF_TOO_LARGE")
+
+    unsafe = [
+        path
+        for path in changed
+        if not path.startswith(STATE_ONLY_CONTROL_PREFIXES)
+    ]
+    return {"changed": changed, "unsafe": unsafe}
 
 
 def verify_peer_baseline(repo: str, expected_source: str, expected_commit: str) -> dict:
@@ -189,12 +231,87 @@ prior_state = str(epoch.get("state") or "")
 prior_certification = str(primary_epoch.get("certification_state") or "")
 same_target = str(primary_epoch.get("source_sha") or "") == TARGET
 same_ref = str(primary_epoch.get("source_ref") or "") == SOURCE_REF
-control_deviation = bool(
-    prior_control_contract
-    and HEX40.fullmatch(prior_control_contract)
-    and prior_control_contract != CONTROL_CONTRACT_SHA
-)
+
+# The Candidate Evidence Root already treats federation epoch files and
+# bootstrap wake pointers as state, not release-control code. Reuse that same
+# policy here so successful proof/recovery transitions cannot manufacture a
+# new immutable epoch merely by advancing main.
+if control_head != CONTROL_CONTRACT_SHA:
+    head_drift = classify_control_drift(
+        CONTROL_CONTRACT_SHA,
+        control_head,
+        history_error="OMEGA_RELEASE_EPOCH_CONTROL_HEAD_HISTORY_INVALID",
+    )
+    if head_drift["unsafe"]:
+        raise SystemExit(
+            "OMEGA_CONTROL_MAIN_DRIFT:"
+            + control_head
+            + "!="
+            + CONTROL_CONTRACT_SHA
+            + ":"
+            + ",".join(sorted(head_drift["unsafe"]))
+        )
+    print(
+        "OMEGA_RELEASE_EPOCH_STATE_ONLY_HEAD_ADVANCE_ALLOWED:"
+        f"{CONTROL_CONTRACT_SHA}->{control_head}:files={len(head_drift['changed'])}"
+    )
+
+state_only_control_paths = []
+control_deviation = False
+if prior_control_contract:
+    if not HEX40.fullmatch(prior_control_contract):
+        raise SystemExit("OMEGA_RELEASE_EPOCH_PRIOR_CONTROL_SHA_INVALID")
+    if prior_control_contract != CONTROL_CONTRACT_SHA:
+        contract_drift = classify_control_drift(
+            prior_control_contract,
+            CONTROL_CONTRACT_SHA,
+        )
+        if contract_drift["unsafe"]:
+            control_deviation = True
+        else:
+            state_only_control_paths = contract_drift["changed"]
+            print(
+                "OMEGA_RELEASE_EPOCH_STATE_ONLY_CONTROL_DRIFT_NOOP:"
+                f"{prior_control_contract}->{CONTROL_CONTRACT_SHA}:"
+                f"files={len(state_only_control_paths)}"
+            )
+
 authority_pass = prior_state == "PASS" and prior_certification == "PASS"
+pending_same_generation = (
+    prior_state == "NOT_EXECUTED"
+    and prior_certification == "NOT_EXECUTED"
+)
+if (
+    same_target
+    and same_ref
+    and not control_deviation
+    and (authority_pass or pending_same_generation)
+):
+    current_epoch_id = str(prior_release_epoch.get("id") or "")
+    if not HEX64.fullmatch(current_epoch_id):
+        raise SystemExit("OMEGA_RELEASE_EPOCH_CURRENT_ID_INVALID")
+    print(
+        "OMEGA_RELEASE_EPOCH_SAME_GENERATION_NOOP:"
+        f"epoch={current_epoch_id}:state={prior_state}:"
+        f"state_only_paths={len(state_only_control_paths)}"
+    )
+    print(
+        json.dumps(
+            {
+                "ok": True,
+                "already_current": True,
+                "source_sha": TARGET,
+                "source_ref": SOURCE_REF,
+                "release_epoch_id": current_epoch_id,
+                "control_contract_sha": prior_control_contract,
+                "state": prior_state,
+                "state_only_control_paths": state_only_control_paths,
+            },
+            sort_keys=True,
+        )
+    )
+    raise SystemExit(0)
+
 live_certified = (
     (latest.get("omega/live-certified") or {}).get("state") == "success"
     or (latest.get("omega/limited-distribution/live-certified") or {}).get("state") == "success"
@@ -352,25 +469,13 @@ if existing is not None:
     resume_head = control_api("GET", f"/repos/{CONTROL}/git/ref/heads/main")["object"]["sha"]
     if not HEX40.fullmatch(resume_head):
         raise SystemExit("OMEGA_RELEASE_EPOCH_RESUME_HEAD_INVALID")
-    compare = control_api(
-        "GET",
-        f"/repos/{CONTROL}/compare/{CONTROL_CONTRACT_SHA}...{resume_head}",
+    resume_drift = classify_control_drift(
+        CONTROL_CONTRACT_SHA,
+        resume_head,
+        history_error="OMEGA_RELEASE_EPOCH_RESUME_HISTORY_INVALID",
     )
-    compare_status = str(compare.get("status") or "")
-    behind_by = int(compare.get("behind_by") or 0)
-    if compare_status not in {"ahead", "identical"} or behind_by != 0:
-        raise SystemExit(
-            f"OMEGA_RELEASE_EPOCH_RESUME_HISTORY_INVALID:{compare_status}:behind={behind_by}"
-        )
-    changed = [str(row.get("filename") or "") for row in (compare.get("files") or [])]
-    unsafe = [
-        path for path in changed
-        if not (
-            path == seed_path
-            or path.startswith("federation/epochs/")
-            or path.startswith("bootstrap/omega/")
-        )
-    ]
+    changed = resume_drift["changed"]
+    unsafe = resume_drift["unsafe"]
     if unsafe:
         raise SystemExit(
             "OMEGA_RELEASE_EPOCH_RESUME_UNSAFE_CONTROL_DRIFT:" + ",".join(sorted(unsafe))
@@ -382,9 +487,28 @@ if existing is not None:
     )
 
 if not resume_existing_seed:
-    if control_head != CONTROL_CONTRACT_SHA:
-        raise SystemExit(
-            f"OMEGA_CONTROL_MAIN_DRIFT:{control_head}!={CONTROL_CONTRACT_SHA}"
+    # Re-read main immediately before the immutable write. State-only movement
+    # is harmless and is intentionally tolerated; any code/config movement is
+    # a generation fence and must be reconciled by a fresh controller run.
+    write_head = control_api("GET", f"/repos/{CONTROL}/git/ref/heads/main")["object"]["sha"]
+    if write_head != CONTROL_CONTRACT_SHA:
+        write_drift = classify_control_drift(
+            CONTROL_CONTRACT_SHA,
+            write_head,
+            history_error="OMEGA_RELEASE_EPOCH_PREWRITE_HISTORY_INVALID",
+        )
+        if write_drift["unsafe"]:
+            raise SystemExit(
+                "OMEGA_CONTROL_MAIN_DRIFT:"
+                + write_head
+                + "!="
+                + CONTROL_CONTRACT_SHA
+                + ":"
+                + ",".join(sorted(write_drift["unsafe"]))
+            )
+        print(
+            "OMEGA_RELEASE_EPOCH_STATE_ONLY_PREWRITE_ADVANCE_ALLOWED:"
+            f"{CONTROL_CONTRACT_SHA}->{write_head}:files={len(write_drift['changed'])}"
         )
 
     seed_payload = {
