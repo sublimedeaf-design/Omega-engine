@@ -17,6 +17,10 @@ def test_generation_reconciler_is_level_triggered_and_reads_full_status_history(
     assert 'generationFields: ["source_sha", "release_epoch_id", "control_contract_sha"]' in text
     assert 'requireCertifiedRollover: true' in text
     assert 'status-run-head-must-be-control-contract-or-safe-descendant' in text
+    assert 'requireCurrentControlContract: true' in text
+    assert 'controlDriftAction: "dispatch-release-orchestrator"' in text
+    assert 'safeControlDescendant' in text
+    assert 'needsRollover: !sourceCurrent || !controlCurrent' in text
     assert 'SAFE_CONTROL_DRIFT = ["federation/epochs/", "bootstrap/omega/"]' in text
     assert 'controlCompatibleStatus' in text
     assert 'generationAwareStatusMap' in text
@@ -44,6 +48,8 @@ def test_generation_reconciler_dispatches_exact_handoffs():
     assert 'post_live_run_id: postLive' in text
     assert '["CERTIFIED_PASS", "LIVE_CERTIFIED"].includes(rolloverStage)' in text
     assert 'String(rollover.release_epoch_id || "") === id' in text
+    assert 'omega-release-federation-rollover.yml' in text
+    assert 'stage: "epoch-rollover"' in text
 
 
 def test_generation_reconciler_serializes_one_reconcile_and_has_schedule_fallback():
