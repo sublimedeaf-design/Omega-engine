@@ -1,6 +1,10 @@
-name: OMEGA Play Content-Addressed Builder (Legacy Diagnostic)
+name: OMEGA Play Content-Addressed Builder
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/omega-play-content-addressed-builder.yml"
   workflow_dispatch:
     inputs:
       source_sha:
@@ -58,7 +62,7 @@ jobs:
           echo "source_ref=$ref" >> "$GITHUB_OUTPUT"
           echo "SOURCE_SHA=$source" >> "$GITHUB_ENV"
           echo "OMEGA_SOURCE_SHA=$source" >> "$GITHUB_ENV"
-          echo "OMEGA_PLAY_LEGACY_DIAGNOSTIC_PIN source=$source ref=$ref"
+          echo "OMEGA_PLAY_CONTENT_ADDRESSED_PIN source=$source ref=$ref"
 
       - name: Checkout exact private source
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -216,7 +220,7 @@ jobs:
           set +x
           state=failure
           [ "$RESULT" = success ] && state=success
-          gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$SOURCE_SHA"             -f state="$state" -f context="omega/play-aab-build-unsigned-legacy"             -f description="legacy diagnostic unsigned code19 AAB: $RESULT"             -f target_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
+          gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$SOURCE_SHA"             -f state="$state" -f context="omega/play-aab-build-unsigned"             -f description="content-addressed unsigned code19 AAB: $RESULT"             -f target_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
 
       - name: Remove disposable signer material
         if: always()
