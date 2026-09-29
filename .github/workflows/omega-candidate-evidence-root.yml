@@ -252,7 +252,7 @@ jobs:
           # it. Fence candidate promotion to the current immutable release epoch
           # and reject any unprojected control-code drift before reading artifacts.
           current_epoch="$RUNNER_TEMP/current-federation-epoch.json"
-          GH_TOKEN="$CONTROL_GH_TOKEN" gh api             "/repos/$GITHUB_REPOSITORY/contents/federation/epochs/current.json?ref=main"             --jq '.content' | tr -d '\n' | base64 -d > "$current_epoch"
+          GH_TOKEN="$CONTROL_GH_TOKEN" gh api             "/repos/$GITHUB_REPOSITORY/contents/federation/epochs/current.json?ref=$GITHUB_REF_NAME"             --jq '.content' | tr -d '\n' | base64 -d > "$current_epoch"
           test -s "$current_epoch"
           current_control="$(GH_TOKEN="$CONTROL_GH_TOKEN" gh api "/repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')"
           contract_control="$(CURRENT_EPOCH_PATH="$current_epoch" python3 - <<'PY'
@@ -561,6 +561,6 @@ jobs:
           set -Eeuo pipefail
           gh workflow run omega-recovery-evidence-release-stager.yml \
             -R "$GITHUB_REPOSITORY" \
-            --ref main \
+            --ref "$GITHUB_REF_NAME" \
             -f evidence_run_id="$EVIDENCE_RUN_ID"
           echo "OMEGA_RELEASE_STAGER_DISPATCHED evidence_run=$EVIDENCE_RUN_ID"
