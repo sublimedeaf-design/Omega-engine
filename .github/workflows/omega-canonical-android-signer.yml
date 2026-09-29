@@ -543,6 +543,30 @@ jobs:
             echo "OMEGA_NATIVE_SIGNER_CONTROL_ALREADY_ACTIVE sha=$FINAL_SHA count=$active"
           fi
 
+      - name: Dispatch exact hosted private signer rescue fallback
+        if: steps.gate.outputs.need_sign == 'true' && steps.rescue_sign.outputs.available != 'true' && steps.hosted_sign.outputs.available != 'true' && steps.wake.outputs.runtime_available != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          FINAL_SHA: ${{ steps.handoff.outputs.final_sha }}
+          RESCUE_REF: rescue/hosted-signer-bcf882
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          current="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/main" --jq .sha)"
+          [ "$current" = "$FINAL_SHA" ] || { echo "OMEGA_HOSTED_RESCUE_MAIN_MOVED:$FINAL_SHA!=$current" >&2; exit 75; }
+          ref_sha="$(gh api "/repos/$PRIVATE_REPOSITORY/commits/$RESCUE_REF" --jq .sha)"
+          [ "$ref_sha" = "117e0eb4efe0326b658ecea278368398fd4e9c9e" ] || { echo "OMEGA_HOSTED_RESCUE_REF_MOVED:$ref_sha" >&2; exit 75; }
+          active="$(
+            gh api "/repos/$PRIVATE_REPOSITORY/actions/runs?branch=$RESCUE_REF&status=queued&per_page=100" --jq '[.workflow_runs[] | select(.name=="OMEGA Android Signing Keepalive" and .event=="workflow_dispatch")] | length'
+          )"
+          active="$((active + $(gh api "/repos/$PRIVATE_REPOSITORY/actions/runs?branch=$RESCUE_REF&status=in_progress&per_page=100" --jq '[.workflow_runs[] | select(.name=="OMEGA Android Signing Keepalive" and .event=="workflow_dispatch")] | length')))"
+          if [ "$active" -eq 0 ]; then
+            gh workflow run android-signing-keepalive.yml               -R "$PRIVATE_REPOSITORY"               --ref "$RESCUE_REF"               -f mode=rescue               -f allow_private_self_hosted=true
+            echo "OMEGA_HOSTED_RESCUE_DISPATCHED source=$FINAL_SHA ref=$RESCUE_REF"
+          else
+            echo "OMEGA_HOSTED_RESCUE_ALREADY_ACTIVE source=$FINAL_SHA ref=$RESCUE_REF count=$active"
+          fi
+
       - name: Hold certification pending when no canonical signer backend is available
         if: steps.gate.outputs.need_sign == 'true' && steps.rescue_sign.outputs.available != 'true' && steps.hosted_sign.outputs.available != 'true' && steps.wake.outputs.runtime_available != 'true'
         shell: bash
