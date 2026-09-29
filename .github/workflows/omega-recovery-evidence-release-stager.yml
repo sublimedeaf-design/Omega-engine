@@ -133,14 +133,28 @@ jobs:
           lock_encoded="$(gh api "/repos/${{ github.repository }}/contents/bootstrap/omega/canonical-unsigned-lock.json?ref=${{ github.sha }}" --jq '.content' 2>/dev/null || true)"
           if [ -n "$lock_encoded" ]; then
             lock_json="$(printf '%s' "$lock_encoded" | tr -d '\n' | base64 -d)"
-            lock_row="$(LOCK_JSON="$lock_json" SOURCE_SHA="$source" python3 - <<'PY'
+            epoch_encoded="$(gh api "/repos/${{ github.repository }}/contents/federation/epochs/current.json?ref=main" --jq '.content' 2>/dev/null || true)"
+            [ -n "$epoch_encoded" ] || { echo "OMEGA_UNSIGNED_LOCK_CURRENT_EPOCH_MISSING" >&2; exit 75; }
+            epoch_json="$(printf '%s' "$epoch_encoded" | tr -d '\n' | base64 -d)"
+            lock_row="$(LOCK_JSON="$lock_json" CURRENT_EPOCH_JSON="$epoch_json" SOURCE_SHA="$source" python3 - <<'PY'
           import json,os,re
           p=json.loads(os.environ["LOCK_JSON"])
+          e=json.loads(os.environ["CURRENT_EPOCH_JSON"])
           source=os.environ["SOURCE_SHA"]
           if p.get("state")!="LOCKED" or p.get("immutable") is not True:
               raise SystemExit(0)
           if p.get("source_sha")!=source:
               raise SystemExit("OMEGA_UNSIGNED_LOCK_SOURCE_MISMATCH")
+          rel=e.get("release_epoch") or {}
+          roll=e.get("release_rollover") or {}
+          current_id=str(rel.get("id") or "")
+          current_seq=rel.get("sequence")
+          certified=(e.get("state")=="PASS" and roll.get("stage")=="CERTIFIED_PASS"
+                     and str(roll.get("release_epoch_id") or "")==current_id)
+          if (not certified
+              or p.get("release_epoch_id")!=current_id
+              or p.get("release_epoch_sequence")!=current_seq):
+              raise SystemExit(0)
           sha=str(p.get("unsigned_sha256") or "")
           run=str(p.get("stager_run_id") or "")
           aid=str(p.get("artifact_id") or "")
@@ -150,6 +164,9 @@ jobs:
           print("|".join((sha,run,aid,name)))
           PY
           )"
+            if [ -z "$lock_row" ]; then
+              echo "OMEGA_UNSIGNED_LOCK_NOT_CURRENT_EPOCH source=$source"
+            fi
             if [ -n "$lock_row" ]; then
               IFS='|' read -r lock_sha lock_run lock_artifact_id lock_artifact_name <<<"$lock_row"
               echo "lock_sha256=$lock_sha" >> "$GITHUB_OUTPUT"
