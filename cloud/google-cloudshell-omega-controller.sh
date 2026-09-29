@@ -52,7 +52,7 @@ sudo tailscale --socket="$SOCKET" up \
 echo "OMEGA_TAILSCALE_LOGIN_PASS"
 
 sudo tailscale --socket="$SOCKET" status
-sudo tailscale --socket="$SOCKET" ping --timeout=10s "$TARGET"
+sudo tailscale --socket="$SOCKET" ping --timeout=10s --until-direct=false --c=1 "$TARGET"
 echo "OMEGA_EXTERNAL_PEER_REACHABILITY_PASS target=$TARGET"
 
 if [ ! -f "$KEY" ]; then
