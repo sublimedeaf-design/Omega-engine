@@ -1,0 +1,7 @@
+name = "omega-generation-pulse"
+main = "cloudflare-generation-pulse.js"
+compatibility_date = "2026-09-29"
+workers_dev = true
+
+[triggers]
+crons = ["*/5 * * * *"]
