@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "state": "LOCKED",
+  "source_sha": "9980fbd6f0511377b01f799651c6cec351cbf74f",
+  "omega_release_id": "258be71845b470c9258bc5cefc813032b70fae5ea6d66c1bf30a9f3f20aca3e3",
+  "release_epoch_id": "45fef390308d1f562277294a84bf39c97a31544625dad047013ceeea8528c556",
+  "release_epoch_sequence": 125,
+  "omega_execution_id": "ba4d979c36f4ff12a1d8fb288d66aefacfd76005a70477f404ccab12fdc25249",
+  "unsigned_sha256": "70ef2ce7afbccab558e272a70a83250e2b483c782254ef2b34036e835bc0395a",
+  "stager_run_id": 36603568959,
+  "artifact_id": 11049424026,
+  "artifact_name": "OMEGA-Unsigned-Release-9980fbd6f0511377b01f799651c6cec351cbf74f",
+  "reproducibility_probe_run_id": 36624919814,
+  "lock_basis": "Previously pinned exact unsigned candidate; reproducibility probe proved later executions changed embedded execution-scoped evidence while source/release/epoch identity remained constant.",
+  "immutable": true
+}
