@@ -519,30 +519,51 @@ jobs:
           gh api --method POST "/repos/$PRIVATE_REPOSITORY/statuses/$FINAL_SHA"             -f state=pending             -f context="omega/android-release-signing"             -f description="canonical signer runtime unavailable; automatic retry armed"             -f target_url="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" >/dev/null
           echo "OMEGA_CANONICAL_SIGNER_BLOCKED_AUTORETRY sha=$FINAL_SHA"
 
-      - name: Request repo-local Samsung ARM64 signer actuation
+      - name: Request repo-local signer rescue with bounded direct fallback
         if: steps.gate.outputs.need_sign == 'true' && steps.rescue_sign.outputs.available != 'true' && steps.hosted_sign.outputs.available != 'true' && steps.wake.outputs.runtime_available != 'true'
         env:
-          GH_TOKEN: ${{ github.token }}
+          CONTROL_TOKEN: ${{ github.token }}
+          PRIVATE_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
           FINAL_SHA: ${{ steps.handoff.outputs.final_sha }}
+          PRIVATE_SIGNER_WORKFLOW: android-signing-keepalive.yml
         shell: bash
         run: |
           set -Eeuo pipefail
-          # The private repository owns the Samsung signer and already has a
-          # status-driven actuator with repo-local actions:write. Never require
-          # a cross-repository PAT to dispatch the secret-bearing signer.
-          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
-            echo "OMEGA_NATIVE_SIGNER_STATUS_REQUESTED sha=$FINAL_SHA control_run=$GITHUB_RUN_ID"
+          set +x
+          [ -n "${PRIVATE_TOKEN:-}" ] || {
+            echo "OMEGA_NATIVE_SIGNER_DIRECT_TOKEN_MISSING"
+            exit 0
+          }
+
+          echo "OMEGA_NATIVE_SIGNER_STATUS_WINDOW_OPEN sha=$FINAL_SHA control_run=$GITHUB_RUN_ID"
+          # Preserve the existing status-driven private actuator as the first path.
+          # Give it a bounded window to enqueue the hosted cache-rescue. If it does
+          # not materialize, fall back to the same private workflow directly.
+          sleep 10
+
+          current="$(GH_TOKEN="$PRIVATE_TOKEN" gh api "/repos/$PRIVATE_REPOSITORY/commits/main" --jq .sha)"
+          if [ "$current" != "$FINAL_SHA" ]; then
+            echo "OMEGA_NATIVE_SIGNER_DIRECT_STALE_NOOP:$FINAL_SHA!=$current"
             exit 0
           fi
 
           active="$(
-            GH_TOKEN="$GH_TOKEN" gh api "/repos/$GITHUB_REPOSITORY/actions/workflows/omega-canonical-android-signer.yml/runs?per_page=30"               --jq '[.workflow_runs[] | select(.event=="workflow_dispatch" and (.status=="queued" or .status=="in_progress"))] | length'
+            {
+              GH_TOKEN="$PRIVATE_TOKEN" gh api "/repos/$PRIVATE_REPOSITORY/actions/workflows/$PRIVATE_SIGNER_WORKFLOW/runs?status=queued&per_page=20" --jq '.total_count'
+              GH_TOKEN="$PRIVATE_TOKEN" gh api "/repos/$PRIVATE_REPOSITORY/actions/workflows/$PRIVATE_SIGNER_WORKFLOW/runs?status=in_progress&per_page=20" --jq '.total_count'
+            } | awk '{s+=$1} END{print s+0}'
           )"
-          if [ "$active" -eq 0 ]; then
-            GH_TOKEN="$GH_TOKEN" gh workflow run omega-canonical-android-signer.yml               -R "$GITHUB_REPOSITORY" --ref main
-            echo "OMEGA_NATIVE_SIGNER_CONTROL_DISPATCHED sha=$FINAL_SHA"
+          if [ "$active" -gt 0 ]; then
+            echo "OMEGA_NATIVE_SIGNER_RESCUE_ALREADY_ACTIVE sha=$FINAL_SHA count=$active"
+            exit 0
+          fi
+
+          # The private rescue workflow is still the signer boundary. This control
+          # job never receives, reads, exports or rewrites the canonical key.
+          if GH_TOKEN="$PRIVATE_TOKEN" gh workflow run "$PRIVATE_SIGNER_WORKFLOW"               -R "$PRIVATE_REPOSITORY"               --ref main               -f mode=rescue               -f allow_private_self_hosted=true; then
+            echo "OMEGA_NATIVE_SIGNER_DIRECT_RESCUE_DISPATCHED sha=$FINAL_SHA backend=github-hosted-cache-rescue"
           else
-            echo "OMEGA_NATIVE_SIGNER_CONTROL_ALREADY_ACTIVE sha=$FINAL_SHA count=$active"
+            echo "OMEGA_NATIVE_SIGNER_DIRECT_RESCUE_DISPATCH_FAILED sha=$FINAL_SHA"
           fi
 
       - name: Hold certification pending when no canonical signer backend is available
