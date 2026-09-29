@@ -1,0 +1,82 @@
+name: OMEGA Ephemeral Render Runner Token Broker
+
+on:
+  push:
+    branches:
+      - rescue/render-runner-token-28a3e81-v1
+
+permissions:
+  contents: read
+
+concurrency:
+  group: omega-ephemeral-render-runner-token-28a3e81
+  cancel-in-progress: true
+
+jobs:
+  broker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+      TARGET_REPOSITORY: sublimedeaf-design/Omega-engines
+    steps:
+      - name: Require existing bootstrap authority
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          set +x
+          [ -n "${GH_TOKEN:-}" ] || { echo OMEGA_RUNNER_BROKER_BOOTSTRAP_TOKEN_MISSING >&2; exit 78; }
+          echo OMEGA_RUNNER_BROKER_AUTH_PRESENT
+
+      - name: Mint one-time repository runner registration token
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          set +x
+          response="$(curl -fsS -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/$TARGET_REPOSITORY/actions/runners/registration-token")"
+          TOKEN_JSON="$response" python3 - <<'PY'
+          import json,os,pathlib
+          p=json.loads(os.environ["TOKEN_JSON"])
+          token=str(p.get("token") or "")
+          if len(token)<20:
+              raise SystemExit("OMEGA_RUNNER_BROKER_TOKEN_INVALID")
+          pathlib.Path("runner-token.txt").write_text(token,encoding="utf-8")
+          PY
+          chmod 600 runner-token.txt
+          echo OMEGA_RUNNER_BROKER_TOKEN_MINTED
+
+      - name: Encrypt token to session-only public key
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          set +x
+          cat > broker-public.pem <<'PEM'
+-----BEGIN PUBLIC KEY-----
+MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAzQ1+LA/QIt2GCvgHpDtP
+H/vu/O4HZ3TmPJef+4IcWgTjERInPo4XQ0u914bBGh07n0wfpWyVFXlJcejKCNqH
+Snb39odwpLXAxlFn8kN1hD2U/AeIrRG6kQhLmNbBJ+pySXYOptX1EmVhNC8hqcjk
+YlEdeRFzhGuV1hPj0e+AnXODJTYmApce8XD8p13ECOVVlPUncqNVZcCEdrPx2V8w
+EhP8IUcLVlTqUQCRDwGLuWtJK3bMAM2cdXT1obKwQ0ks3rU4hoCbNzf2fWFC4qbF
+F7qJnGPfzypr0Dzfj3eV1BTaWiuVR1dRO87kCogi7kTXw7j1oKqy3U/dNBiFhMuo
+/wIDAQAB
+-----END PUBLIC KEY-----
+PEM
+          openssl pkeyutl -encrypt -pubin -inkey broker-public.pem \
+            -pkeyopt rsa_padding_mode:oaep \
+            -pkeyopt rsa_oaep_md:sha256 \
+            -in runner-token.txt -out runner-token.enc
+          rm -f runner-token.txt
+          test -s runner-token.enc
+          echo OMEGA_RUNNER_BROKER_CIPHERTEXT_READY
+
+      - name: Upload encrypted one-time handoff
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: OMEGA-Render-Runner-Token-Ciphertext-28a3e81
+          retention-days: 1
+          if-no-files-found: error
+          path: runner-token.enc
