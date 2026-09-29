@@ -559,3 +559,4 @@ jobs:
         if: always()
         shell: bash
         run: rm -f "$RUNNER_TEMP/omega-google-upload.jks" "$HOME/.android/debug.keystore" || true
+# branch-trigger: arm google autopilot for exact-source 036dc286ab7a
