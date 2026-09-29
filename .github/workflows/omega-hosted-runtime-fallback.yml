@@ -413,3 +413,4 @@ jobs:
               -f description="public hosted immutable shadow/data handoff chain: $RESULT terminal=$OMEGA_MODE" \
               -f target_url="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" >/dev/null
           done
+# branch-trigger: settlement exact-source 036dc286ab7a
