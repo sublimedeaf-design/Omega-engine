@@ -3,6 +3,13 @@ import html
 import json
 import logging
 import os
+import pathlib
+import re
+import shutil
+import subprocess
+import tarfile
+import tempfile
+import threading
 import time
 from urllib.parse import quote
 
@@ -27,13 +34,20 @@ HANDOFF_PUBLIC_KEY = serialization.load_pem_public_key(
     base64.b64decode(os.environ["HANDOFF_PUBLIC_KEY_PEM_B64"])
 )
 APP_NAME = os.environ.get("APP_NAME", "omega-runner-authority")
-DATA = {"stage": "ready_for_authorization", "app": None, "installation_id": None, "handoff": None, "error": None}
+DATA = {
+    "stage": "ready_for_authorization",
+    "app": None,
+    "installation_id": None,
+    "handoff": None,
+    "runner_name": None,
+    "error": None,
+}
 
 def _headers(token=None):
     h = {
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": API_VERSION,
-        "User-Agent": "OMEGA-Runner-Authority-Broker/1.0",
+        "User-Agent": "OMEGA-Runner-Authority-Broker/1.1",
     }
     if token:
         h["Authorization"] = f"Bearer {token}"
@@ -66,6 +80,98 @@ def _hybrid_encrypt(payload):
         "ciphertext_b64": base64.b64encode(ciphertext).decode(),
         "aad_b64": base64.b64encode(aad).decode(),
     }
+
+def _revoke_installation():
+    installation_id = DATA.get("installation_id")
+    if not installation_id:
+        return True
+    try:
+        r = requests.delete(
+            f"{API}/app/installations/{installation_id}",
+            headers=_headers(_app_jwt()),
+            timeout=20,
+        )
+        return r.status_code in (202, 204, 404)
+    except Exception:
+        return False
+
+def _download_runner(root):
+    r = requests.get(
+        f"{API}/repos/actions/runner/releases/latest",
+        headers=_headers(),
+        timeout=30,
+    )
+    r.raise_for_status()
+    release = r.json()
+    assets = [
+        a for a in release.get("assets", [])
+        if re.fullmatch(r"actions-runner-linux-x64-[0-9.]+\.tar\.gz", str(a.get("name") or ""))
+    ]
+    if len(assets) != 1:
+        raise RuntimeError("RUNNER_ASSET_INVALID")
+    with tempfile.NamedTemporaryFile(suffix=".tar.gz", delete=False) as fh:
+        archive = pathlib.Path(fh.name)
+    try:
+        with requests.get(assets[0]["browser_download_url"], stream=True, timeout=120) as dl:
+            dl.raise_for_status()
+            with archive.open("wb") as out:
+                for chunk in dl.iter_content(chunk_size=1024 * 1024):
+                    if chunk:
+                        out.write(chunk)
+        with tarfile.open(archive, "r:gz") as tf:
+            tf.extractall(root, filter="data")
+    finally:
+        archive.unlink(missing_ok=True)
+
+def _runner_worker(registration_token):
+    root = pathlib.Path("/tmp/omega-authority-runner")
+    try:
+        DATA["stage"] = "runner_provisioning"
+        if root.exists():
+            shutil.rmtree(root)
+        root.mkdir(parents=True)
+        _download_runner(root)
+
+        runner_name = f"omega-render-authority-{int(time.time())}"
+        DATA["runner_name"] = runner_name
+        env = os.environ.copy()
+        env["RUNNER_ALLOW_RUNASROOT"] = "1"
+
+        subprocess.run(
+            [
+                str(root / "config.sh"),
+                "--url", f"https://github.com/{TARGET_OWNER}/{TARGET_REPO}",
+                "--token", registration_token,
+                "--name", runner_name,
+                "--labels", "omega-ci",
+                "--unattended",
+                "--ephemeral",
+                "--replace",
+            ],
+            cwd=root,
+            env=env,
+            check=True,
+            timeout=180,
+        )
+        registration_token = ""
+        DATA["stage"] = "runner_online"
+
+        proc = subprocess.Popen([str(root / "run.sh")], cwd=root, env=env)
+        rc = proc.wait()
+        DATA["stage"] = "runner_job_complete" if rc == 0 else "runner_job_failed"
+        if rc != 0:
+            DATA["error"] = f"RUNNER_EXIT_{rc}"
+    except Exception as exc:
+        registration_token = ""
+        DATA["stage"] = "error"
+        DATA["error"] = f"RUNNER_START_FAILED:{type(exc).__name__}"
+    finally:
+        revoked = _revoke_installation()
+        DATA["installation_revoked"] = revoked
+        try:
+            shutil.rmtree(root)
+        except Exception:
+            pass
 
 def _fail(code, exc):
     DATA["stage"] = "error"
@@ -100,7 +206,7 @@ def index():
 <h1>OMEGA · one-time runner authority</h1>
 <p>Deze tijdelijke privé GitHub App vraagt alleen <b>Repository Administration: write</b> voor <b>{html.escape(TARGET_OWNER + "/" + TARGET_REPO)}</b>.
 Dat recht wordt uitsluitend gebruikt om één GitHub self-hosted runner registration token te maken. De canonical Android signing key wordt niet vervangen of geëxporteerd.</p>
-<p>Installeer de App alleen op <b>{html.escape(TARGET_REPO)}</b>. Na succesvolle runnerregistratie wordt de installatie weer ingetrokken.</p>
+<p>Installeer de App alleen op <b>{html.escape(TARGET_REPO)}</b>. Na de eerste ephemeral runner-job wordt de installatie automatisch weer ingetrokken.</p>
 <form method="post" action="{action}">
 <input type="hidden" name="manifest" value="{m}">
 <button style="font-size:18px;padding:14px 20px">GitHub-toestemming starten</button>
@@ -179,45 +285,46 @@ def installed():
         }
         DATA["handoff"] = _hybrid_encrypt(payload)
         DATA["installation_id"] = installation_id
-        DATA["stage"] = "handoff_ready"
+        DATA["stage"] = "runner_starting"
+        threading.Thread(
+            target=_runner_worker,
+            args=(regj["token"],),
+            daemon=True,
+        ).start()
+
         return """<!doctype html><html><body style='font-family:sans-serif;background:#07111f;color:#eef5ff;padding:32px'>
-<h2 style='color:#4ee29a'>OMEGA authority gereed</h2>
-<p>De kortlevende runner-authority is veilig aangemaakt en versleuteld. Ga terug naar ChatGPT; er hoeft hier niets meer gekopieerd te worden.</p>
+<h2 style='color:#4ee29a'>OMEGA authority geautoriseerd</h2>
+<p>De tijdelijke authority start nu automatisch één ephemeral omega-ci runner. Het runner-token wordt niet getoond of opgeslagen. Ga terug naar ChatGPT.</p>
 </body></html>"""
     except Exception as exc:
         return _fail("INSTALLATION_FLOW_FAILED", exc)
 
 @app.get("/healthz")
 def healthz():
-    return jsonify({"ok": DATA["stage"] != "error", "stage": DATA["stage"], "error": DATA["error"]})
+    return jsonify({
+        "ok": DATA["stage"] != "error",
+        "stage": DATA["stage"],
+        "runner_name": DATA.get("runner_name"),
+        "installation_revoked": DATA.get("installation_revoked"),
+        "error": DATA["error"],
+    })
 
 @app.get("/handoff/<nonce>")
 def handoff(nonce):
     if nonce != BROKER_NONCE:
         return jsonify({"error": "not_found"}), 404
-    if DATA.get("stage") != "handoff_ready" or not DATA.get("handoff"):
+    if not DATA.get("handoff"):
         return jsonify({"ready": False, "stage": DATA.get("stage"), "error": DATA.get("error")}), 202
-    return jsonify({"ready": True, "handoff": DATA["handoff"]})
+    return jsonify({"ready": True, "stage": DATA.get("stage"), "handoff": DATA["handoff"]})
 
 @app.get("/cleanup/<nonce>")
 def cleanup(nonce):
     if nonce != BROKER_NONCE:
         return jsonify({"error": "not_found"}), 404
-    installation_id = DATA.get("installation_id")
-    if not installation_id:
-        return jsonify({"ok": True, "stage": "nothing_to_cleanup"})
-    try:
-        r = requests.delete(
-            f"{API}/app/installations/{installation_id}",
-            headers=_headers(_app_jwt()),
-            timeout=20,
-        )
-        if r.status_code not in (202, 204, 404):
-            return jsonify({"ok": False, "status": r.status_code}), 502
+    if _revoke_installation():
         DATA["stage"] = "installation_revoked"
         return jsonify({"ok": True, "stage": DATA["stage"]})
-    except Exception:
-        return jsonify({"ok": False, "stage": "cleanup_failed"}), 500
+    return jsonify({"ok": False, "stage": "cleanup_failed"}), 500
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "10000")))
