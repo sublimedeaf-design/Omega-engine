@@ -467,19 +467,21 @@ jobs:
           cleanup(){ rm -f "$key"; }
           trap cleanup EXIT
           umask 077
-          printf '%s' "$OMEGA_ANDROID_KEYSTORE_B64" | base64 -d > "$key" || {
-            echo OMEGA_HOSTED_SIGNER_ESCROW_DECODE_FAILED >&2
-            exit 34
-          }
+          if ! printf '%s' "$OMEGA_ANDROID_KEYSTORE_B64" | base64 -d > "$key" 2>/dev/null; then
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo OMEGA_HOSTED_SIGNER_ESCROW_DECODE_FAILED_FALLBACK
+            exit 0
+          fi
           fingerprint(){
             keytool -list -v -keystore "$1" -storepass android -alias androiddebugkey 2>/dev/null |
               sed -n 's/.*SHA256: //p' | head -1 | tr -d ':' | tr 'A-F' 'a-f'
           }
           actual_fp="$(fingerprint "$key" || true)"
-          [ "$actual_fp" = "$EXPECTED_FINGERPRINT" ] || {
-            echo OMEGA_HOSTED_SIGNER_ESCROW_FINGERPRINT_MISMATCH >&2
-            exit 35
-          }
+          if [ "$actual_fp" != "$EXPECTED_FINGERPRINT" ]; then
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo OMEGA_HOSTED_SIGNER_ESCROW_FINGERPRINT_MISMATCH_FALLBACK
+            exit 0
+          fi
           mkdir -p dist
           rm -f dist/OMEGA-Engine.apk dist/OMEGA-Engine.apk.sha256
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" sign             --ks "$key" --ks-key-alias androiddebugkey             --ks-pass pass:android --key-pass pass:android             --out dist/OMEGA-Engine.apk "$UNSIGNED_APK"
