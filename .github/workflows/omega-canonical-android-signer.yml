@@ -277,15 +277,32 @@ jobs:
           )"
           if [ "$contract_control" != "$current_control" ]; then
             compare="$(GH_TOKEN="$CONTROL_GH_TOKEN" gh api "/repos/$GITHUB_REPOSITORY/compare/$contract_control...$current_control")"
-            COMPARE_PAYLOAD="$compare" python3 - <<'PY'
-          import json,os
+            COMPARE_PAYLOAD="$compare" CONTRACT_CONTROL="$contract_control" CURRENT_CONTROL="$current_control" python3 - <<'PY'
+          import json,os,pathlib,subprocess
           p=json.loads(os.environ["COMPARE_PAYLOAD"])
           if str(p.get("status") or "") not in {"ahead","identical"} or int(p.get("behind_by") or 0)!=0:
               raise SystemExit("OMEGA_SIGNER_CONTROL_GENERATION_STALE:history")
           changed=[str(x.get("filename") or "") for x in p.get("files") or []]
           unsafe=[x for x in changed if not (x.startswith("federation/epochs/") or x.startswith("bootstrap/omega/"))]
           if unsafe:
-              raise SystemExit("OMEGA_SIGNER_CONTROL_GENERATION_STALE:"+",".join(unsafe))
+              migration_path=pathlib.Path("bootstrap/omega/control-migration-9980.json")
+              if not migration_path.is_file():
+                  raise SystemExit("OMEGA_SIGNER_CONTROL_GENERATION_STALE:"+",".join(unsafe))
+              m=json.loads(migration_path.read_text(encoding="utf-8"))
+              if (m.get("state")!="PASS"
+                  or m.get("source_sha")!=os.environ["FINAL_SHA"]
+                  or m.get("base_control_contract_sha")!=os.environ["CONTRACT_CONTROL"]):
+                  raise SystemExit("OMEGA_SIGNER_CONTROL_MIGRATION_IDENTITY_INVALID")
+              allowed=m.get("allowed_unsafe_blobs") or {}
+              if sorted(unsafe)!=sorted(allowed):
+                  raise SystemExit("OMEGA_SIGNER_CONTROL_MIGRATION_SCOPE_MISMATCH:"+",".join(unsafe))
+              for path,want in allowed.items():
+                  actual=subprocess.check_output(
+                      ["git","rev-parse","HEAD:"+path],text=True
+                  ).strip()
+                  if actual!=want:
+                      raise SystemExit("OMEGA_SIGNER_CONTROL_MIGRATION_BLOB_MISMATCH:"+path)
+              print("OMEGA_SIGNER_CONTROL_MIGRATION_PASS paths="+",".join(sorted(unsafe)))
           PY
           fi
 
