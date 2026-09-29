@@ -242,21 +242,44 @@ jobs:
               raise SystemExit("OMEGA_RELEASE_CERTIFIER_FINALIZE_AUTHORITY_MOVED")
           if rr.get("stage")!="CERTIFIED_PASS_PENDING_SECOND_PROOF":
               raise SystemExit("OMEGA_RELEASE_CERTIFIER_FINALIZE_STAGE_MOVED")
+          rel=d.get("release_epoch") or {}
+          epoch_id=str(rel.get("id") or "")
+          if len(epoch_id)!=64:
+              raise SystemExit("OMEGA_RELEASE_CERTIFIER_FINALIZE_EPOCH_ID_INVALID")
           rr["stage"]="CERTIFIED_PASS"
           rr["second_peer_bridge_run_id"]=os.environ["BRIDGE_RUN_ID"]
+          rr["execution_control_ref"]="omega-control-epoch/"+epoch_id[:16]
           print(json.dumps(d,indent=2,ensure_ascii=False))
           PY
           encoded="$(base64 -w0 "$RUNNER_TEMP/epoch-final.json")"
-          gh api --method PUT "/repos/$CONTROL_REPOSITORY/contents/federation/epochs/current.json" \
+          response="$(gh api --method PUT "/repos/$CONTROL_REPOSITORY/contents/federation/epochs/current.json" \
             -f message="Federation v3: finalize second proof for ${SOURCE_SHA:0:12}" \
-            -f content="$encoded" -f sha="$blob_sha" -f branch=main >/dev/null
+            -f content="$encoded" -f sha="$blob_sha" -f branch=main)"
+          certified_snapshot_sha="$(printf '%s' "$response" | jq -r '.commit.sha // empty')"
+          [[ "$certified_snapshot_sha" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "OMEGA_RELEASE_EXECUTION_SNAPSHOT_SHA_INVALID" >&2
+            exit 66
+          }
+          control_ref="omega-control-epoch/${RELEASE_EPOCH_ID:0:16}"
+          existing_ref="$(gh api "/repos/$CONTROL_REPOSITORY/git/ref/heads/$control_ref" --jq '.object.sha // empty' 2>/dev/null || true)"
+          if [ -n "$existing_ref" ]; then
+            [ "$existing_ref" = "$certified_snapshot_sha" ] || {
+              echo "OMEGA_RELEASE_EXECUTION_REF_MOVED:$control_ref:$existing_ref!=$certified_snapshot_sha" >&2
+              exit 66
+            }
+          else
+            gh api --method POST "/repos/$CONTROL_REPOSITORY/git/refs" \
+              -f ref="refs/heads/$control_ref" \
+              -f sha="$certified_snapshot_sha" >/dev/null
+          fi
+          echo "OMEGA_RELEASE_EXECUTION_REF_READY ref=$control_ref sha=$certified_snapshot_sha"
           echo "OMEGA_RELEASE_FEDERATION_SECOND_PROOF_FINALIZED source=$SOURCE_SHA bridge_run=$BRIDGE_RUN_ID"
 
-          echo "OMEGA_RELEASE_FINAL_RECOVERY_ARMED source=$SOURCE_SHA ref=$SOURCE_REF"
-          gh workflow run omega-hosted-recovery-failover.yml -R "$CONTROL_REPOSITORY" --ref main
-          echo "OMEGA_RELEASE_FINAL_RECOVERY_DISPATCHED source=$SOURCE_SHA"
+          echo "OMEGA_RELEASE_FINAL_RECOVERY_ARMED source=$SOURCE_SHA ref=$SOURCE_REF control_ref=$control_ref"
+          gh workflow run omega-hosted-recovery-failover.yml -R "$CONTROL_REPOSITORY" --ref "$control_ref"
+          echo "OMEGA_RELEASE_FINAL_RECOVERY_DISPATCHED source=$SOURCE_SHA control_ref=$control_ref"
 
           # Explicit handoff avoids GitHub workflow_run depth limits. The signer
           # arm is idempotent and still requires the complete exact-SHA gate set.
-          gh workflow run omega-signer-continuity-arm.yml -R "$CONTROL_REPOSITORY" --ref main
-          echo "OMEGA_RELEASE_SIGNER_ARM_DISPATCHED source=$SOURCE_SHA"
+          gh workflow run omega-signer-continuity-arm.yml -R "$CONTROL_REPOSITORY" --ref "$control_ref"
+          echo "OMEGA_RELEASE_SIGNER_ARM_DISPATCHED source=$SOURCE_SHA control_ref=$control_ref"
