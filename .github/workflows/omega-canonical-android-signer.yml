@@ -49,7 +49,32 @@ jobs:
           final="$(GH_TOKEN="$PRIVATE_TOKEN" gh api "/repos/$PRIVATE_REPOSITORY/commits/main" --jq .sha)"
           [[ "$final" =~ ^[0-9a-f]{40}$ ]] || { echo OMEGA_SIGNER_PRIVATE_MAIN_INVALID >&2; exit 64; }
 
-          if [ "$EVENT_NAME" = workflow_run ] && [ "$EVENT_WORKFLOW_NAME" = "OMEGA Recovery Evidence Release Stager" ]; then
+          # Canonical selection is status-driven, not "newest artifact" driven.
+          # This is required because repeated executions can carry different
+          # execution-scoped evidence while the source/release/epoch identity is unchanged.
+          status="$(GH_TOKEN="$PRIVATE_TOKEN" gh api "/repos/$PRIVATE_REPOSITORY/commits/$final/status?per_page=100")"
+          canonical_run="$(STATUS_PAYLOAD="$status" python3 - <<'PY'
+          import json,os,re
+          p=json.loads(os.environ["STATUS_PAYLOAD"])
+          latest={}
+          for row in p.get("statuses",[]):
+              ctx=str(row.get("context") or "")
+              stamp=str(row.get("updated_at") or row.get("created_at") or "")
+              if ctx and (ctx not in latest or stamp > latest[ctx][0]):
+                  latest[ctx]=(stamp,row)
+          row=(latest.get("omega/android-release-unsigned") or ("",{}))[1]
+          if row.get("state")=="success":
+              target=str(row.get("target_url") or "")
+              m=re.fullmatch(r"https://github\.com/sublimedeaf-design/Omega-engine/actions/runs/(\d+)",target)
+              if m:
+                  print(m.group(1))
+          PY
+          )"
+
+          if [ -n "$canonical_run" ]; then
+            runs=("$canonical_run")
+            echo "OMEGA_SIGNER_STATUS_PINNED_HANDOFF run=$canonical_run sha=$final"
+          elif [ "$EVENT_NAME" = workflow_run ] && [ "$EVENT_WORKFLOW_NAME" = "OMEGA Recovery Evidence Release Stager" ]; then
             runs=("$EVENT_RUN_ID")
           else
             mapfile -t runs < <(GH_TOKEN="$PUBLIC_TOKEN" gh api "/repos/${{ github.repository }}/actions/workflows/omega-recovery-evidence-release-stager.yml/runs?status=success&per_page=30" --jq '.workflow_runs[].id')
