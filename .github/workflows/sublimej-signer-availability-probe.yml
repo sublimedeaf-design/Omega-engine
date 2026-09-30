@@ -1,0 +1,52 @@
+name: SublimeJ Signer Availability Probe
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/sublimej-signer-availability-probe.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sublimej-signer-availability-probe
+  cancel-in-progress: false
+
+env:
+  EXPECTED_FINGERPRINT: 0738b245ec8a557edc0600a6961d7bb2586cc22f886ed5273560ce6ab2db447f
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Verify escrow availability and certificate identity
+        env:
+          OMEGA_ANDROID_KEYSTORE_B64: ${{ secrets.OMEGA_ANDROID_KEYSTORE_B64 }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          set +x
+          if [ -z "${OMEGA_ANDROID_KEYSTORE_B64:-}" ]; then
+            echo "SUBLIMEJ_SIGNER_ESCROW_UNAVAILABLE"
+            exit 44
+          fi
+          tmp="$(mktemp)"
+          trap 'rm -f "$tmp"' EXIT
+          umask 077
+          printf '%s' "$OMEGA_ANDROID_KEYSTORE_B64" | base64 --decode > "$tmp"
+          test -s "$tmp"
+          actual="$(keytool -list -v -keystore "$tmp" -storepass android -alias androiddebugkey 2>/dev/null |
+            sed -n 's/.*SHA256: //p' | head -1 | tr -d ':' | tr 'A-F' 'a-f')"
+          test "$actual" = "$EXPECTED_FINGERPRINT" || {
+            echo "SUBLIMEJ_SIGNER_ESCROW_FINGERPRINT_MISMATCH"
+            exit 45
+          }
+          echo "SUBLIMEJ_SIGNER_ESCROW_PASS fingerprint_verified=true"
