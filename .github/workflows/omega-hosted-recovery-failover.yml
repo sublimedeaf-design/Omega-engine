@@ -8,6 +8,7 @@ on:
     branches: [main]
     paths:
       - "bootstrap/omega/recovery-trigger.txt"
+      - ".github/workflows/omega-hosted-recovery-failover.yml"
 
 permissions:
   contents: read
@@ -57,7 +58,11 @@ jobs:
           sha="$main_sha"
           mode=main
           candidate_watch=false
-          if [ "$EVENT_NAME" = push ] || { [ "$EVENT_NAME" = schedule ] && [ "$EVENT_SCHEDULE" = "22,52 * * * *" ]; }; then
+          # Explicit recovery intent (including the release certifier's
+          # workflow_dispatch) must consume the exact epoch-bearing trigger. Treating
+          # workflow_dispatch as a routine-main probe can reuse a green certificate
+          # from an older release epoch for the same source SHA.
+          if [ "$EVENT_NAME" = push ] || [ "$EVENT_NAME" = workflow_dispatch ] || { [ "$EVENT_NAME" = schedule ] && [ "$EVENT_SCHEDULE" = "22,52 * * * *" ]; }; then
             candidate_watch=true
           fi
           if [ "$EVENT_NAME" = push ]; then

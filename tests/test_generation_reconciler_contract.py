@@ -77,6 +77,8 @@ def test_recovery_explicitly_dispatches_candidate_evidence_root():
     assert "OMEGA_HOSTED_RECOVERY_EPOCH_AUTHORITY_RETRY" in wf
     assert 'expected_epoch="$(epoch_identity_retry)"' in wf
     assert 'current_epoch="$(epoch_identity_retry)"' in wf
+    assert '"$EVENT_NAME" = workflow_dispatch' in wf
+    assert '- ".github/workflows/omega-hosted-recovery-failover.yml"' in wf
 
 
 if __name__ == "__main__":
