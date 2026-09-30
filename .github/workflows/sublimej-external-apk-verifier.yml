@@ -1,0 +1,102 @@
+name: SublimeJ External APK Verifier
+
+on:
+  push:
+    paths:
+      - ".github/workflows/sublimej-external-apk-verifier.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sublimej-external-apk-verifier
+  cancel-in-progress: true
+
+env:
+  TARGET_REPOSITORY: sublimedeaf-design/Sublimej
+
+jobs:
+  verify-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Resolve exact current SublimeJ main
+        id: source
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          set +x
+          [ -n "${GH_TOKEN:-}" ] || { echo SUBLIMEJ_EXTERNAL_PRIVATE_AUTH_MISSING >&2; exit 77; }
+          sha="$(gh api "/repos/$TARGET_REPOSITORY/commits/main" --jq .sha)"
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo SUBLIMEJ_EXTERNAL_SOURCE_INVALID >&2; exit 64; }
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "SUBLIMEJ_EXTERNAL_SOURCE_SHA=$sha"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: ${{ env.TARGET_REPOSITORY }}
+          ref: ${{ steps.source.outputs.sha }}
+          token: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          persist-credentials: false
+          fetch-depth: 1
+          path: sublimej
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.11"
+
+      - name: Run exact-SHA provider-neutral verifier
+        working-directory: sublimej
+        env:
+          SUBLIMEJ_SOURCE_SHA: ${{ steps.source.outputs.sha }}
+          PYTHONPATH: ${{ github.workspace }}/sublimej/src
+        run: python scripts/cloud_verify.py
+
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install Android SDK 36
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "platforms;android-36" "build-tools;36.0.0"
+
+      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+        with:
+          gradle-version: "8.13"
+
+      - name: Build and verify exact-SHA debug APK
+        working-directory: sublimej
+        env:
+          SUBLIMEJ_SOURCE_SHA: ${{ steps.source.outputs.sha }}
+        run: bash android/build.sh
+
+      - name: Publish verification statuses
+        if: ${{ always() }}
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+          RESULT: ${{ job.status }}
+        shell: bash
+        run: |
+          set +x
+          state=failure
+          [ "$RESULT" = success ] && state=success
+          gh api --method POST "/repos/$TARGET_REPOSITORY/statuses/$SOURCE_SHA"             -f state="$state"             -f context="sublimej/external-apk-verifier"             -f description="public external verifier + Android debug build: $RESULT"             -f target_url="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" >/dev/null || true
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: ${{ success() }}
+        with:
+          name: SublimeJ-Current-SHA-Debug-${{ steps.source.outputs.sha }}
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            sublimej/android/app/build/outputs/apk/debug/app-debug.apk
+            sublimej/sublimej-debug.apk.sha256
+            sublimej/public/health.json
