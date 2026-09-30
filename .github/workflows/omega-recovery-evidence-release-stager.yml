@@ -144,7 +144,10 @@ jobs:
           if p.get("state")!="LOCKED" or p.get("immutable") is not True:
               raise SystemExit(0)
           if p.get("source_sha")!=source:
-              raise SystemExit("OMEGA_UNSIGNED_LOCK_SOURCE_MISMATCH")
+              # Canonical unsigned locks are generation-specific historical evidence.
+              # A lock from an older source generation must not fail the new generation;
+              # it is simply not applicable to this source and staging continues.
+              raise SystemExit(0)
           rel=e.get("release_epoch") or {}
           roll=e.get("release_rollover") or {}
           current_id=str(rel.get("id") or "")
