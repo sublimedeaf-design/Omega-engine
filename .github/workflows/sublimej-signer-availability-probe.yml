@@ -43,8 +43,17 @@ jobs:
           umask 077
           printf '%s' "$OMEGA_ANDROID_KEYSTORE_B64" | base64 --decode > "$tmp"
           test -s "$tmp"
-          actual="$(keytool -list -v -keystore "$tmp" -storepass android -alias androiddebugkey 2>/dev/null |
-            sed -n 's/.*SHA256: //p' | head -1 | tr -d ':' | tr 'A-F' 'a-f')"
+          listing="$(keytool -list -v -keystore "$tmp" -storepass android -alias androiddebugkey 2>/dev/null)" || {
+            echo "SUBLIMEJ_SIGNER_ESCROW_KEYTOOL_READ_FAILED"
+            exit 46
+          }
+          actual="$(KEYTOOL_LISTING="$listing" python3 - <<'PY'
+import os,re
+text=os.environ["KEYTOOL_LISTING"]
+m=re.search(r"SHA256:\s*([0-9A-F:]+)", text)
+print((m.group(1).replace(":","").lower() if m else ""))
+PY
+)"
           test "$actual" = "$EXPECTED_FINGERPRINT" || {
             echo "SUBLIMEJ_SIGNER_ESCROW_FINGERPRINT_MISMATCH"
             exit 45
