@@ -1,4 +1,5 @@
 name: SublimeJ External APK Verifier
+# UNIFIED_AUTHORITY: verifier-only donor actuator; no OMEGA product/release authority.
 
 on:
   push:
