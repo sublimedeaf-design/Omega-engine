@@ -57,14 +57,12 @@ jobs:
             echo "OMEGA_FEDERATION_CONTROL_ROLLBACK_DETECTED:$contract" >&2
             exit 66
           }
-          mapfile -t changed < <(git diff --name-only "$contract"..HEAD)
+          mapfile -t changed < <(git diff --no-renames --name-only "$contract"..HEAD)
           for path in "${changed[@]}"; do
             # Reuse the same state-only boundary as Candidate Evidence Root and
             # the release orchestrator. Epoch projections and bootstrap wake
             # pointers are evidence/control state, never release-control code.
-            case "$path" in
-              federation/epochs/*|bootstrap/omega/*) continue ;;
-            esac
+            if python3 scripts/control_state_policy.py "$path"; then continue; fi
             echo "OMEGA_FEDERATION_CONTROL_DRIFT_REQUIRES_NEW_EPOCH:$path" >&2
             exit 67
           done

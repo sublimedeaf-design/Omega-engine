@@ -8,9 +8,9 @@ on:
       - "OMEGA Candidate Evidence Root"
       - "OMEGA External Validator Dispatch"
     types: [completed]
-  schedule:
-    - cron: "11,26,41,56 * * * *"
+  # Periodic repair is owned by omega-generation-reconciler.yml.
   push:
+    branches: [main]
     paths:
       - "control-plane/certify.mjs"
       - "control-plane/certify-github.mjs"

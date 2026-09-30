@@ -3,10 +3,9 @@ name: OMEGA Hosted Recovery Failover
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "7,37 * * * *"   # production-main recovery
-    - cron: "22,52 * * * *"  # current hardening-candidate recovery watchdog
+  # Periodic repair is owned by omega-generation-reconciler.yml.
   push:
+    branches: [main]
     paths:
       - "bootstrap/omega/recovery-trigger.txt"
 

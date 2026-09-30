@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "exact_paths": [
+    "bootstrap/omega/android-coldstart-trigger.txt",
+    "bootstrap/omega/canonical-unsigned-lock.json",
+    "bootstrap/omega/desired_private_head.txt",
+    "bootstrap/omega/evidence-root-trigger.txt",
+    "bootstrap/omega/external-validator-trigger.txt",
+    "bootstrap/omega/federation-trigger.txt",
+    "bootstrap/omega/free-provider-smoke-trigger.txt",
+    "bootstrap/omega/observer-trigger.txt",
+    "bootstrap/omega/pr-validation-trigger.txt",
+    "bootstrap/omega/product-trigger.txt",
+    "bootstrap/omega/recovery-trigger.txt",
+    "bootstrap/omega/signer-trigger.txt",
+    "bootstrap/omega/supply-chain-bootstrap-trigger.txt",
+    "bootstrap/omega/supply-chain-lock-trigger.txt",
+    "bootstrap/omega/supply-chain-trigger.txt",
+    "bootstrap/omega/validation-trigger.txt"
+  ],
+  "patterns": [
+    "^federation/epochs/(?:[A-Za-z0-9_-]+/)*[A-Za-z0-9_.-]+\\.json$",
+    "^bootstrap/omega/validation-requests/[0-9a-f]{40}\\.json$"
+  ]
+}

@@ -6,20 +6,30 @@ on:
     paths:
       - ".github/workflows/**"
       - "scripts/verify_control_plane.rb"
+      - "scripts/control_state_policy.py"
       - "scripts/omega_gate_classifier.py"
       - "scripts/rollover_release_federation.py"
       - "external_validator/**"
       - "control-plane/**"
+      - "tests/test_external_validator_admission.py"
+      - "tests/test_control_state_policy.*"
+      - "tests/test_generation_retry.mjs"
+      - "tests/test_generation_reconciler_contract.py"
   push:
     paths:
       - ".github/workflows/**"
       - "scripts/verify_control_plane.rb"
+      - "scripts/control_state_policy.py"
       - "scripts/omega_gate_classifier.py"
       - "scripts/rollover_release_federation.py"
       - "scripts/verify_federation_epoch.py"
       - "federation/epochs/**"
       - "external_validator/**"
       - "control-plane/**"
+      - "tests/test_external_validator_admission.py"
+      - "tests/test_control_state_policy.*"
+      - "tests/test_generation_retry.mjs"
+      - "tests/test_generation_reconciler_contract.py"
 
 permissions:
   contents: read
@@ -40,6 +50,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
+      - name: Install validator dependencies for admission tests
+        run: python3 -m pip install -r external_validator/requirements.txt
       - name: Verify workflow syntax, immutable actions and failproof contracts
         shell: bash
         run: |
@@ -51,7 +63,11 @@ jobs:
           node --check control-plane/reconcile.mjs
           node --check control-plane/generation-reconciler.mjs
           node --check control-plane/generation-reconciler-github.mjs
+          python3 tests/test_control_state_policy.py
+          node --test tests/test_control_state_policy.mjs
+          node --test tests/test_generation_retry.mjs
           python3 tests/test_generation_reconciler_contract.py
+          python3 tests/test_external_validator_admission.py
 
       - name: Publish exact-SHA control-plane integrity
         if: ${{ always() }}

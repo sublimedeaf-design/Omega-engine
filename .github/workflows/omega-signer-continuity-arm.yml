@@ -8,8 +8,7 @@ on:
       - "OMEGA Private PR Hosted Bridge"
       - "OMEGA Release Federation Certifier"
     types: [completed]
-  schedule:
-    - cron: "37 * * * *"
+  # Periodic repair is owned by omega-generation-reconciler.yml.
   push:
     branches: [main]
     paths:
