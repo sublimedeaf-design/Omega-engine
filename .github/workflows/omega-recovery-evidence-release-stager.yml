@@ -453,8 +453,11 @@ jobs:
           p=json.loads(os.environ["COMPARE_PAYLOAD"])
           if str(p.get("status") or "") not in {"ahead","identical"} or int(p.get("behind_by") or 0)!=0:
               raise SystemExit("OMEGA_RELEASE_STAGE_CONTROL_GENERATION_STALE:history")
-          changed=[str(x.get("filename") or "") for x in p.get("files") or []]
-          unsafe=[x for x in changed if not (x.startswith("federation/epochs/") or x.startswith("bootstrap/omega/"))]
+          files=p.get("files") or []
+          if len(files)>=300: raise SystemExit("OMEGA_CONTROL_DIFF_TOO_LARGE")
+          changed=[str(x.get(key)) for x in files for key in ("filename","previous_filename") if x.get(key)]
+          from scripts.control_state_policy import is_state_only_path
+          unsafe=[x for x in changed if not is_state_only_path(x)]
           if unsafe:
               raise SystemExit("OMEGA_RELEASE_STAGE_CONTROL_GENERATION_STALE:"+",".join(unsafe))
           PY

@@ -390,7 +390,7 @@ fail!("federation_rollover_release_ref_guard_missing") unless File.read(WORKFLOW
 rollover_script = File.read(ROOT.join("scripts", "rollover_release_federation.py"), encoding: "UTF-8")
 fail!("federation_rollover_script_ref_contract_missing") unless rollover_script.include?("RELEASE_REF") && rollover_script.include?("release/[A-Za-z0-9._/-]+") && rollover_script.include?("OMEGA_RELEASE_FEDERATION_REF_INVALID")
 fail!("federation_rollover_ambiguous_write_resume_missing") unless rollover_script.include?("OMEGA_RELEASE_EPOCH_RESUME_EXISTING_SEED") && rollover_script.include?("OMEGA_RELEASE_EPOCH_RESUME_UNSAFE_CONTROL_DRIFT") && rollover_script.include?("resume_existing_seed") && !rollover_script.include?("OMEGA_RELEASE_EPOCH_SEED_EXISTS_BUT_PROJECTION_MOVED")
-fail!("release_epoch_state_only_control_policy_missing") unless rollover_script.include?('STATE_ONLY_CONTROL_PREFIXES = ("federation/epochs/", "bootstrap/omega/")') && rollover_script.include?("classify_control_drift") && rollover_script.include?("OMEGA_RELEASE_EPOCH_STATE_ONLY_CONTROL_DRIFT_NOOP") && rollover_script.include?("OMEGA_RELEASE_EPOCH_SAME_GENERATION_NOOP") && rollover_script.include?("OMEGA_RELEASE_EPOCH_CONTROL_DIFF_TOO_LARGE")
+fail!("release_epoch_state_only_control_policy_missing") unless rollover_script.include?("from control_state_policy import is_state_only_path") && rollover_script.include?("classify_control_drift") && rollover_script.include?("OMEGA_RELEASE_EPOCH_STATE_ONLY_CONTROL_DRIFT_NOOP") && rollover_script.include?("OMEGA_RELEASE_EPOCH_SAME_GENERATION_NOOP") && rollover_script.include?("OMEGA_RELEASE_EPOCH_CONTROL_DIFF_TOO_LARGE")
 fail!("release_epoch_state_only_prewrite_guard_missing") unless rollover_script.include?("OMEGA_RELEASE_EPOCH_STATE_ONLY_HEAD_ADVANCE_ALLOWED") && rollover_script.include?("OMEGA_RELEASE_EPOCH_STATE_ONLY_PREWRITE_ADVANCE_ALLOWED") && rollover_script.include?("OMEGA_CONTROL_MAIN_DRIFT")
 
 fail!("federation_rollover_epoch_cas_missing") unless rollover_script.include?("expected_source") && rollover_script.include?("expected_commit") && rollover_script.include?("OMEGA_PEER_MAIN_DRIFT") && rollover_script.include?("OMEGA_FEDERATION_AUTHORITY_NOT_PASS")
@@ -538,7 +538,7 @@ fail!("release_epoch_live_bound_verifier_missing") unless epoch_verifier.include
 peer_bridge = File.read(WORKFLOWS.join("omega-federation-v3-peer-bridge.yml"), encoding: "UTF-8")
 fail!("federation_control_rollback_guard_missing") unless peer_bridge.include?("OMEGA_FEDERATION_CONTROL_ROLLBACK_DETECTED") && peer_bridge.include?("git merge-base --is-ancestor")
 fail!("federation_control_drift_guard_missing") unless peer_bridge.include?("OMEGA_FEDERATION_CONTROL_DRIFT_REQUIRES_NEW_EPOCH")
-fail!("federation_peer_state_only_control_policy_missing") unless peer_bridge.include?("federation/epochs/*|bootstrap/omega/*")
+fail!("federation_peer_state_only_control_policy_missing") unless peer_bridge.include?('python3 scripts/control_state_policy.py "$path"') && !peer_bridge.include?("federation/epochs/*|bootstrap/omega/*")
 fail!("federation_epoch_sequence_required_missing") unless peer_bridge.include?("OMEGA_FEDERATION_EPOCH_SEQUENCE_REQUIRED")
 fail!("federation_peer_control_binding_missing") unless peer_bridge.include?('"control_contract_sha":control_contract') && peer_bridge.include?('"release_epoch_sequence":sequence')
 
@@ -563,7 +563,17 @@ release_critical_paths.each do |path|
   fail!("release_orchestrator_critical_trigger_missing:#{path}") unless orchestrator.include?("\"#{path}\"")
 end
 fail!("release_orchestrator_actions_write_missing") unless orchestrator.include?("actions: write")
-fail!("release_orchestrator_schedule_missing") unless orchestrator.include?('cron: "3,18,33,48 * * * *"')
+# One periodic repair owner avoids parallel watchdogs rebuilding the same source.
+periodic_owner = File.read(WORKFLOWS.join("omega-generation-reconciler.yml"), encoding: "UTF-8")
+fail!("generation_reconciler_schedule_missing") unless periodic_owner.include?('cron: "4,14,24,34,44,54 * * * *"')
+%w[omega-hosted-recovery-failover.yml omega-canonical-android-signer.yml omega-release-orchestrator-arm.yml omega-signer-continuity-arm.yml omega-resilience-certifier.yml].each do |name|
+  text = File.read(WORKFLOWS.join(name), encoding: "UTF-8")
+  fail!("duplicate_release_watchdog:#{name}") if text.include?("  schedule:")
+  fail!("release_stage_dispatch_missing:#{name}") unless text.include?("workflow_dispatch:")
+end
+%w[omega-candidate-evidence-root.yml omega-canonical-android-signer.yml].each do |name|
+  fail!("duplicate_release_handoff:#{name}") if File.read(WORKFLOWS.join(name), encoding: "UTF-8").include?("  workflow_run:")
+end
 fail!("release_orchestrator_exact_proof_event_missing") unless orchestrator.include?("workflow_run:") && orchestrator.include?('OMEGA Private PR Hosted Bridge') && orchestrator.include?("types: [completed]")
 fail!("release_orchestrator_exact_final_reconcile_missing") unless orchestrator.include?('gh workflow run omega-private-pr-hosted-bridge.yml') && orchestrator.include?('-f source_sha="$candidate" -f source_ref=main') && orchestrator.include?("OMEGA_RELEASE_CONTROLLER_EXACT_FINAL_DISPATCHED")
 fail!("release_orchestrator_exact_final_duplicate_guard_missing") unless orchestrator.include?("OMEGA_RELEASE_CONTROLLER_EXACT_FINAL_ALREADY_ACTIVE") && orchestrator.include?("omega-private-pr-hosted-bridge.yml/runs?status=queued") && orchestrator.include?("omega-private-pr-hosted-bridge.yml/runs?status=in_progress")
@@ -573,8 +583,8 @@ fail!("release_orchestrator_control_deviation_missing") unless orchestrator.incl
 fail!("release_orchestrator_private_main_reconcile_missing") unless orchestrator.include?('commits/main" --jq .sha') && orchestrator.include?('source_ref="release/auto-') && orchestrator.include?("OMEGA_RELEASE_CONTROLLER_REF_CREATED")
 fail!("release_orchestrator_trigger_file_authority_forbidden") if orchestrator.include?("read -r marker candidate source_ref")
 fail!("release_orchestrator_generation_inputs_missing") unless orchestrator.include?('-f source_sha="$SOURCE_SHA" -f source_ref="$SOURCE_REF"')
-fail!("release_orchestrator_state_only_drift_missing") unless orchestrator.include?("state-only-control-head-advance") && orchestrator.include?('path.startswith("federation/epochs/")') && orchestrator.include?('path.startswith("bootstrap/omega/")')
-fail!("release_orchestrator_narrow_bootstrap_state_regression") if orchestrator.include?('path=="bootstrap/omega/pr-validation-trigger.txt"')
+fail!("release_orchestrator_state_only_drift_missing") unless orchestrator.include?("state-only-control-head-advance") && orchestrator.include?("from scripts.control_state_policy import is_state_only_path")
+fail!("release_orchestrator_broad_bootstrap_state_regression") if orchestrator.include?('path.startswith("bootstrap/omega/")')
 fail!("release_orchestrator_compare_guard_missing") unless orchestrator.include?("/compare/$contract...$control_main") && orchestrator.include?("control-diff-too-large") && orchestrator.include?("control-history-")
 fail!("release_orchestrator_missing_ref_json_guard") unless orchestrator.include?('if ref_json="$(gh api "/repos/$PRIVATE_REPOSITORY/git/ref/heads/$source_ref" 2>/dev/null)"; then') && orchestrator.include?("OMEGA_RELEASE_CONTROLLER_REF_RESPONSE_INVALID")
 fail!("release_orchestrator_404_stdout_collision_regression") if orchestrator.include?('--jq .object.sha 2>/dev/null || true')

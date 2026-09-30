@@ -1,4 +1,6 @@
 from __future__ import annotations
+from contextlib import contextmanager
+import fcntl
 import hashlib
 import io
 import json
@@ -57,6 +59,17 @@ def _read(sha: str) -> dict | None:
         return None
 
 
+@contextmanager
+def _admission(sha: str):
+    # Serialize admission across threads and Gunicorn processes sharing STATE.
+    with LOCK, (STATE / f"{sha}.lock").open("a") as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle, fcntl.LOCK_UN)
+
+
 def _oidc() -> dict:
     auth = request.headers.get("authorization", "")
     if not auth.startswith("Bearer "):
@@ -110,9 +123,8 @@ def _run(argv: list[str], cwd: Path, *, timeout: int = 1200, env: dict | None = 
     return {"argv": argv[:4], "rc": proc.returncode, "seconds": round(time.time() - started, 3), "tail": out}
 
 
-def _validate(sha: str, raw: bytes, bundle_sha: str, oidc_claims: dict) -> None:
-    work = Path(tempfile.mkdtemp(prefix="omega-validator-"))
-    result = {
+def _initial_result(sha: str, bundle_sha: str, oidc_claims: dict) -> dict:
+    return {
         "schema_version": 1,
         "provider": PROVIDER,
         "sha": sha,
@@ -134,8 +146,13 @@ def _validate(sha: str, raw: bytes, bundle_sha: str, oidc_claims: dict) -> None:
         },
         "checks": [],
     }
-    _write(sha, result)
+
+
+def _validate(sha: str, raw: bytes, bundle_sha: str, oidc_claims: dict) -> None:
+    result = _initial_result(sha, bundle_sha, oidc_claims)
+    work = None
     try:
+        work = Path(tempfile.mkdtemp(prefix="omega-validator-"))
         _safe_extract(raw, work)
         head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=work, text=True, timeout=30).strip()
         if head != sha:
@@ -185,7 +202,8 @@ def _validate(sha: str, raw: bytes, bundle_sha: str, oidc_claims: dict) -> None:
         result["completed_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     finally:
         _write(sha, result)
-        shutil.rmtree(work, ignore_errors=True)
+        if work is not None:
+            shutil.rmtree(work, ignore_errors=True)
 
 
 @app.get("/healthz")
@@ -224,9 +242,9 @@ def validate():
         if not raw or len(raw) > MAX_BUNDLE:
             return jsonify({"ok": False, "error": "INVALID_BUNDLE_SIZE"}), 413
         bundle_sha = hashlib.sha256(raw).hexdigest()
-        with LOCK:
+        with _admission(sha):
             prior = _read(sha)
-            if prior and prior.get("state") in {"running", "success"}:
+            if prior:
                 prior_bundle = str(prior.get("bundle_sha256") or "")
                 if prior_bundle and prior_bundle != bundle_sha:
                     return jsonify({
@@ -234,6 +252,7 @@ def validate():
                         "error": "IMMUTABLE_SHA_BUNDLE_CONFLICT",
                         "sha": sha,
                     }), 409
+            if prior and prior.get("state") in {"running", "success"}:
                 return jsonify({
                     "ok": True,
                     "accepted": False,
@@ -241,8 +260,17 @@ def validate():
                     "sha": sha,
                     "bundle_sha256": bundle_sha,
                 }), 202
-            thread = threading.Thread(target=_validate, args=(sha, raw, bundle_sha, claims), daemon=True)
-            thread.start()
+            # Reserve synchronously: the worker may not start before the next
+            # request or may fail to start at all.
+            reservation = _initial_result(sha, bundle_sha, claims)
+            _write(sha, reservation)
+            try:
+                thread = threading.Thread(target=_validate, args=(sha, raw, bundle_sha, claims), daemon=True)
+                thread.start()
+            except Exception as exc:
+                reservation.update(state="failure", error=f"WORKER_START_FAILED:{type(exc).__name__}")
+                _write(sha, reservation)
+                return jsonify({"ok": False, "error": "WORKER_START_FAILED", "sha": sha}), 503
         return jsonify({"ok": True, "accepted": True, "sha": sha, "bundle_sha256": bundle_sha}), 202
     except Exception as exc:
         return jsonify({"ok": False, "error": f"{type(exc).__name__}:{str(exc)[:300]}"}), 401

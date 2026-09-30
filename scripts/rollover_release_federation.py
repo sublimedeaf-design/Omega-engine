@@ -9,6 +9,7 @@ import re
 import urllib.error
 import urllib.parse
 import urllib.request
+from control_state_policy import is_state_only_path
 
 API = "https://api.github.com"
 PRIVATE_TOKEN = os.environ["OMEGA_BOOTSTRAP_TOKEN"].strip()
@@ -35,7 +36,6 @@ FILES = [
     "state/source-pin.json",
 ]
 IMMUTABLE_PREFIX = "federation/epochs/releases"
-STATE_ONLY_CONTROL_PREFIXES = ("federation/epochs/", "bootstrap/omega/")
 
 
 def api(token: str, method: str, path: str, payload=None, *, allow_404: bool = False):
@@ -109,20 +109,22 @@ def classify_control_drift(
             f"{history_error}:{compare_status}:behind={behind_by}"
         )
 
+    files = compare.get("files") or []
     changed = [
-        str(row.get("filename") or "")
-        for row in (compare.get("files") or [])
-        if row.get("filename")
+        str(row[key])
+        for row in files
+        for key in ("filename", "previous_filename")
+        if row.get(key)
     ]
     # GitHub's compare API caps the changed-file list. Never classify a
     # truncated comparison as state-only.
-    if len(changed) >= 300:
+    if len(files) >= 300:
         raise SystemExit("OMEGA_RELEASE_EPOCH_CONTROL_DIFF_TOO_LARGE")
 
     unsafe = [
         path
         for path in changed
-        if not path.startswith(STATE_ONLY_CONTROL_PREFIXES)
+        if not is_state_only_path(path)
     ]
     return {"changed": changed, "unsafe": unsafe}
 

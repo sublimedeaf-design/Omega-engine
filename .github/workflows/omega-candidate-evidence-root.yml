@@ -2,11 +2,10 @@ name: OMEGA Candidate Evidence Root
 
 on:
   push:
+    branches: [main]
     paths:
       - "bootstrap/omega/evidence-root-trigger.txt"
-  workflow_run:
-    workflows: ["OMEGA Hosted Recovery Failover"]
-    types: [completed]
+  # The upstream workflow explicitly dispatches the exact completed run.
   workflow_dispatch:
     inputs:
       recovery_run_id:
@@ -28,11 +27,11 @@ env:
 
 jobs:
   evidence:
-    if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') || github.event_name == 'workflow_dispatch' }}
+    if: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      RECOVERY_RUN_ID: ${{ github.event_name == 'workflow_dispatch' && inputs.recovery_run_id || github.event.workflow_run.id }}
+      RECOVERY_RUN_ID: ${{ inputs.recovery_run_id }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -273,8 +272,11 @@ jobs:
           behind=int(p.get("behind_by") or 0)
           if status not in {"ahead","identical"} or behind!=0:
               raise SystemExit("OMEGA_EVIDENCE_ROOT_CONTROL_GENERATION_STALE:history")
-          changed=[str(x.get("filename") or "") for x in p.get("files") or []]
-          unsafe=[x for x in changed if not (x.startswith("federation/epochs/") or x.startswith("bootstrap/omega/"))]
+          files=p.get("files") or []
+          if len(files)>=300: raise SystemExit("OMEGA_CONTROL_DIFF_TOO_LARGE")
+          changed=[str(x.get(key)) for x in files for key in ("filename","previous_filename") if x.get(key)]
+          from scripts.control_state_policy import is_state_only_path
+          unsafe=[x for x in changed if not is_state_only_path(x)]
           if unsafe:
               raise SystemExit("OMEGA_EVIDENCE_ROOT_CONTROL_GENERATION_STALE:"+",".join(unsafe))
           PY

@@ -1,8 +1,18 @@
+import { readFileSync } from "node:fs";
+
 const PRIVATE_REPO = "sublimedeaf-design/Omega-engines";
 const CONTROL_REPO = "sublimedeaf-design/Omega-engine";
 const SHA = /^[0-9a-f]{40}$/;
 const RUN_URL = /\/actions\/runs\/([0-9]+)$/;
-const SAFE_CONTROL_DRIFT = ["federation/epochs/", "bootstrap/omega/"];
+const STATE_ONLY_POLICY = JSON.parse(readFileSync(new URL("./state-only-paths.json", import.meta.url), "utf8"));
+const STATE_ONLY_EXACT = new Set(STATE_ONLY_POLICY.exact_paths);
+const STATE_ONLY_PATTERNS = STATE_ONLY_POLICY.patterns.map(value => new RegExp(value));
+
+export function isStateOnlyPath(name) {
+  if (typeof name !== "string" || !name || /[\\\r\n\0]/.test(name)) return false;
+  if (name.split("/").some(part => ["", ".", ".."].includes(part))) return false;
+  return STATE_ONLY_EXACT.has(name) || STATE_ONLY_PATTERNS.some(pattern => pattern.test(name));
+}
 const CONTROL_BOUND_CONTEXTS = [
   // Recovery proof is part of the release generation. A successful recovery from
   // an older control contract must be re-executed before candidate evidence can
@@ -14,6 +24,8 @@ const CONTROL_BOUND_CONTEXTS = [
   "omega/release-evidence-staged",
   "omega/android-release-unsigned",
   "omega/resilience-certified",
+  "omega/control-plane/signer",
+  "omega/signer/key-availability",
   "omega/signer/continuity",
   "omega/android-release-signed",
   "omega/android-runtime-coldstart",
@@ -92,10 +104,9 @@ async function safeControlDescendant(controlToken, baseSha, headSha) {
   );
   if (!["ahead", "identical"].includes(String(compare.status || ""))) return false;
   const files = Array.isArray(compare.files) ? compare.files : [];
-  return files.every(file => {
-    const name = String(file.filename || "");
-    return SAFE_CONTROL_DRIFT.some(prefix => name.startsWith(prefix));
-  });
+  if (files.length >= 300) return false;
+  return files.every(file => isStateOnlyPath(String(file.filename || "")) &&
+    (!file.previous_filename || isStateOnlyPath(String(file.previous_filename))));
 }
 
 async function controlCompatibleStatus(controlToken, row, controlContractSha) {
@@ -295,6 +306,24 @@ function chooseStage(map) {
   return { stage: "complete", complete: true };
 }
 
+export function signerRetryAdmission(map) {
+  const failure = map["omega/control-plane/signer"];
+  if (!["failure", "error"].includes(String(failure?.state || "")) ||
+      !/^AUTHORIZATION\b/.test(String(failure?.description || ""))) {
+    return { allowed: true, reason: "no_current_authorization_failure" };
+  }
+  const failedAt = Date.parse(failure.updated_at || failure.created_at || "");
+  const readiness = map["omega/signer/key-availability"];
+  const readyAt = Date.parse(readiness?.updated_at || readiness?.created_at || "");
+  if (readiness?.state === "success" && Number.isFinite(failedAt) &&
+      Number.isFinite(readyAt) && readyAt > failedAt) {
+    return { allowed: true, reason: "new_verified_key_availability" };
+  }
+  // Alternate backends remain eligible through explicit dispatch after their
+  // capability is verified. A periodic wake is not evidence of changed authority.
+  return { allowed: false, reason: "wait_for_changed_signer_authority" };
+}
+
 export async function reconcileGeneration({ privateToken, controlToken, targetUrl = "" } = {}) {
   if (!privateToken) throw new Error("OMEGA_PRIVATE_TOKEN_MISSING");
   if (!controlToken) throw new Error("OMEGA_CONTROL_TOKEN_MISSING");
@@ -348,6 +377,18 @@ export async function reconcileGeneration({ privateToken, controlToken, targetUr
   const map = generationView.effective;
   const next = chooseStage(map);
   const generation = `${sha}:${epoch.id}`;
+
+  if (next.stage === "canonical-signing") {
+    const admission = signerRetryAdmission(map);
+    if (!admission.allowed) {
+      await postState(privateToken, sha, "pending", admission.reason, targetUrl);
+      return {
+        ok: true, source_sha: sha, observed_generation: generation,
+        action: "wait_capability", stage: next.stage, reason: admission.reason,
+        control_freshness: generationView.freshness,
+      };
+    }
+  }
 
   if (next.complete) {
     await postState(privateToken, sha, "success", `generation converged epoch=${epoch.id.slice(0, 12)}`, targetUrl);
@@ -413,6 +454,7 @@ export const POLICY = Object.freeze({
   controlDriftAction: "dispatch-release-orchestrator",
   controlBoundStatusRule: "status-run-head-must-be-control-contract-or-safe-descendant",
   recoveryProofGenerationBound: true,
+  authorizationRetryRequiresChangedCapability: true,
   stages: [
     "upstream-proof",
     "recovery",

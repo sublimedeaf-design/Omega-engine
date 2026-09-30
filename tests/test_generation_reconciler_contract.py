@@ -21,7 +21,9 @@ def test_generation_reconciler_is_level_triggered_and_reads_full_status_history(
     assert 'controlDriftAction: "dispatch-release-orchestrator"' in text
     assert 'safeControlDescendant' in text
     assert 'needsRollover: !sourceCurrent || !controlCurrent' in text
-    assert 'SAFE_CONTROL_DRIFT = ["federation/epochs/", "bootstrap/omega/"]' in text
+    assert "isStateOnlyPath" in text
+    assert "state-only-paths.json" in text
+    assert "files.length >= 300" in text
     assert 'controlCompatibleStatus' in text
     assert 'generationAwareStatusMap' in text
     assert '"omega/hosted-recovery"' in text

@@ -7,8 +7,7 @@ on:
     workflows:
       - "OMEGA Private PR Hosted Bridge"
     types: [completed]
-  schedule:
-    - cron: "3,18,33,48 * * * *"
+  # Periodic repair is owned by omega-generation-reconciler.yml.
   push:
     branches: [main]
     paths:
@@ -263,10 +262,12 @@ jobs:
               or (latest.get("omega/limited-distribution/live-certified") or {}).get("state")=="success"
           )
           compare_status=str(compare.get("status") or "")
-          changed=[str(x.get("filename") or "") for x in compare.get("files",[]) if x.get("filename")]
-          state_only=lambda path: path.startswith("federation/epochs/") or path.startswith("bootstrap/omega/")
+          files=compare.get("files",[])
+          changed=[str(x.get(key)) for x in files for key in ("filename","previous_filename") if x.get(key)]
+          from scripts.control_state_policy import is_state_only_path
+          state_only=is_state_only_path
           code_drift=any(not state_only(path) for path in changed)
-          if len(changed)>=300:
+          if len(files)>=300:
               print("BLOCKED:control-diff-too-large")
           elif contract and contract!=control and compare_status not in ("ahead","identical"):
               print("BLOCKED:control-history-"+compare_status.lower())
