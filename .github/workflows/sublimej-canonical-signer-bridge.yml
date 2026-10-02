@@ -69,7 +69,7 @@ jobs:
             "release_ref":os.environ["RELEASE_REF"],
             "phase13_14_run_id":int(os.environ["PHASE13_14_RUN_ID"]),
             "source_artifact_digest":os.environ["PHASE13_ARTIFACT_DIGEST"],
-            "control_artifact_digest":os.environ["PHASE13_ARTIFACT_DIGEST"],
+            "control_asset_digest":os.environ["PHASE13_ARTIFACT_DIGEST"],
             "control_repository":"sublimedeaf-design/Omega-engine",
             "control_release_draft":True,
             "signer_certificate_sha256":"0738b245ec8a557edc0600a6961d7bb2586cc22f886ed5273560ce6ab2db447f",
