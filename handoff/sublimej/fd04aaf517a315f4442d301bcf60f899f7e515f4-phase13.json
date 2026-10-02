@@ -1,0 +1,19 @@
+{
+  "schema": "sublimej-phase13-control-handoff-v1",
+  "source_repository": "sublimedeaf-design/Sublimej",
+  "source_sha": "fd04aaf517a315f4442d301bcf60f899f7e515f4",
+  "release_ref": "release/final-20261002-fd04aaf5",
+  "phase13_14_run_id": 37046995062,
+  "source_artifact_id": 11245155963,
+  "source_artifact_name": "phase13-14-candidate-fd04aaf517a315f4442d301bcf60f899f7e515f4",
+  "source_artifact_digest": "sha256:831ae0eabb06edb33b9ed74e6c2a2cd460051f380a56d83f7746709affdfe5b3",
+  "control_repository": "sublimedeaf-design/Omega-engine",
+  "control_release_id": 402061442,
+  "control_release_draft": true,
+  "control_asset_id": 606227240,
+  "control_asset_name": "phase13-14-candidate-fd04aaf517a315f4442d301bcf60f899f7e515f4.zip",
+  "control_asset_digest": "sha256:831ae0eabb06edb33b9ed74e6c2a2cd460051f380a56d83f7746709affdfe5b3",
+  "signer_certificate_sha256": "0738b245ec8a557edc0600a6961d7bb2586cc22f886ed5273560ce6ab2db447f",
+  "transfer_authority": "authorized-github-connector",
+  "verdict": "BYTE_IDENTICAL_PRIVATE_DRAFT_HANDOFF_PASS"
+}
