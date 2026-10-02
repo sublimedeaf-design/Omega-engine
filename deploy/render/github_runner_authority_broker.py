@@ -29,6 +29,8 @@ API = "https://api.github.com"
 API_VERSION = "2026-03-10"
 TARGET_OWNER = os.environ.get("TARGET_OWNER", "sublimedeaf-design")
 TARGET_REPO = os.environ.get("TARGET_REPO", "Omega-engines")
+RUNNER_LABEL = os.environ.get("RUNNER_LABEL", "omega-ci").strip() or "omega-ci"
+QUEUE_POLL_SECONDS = max(15, int(os.environ.get("QUEUE_POLL_SECONDS", "30")))
 BROKER_STATE = os.environ["BROKER_STATE"]
 BROKER_NONCE = os.environ["BROKER_NONCE"]
 PUBLIC_BASE_URL = os.environ["PUBLIC_BASE_URL"].rstrip("/")
@@ -56,6 +58,8 @@ DATA = {
     "runner_active": False,
     "last_runner_result": None,
     "error": None,
+    "queue_poll_error": None,
+    "queue_poll_checked_at": None,
 }
 LOCK = threading.Lock()
 
@@ -271,7 +275,7 @@ def _runner_worker(registration_token, reason):
         root.mkdir(parents=True)
         _download_runner(root)
 
-        runner_name = f"omega-render-authority-{int(time.time())}"
+        runner_name = f"{RUNNER_LABEL}-render-authority-{int(time.time())}"
         DATA["runner_name"] = runner_name
         env = os.environ.copy()
         env["RUNNER_ALLOW_RUNASROOT"] = "1"
@@ -287,7 +291,7 @@ def _runner_worker(registration_token, reason):
                 "--name",
                 runner_name,
                 "--labels",
-                "omega-ci",
+                RUNNER_LABEL,
                 "--unattended",
                 "--ephemeral",
                 "--replace",
@@ -352,6 +356,51 @@ def _ensure_ephemeral_runner(reason):
         raise
 
 
+
+def _queued_target_job_exists():
+    if not _ensure_authority_loaded():
+        return False
+    token = _installation_token()
+    try:
+        runs = requests.get(
+            f"{API}/repos/{TARGET_OWNER}/{TARGET_REPO}/actions/runs",
+            headers=_headers(token),
+            params={"status": "queued", "per_page": 20},
+            timeout=20,
+        )
+        if runs.status_code != 200:
+            raise RuntimeError(f"QUEUED_RUNS_HTTP_{runs.status_code}")
+        for run in runs.json().get("workflow_runs") or []:
+            jobs = requests.get(
+                run.get("jobs_url"),
+                headers=_headers(token),
+                params={"filter": "latest", "per_page": 100},
+                timeout=20,
+            )
+            if jobs.status_code != 200:
+                raise RuntimeError(f"QUEUED_JOBS_HTTP_{jobs.status_code}")
+            for job in jobs.json().get("jobs") or []:
+                labels = {str(x) for x in (job.get("labels") or [])}
+                if job.get("status") == "queued" and RUNNER_LABEL in labels:
+                    return True
+        return False
+    finally:
+        token = ""
+
+
+def _queue_poller():
+    while True:
+        try:
+            DATA["queue_poll_checked_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            DATA["queue_poll_error"] = None
+            if not DATA.get("runner_active") and _queued_target_job_exists():
+                _ensure_ephemeral_runner("queue-poller")
+        except Exception as exc:
+            DATA["queue_poll_error"] = f"{type(exc).__name__}:{str(exc)[:160]}"
+            print(f"OMEGA_AUTHORITY_QUEUE_POLL_ERROR {DATA['queue_poll_error']}", flush=True)
+        time.sleep(QUEUE_POLL_SECONDS)
+
+
 def _hook_valid(body):
     secret = DATA.get("webhook_secret")
     signature = request.headers.get("X-Hub-Signature-256", "")
@@ -407,7 +456,7 @@ def index():
 {status}
 <p>Deze privé GitHub App vraagt uitsluitend <b>Repository Administration: write</b> en <b>Actions: read</b>
 voor <b>{html.escape(TARGET_OWNER + "/" + TARGET_REPO)}</b>.</p>
-<p>De authority blijft geïnstalleerd. Iedere queued <b>omega-ci</b> job krijgt automatisch een nieuwe
+<p>De authority blijft geïnstalleerd. Iedere queued <b>{html.escape(RUNNER_LABEL)}</b> job krijgt automatisch een nieuwe
 ephemeral runner; na één job verdwijnt die runner weer. De Android signing-key wordt niet door deze
 authority opgeslagen of geëxporteerd.</p>
 <form method="post" action="{action}">
@@ -432,7 +481,7 @@ def hook():
     repo = ((payload.get("repository") or {}).get("full_name") or "")
     job = payload.get("workflow_job") or {}
     labels = {str(x) for x in (job.get("labels") or [])}
-    if repo != f"{TARGET_OWNER}/{TARGET_REPO}" or "omega-ci" not in labels:
+    if repo != f"{TARGET_OWNER}/{TARGET_REPO}" or RUNNER_LABEL not in labels:
         return ("", 204)
     try:
         started = _ensure_ephemeral_runner(
@@ -532,8 +581,8 @@ def installed():
 
         return """<!doctype html><html><body style='font-family:sans-serif;background:#07111f;color:#eef5ff;padding:32px'>
 <h2 style='color:#4ee29a'>OMEGA permanente authority geautoriseerd</h2>
-<p>De GitHub App-installatie blijft bestaan. De huidige queued omega-ci job krijgt nu automatisch
-een ephemeral runner. Toekomstige omega-ci jobs starten via geverifieerde GitHub workflow_job webhooks.</p>
+<p>De GitHub App-installatie blijft bestaan. De huidige queued {html.escape(RUNNER_LABEL)} job krijgt nu automatisch
+een ephemeral runner. Toekomstige jobs starten via geverifieerde GitHub workflow_job webhooks en queue polling.</p>
 <p>Er hoeft geen runner-token of signing-key te worden gekopieerd.</p>
 </body></html>"""
     except Exception as exc:
@@ -572,6 +621,10 @@ def healthz():
                 and DATA.get("webhook_secret")
             ),
             "error": DATA["error"],
+            "target_repository": f"{TARGET_OWNER}/{TARGET_REPO}",
+            "runner_label": RUNNER_LABEL,
+            "queue_poll_checked_at": DATA.get("queue_poll_checked_at"),
+            "queue_poll_error": DATA.get("queue_poll_error"),
         }
     )
 
@@ -613,6 +666,7 @@ def cleanup(nonce):
 # Best-effort restore after service restart. A missing state blob is expected
 # before the first persistent GitHub App installation is committed.
 _load_persisted_authority()
+threading.Thread(target=_queue_poller, daemon=True).start()
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "10000")))
