@@ -53,7 +53,8 @@ jobs:
           [[ "$RELEASE_REF" == release/final-* ]] || { echo SUBLIMEJ_SIGNER_RELEASE_REF_INVALID >&2; exit 65; }
           [[ "$PHASE13_14_RUN_ID" =~ ^[0-9]+$ ]] || { echo SUBLIMEJ_SIGNER_PHASE13_RUN_INVALID >&2; exit 66; }
 
-          ref_sha="$(gh api "/repos/$TARGET_REPOSITORY/git/ref/heads/$RELEASE_REF" --jq .object.sha)"
+          ref_sha="$(gh api --paginate "/repos/$TARGET_REPOSITORY/branches?per_page=100" --jq '.[] | [.name,.commit.sha] | @tsv' | awk -F '\\t' -v ref="$RELEASE_REF" '$1==ref {print $2}')"
+          [ "$(printf '%s\\n' "$ref_sha" | sed '/^$/d' | wc -l)" -eq 1 ] || { echo SUBLIMEJ_SIGNER_RELEASE_REF_NOT_UNIQUE >&2; exit 67; }
           [ "$ref_sha" = "$SOURCE_SHA" ] || { echo SUBLIMEJ_SIGNER_RELEASE_REF_MISMATCH >&2; exit 67; }
 
           signer_fp="$(gh api "/repos/$TARGET_REPOSITORY/contents/android/signer.sha256?ref=$SOURCE_SHA" --jq .content | tr -d '\n' | base64 -d | tr -d '[:space:]' | tr -d ':' | tr 'A-F' 'a-f')"
