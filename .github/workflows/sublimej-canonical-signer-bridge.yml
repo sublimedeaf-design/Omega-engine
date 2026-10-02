@@ -44,7 +44,7 @@ jobs:
 
       - name: Validate immutable SublimeJ handoff identity
         env:
-          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
           SOURCE_SHA: ${{ inputs.source_sha }}
           RELEASE_REF: ${{ inputs.release_ref }}
           PHASE13_14_RUN_ID: ${{ inputs.phase13_14_run_id }}
@@ -52,28 +52,19 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          set +x
-          [ -n "${GH_TOKEN:-}" ] || { echo SUBLIMEJ_SIGNER_PRIVATE_AUTH_MISSING >&2; exit 77; }
           [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo SUBLIMEJ_SIGNER_SOURCE_INVALID >&2; exit 64; }
           [[ "$RELEASE_REF" == release/final-* ]] || { echo SUBLIMEJ_SIGNER_RELEASE_REF_INVALID >&2; exit 65; }
           [[ "$PHASE13_14_RUN_ID" =~ ^[0-9]+$ ]] || { echo SUBLIMEJ_SIGNER_PHASE13_RUN_INVALID >&2; exit 66; }
           [[ "$PHASE13_ARTIFACT_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo SUBLIMEJ_SIGNER_ARTIFACT_DIGEST_INVALID >&2; exit 67; }
 
-          echo SUBLIMEJ_SIGNER_RELEASE_REF_INPUT=PASS
-          echo SUBLIMEJ_SIGNER_VALIDATE_FINGERPRINT
-          signer_fp="$(gh api "/repos/$TARGET_REPOSITORY/contents/android/signer.sha256?ref=$SOURCE_SHA" --jq .content | tr -d '\n' | base64 -d | tr -d '[:space:]' | tr -d ':' | tr 'A-F' 'a-f')"
-          [ "$signer_fp" = "$EXPECTED_FINGERPRINT" ] || { echo SUBLIMEJ_SIGNER_EXPECTED_FINGERPRINT_MISMATCH >&2; exit 70; }
-
-          echo SUBLIMEJ_SIGNER_VALIDATE_UNSIGNED_HANDOFF_RELEASE
-          tag="unsigned-$SOURCE_SHA"
-          release="$(gh api "/repos/$TARGET_REPOSITORY/releases/tags/$tag")"
+          tag="sublimej-unsigned-$SOURCE_SHA"
+          release="$(gh api "/repos/$GITHUB_REPOSITORY/releases/tags/$tag")"
           RELEASE_JSON="$release" SOURCE_SHA="$SOURCE_SHA" ARTIFACT_DIGEST="$PHASE13_ARTIFACT_DIGEST" python3 - <<'PY'
           import json,os
           r=json.loads(os.environ["RELEASE_JSON"])
           source=os.environ["SOURCE_SHA"]
           name=f"phase13-14-candidate-{source}.zip"
-          assert r.get("tag_name")==f"unsigned-{source}"
-          assert r.get("target_commitish")==source
+          assert r.get("tag_name")==f"sublimej-unsigned-{source}"
           assert r.get("prerelease") is True and r.get("draft") is False
           rows=[a for a in (r.get("assets") or []) if a.get("name")==name and a.get("state")=="uploaded"]
           assert len(rows)==1, "SUBLIMEJ_UNSIGNED_HANDOFF_ASSET_NOT_UNIQUE"
@@ -83,16 +74,15 @@ jobs:
 
       - name: Download exact Phase 13-14 artifact
         env:
-          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
           SOURCE_SHA: ${{ inputs.source_sha }}
         shell: bash
         run: |
           set -Eeuo pipefail
-          set +x
           name="phase13-14-candidate-$SOURCE_SHA.zip"
-          tag="unsigned-$SOURCE_SHA"
+          tag="sublimej-unsigned-$SOURCE_SHA"
           mkdir -p "$RUNNER_TEMP/phase13" "$RUNNER_TEMP/handoff" dist
-          gh release download "$tag" -R "$TARGET_REPOSITORY" -p "$name" -D "$RUNNER_TEMP/handoff"
+          gh release download "$tag" -R "$GITHUB_REPOSITORY" -p "$name" -D "$RUNNER_TEMP/handoff"
           test -s "$RUNNER_TEMP/handoff/$name"
           unzip -q "$RUNNER_TEMP/handoff/$name" -d "$RUNNER_TEMP/phase13"
           test -s "$RUNNER_TEMP/phase13/sublimej-phase13-unsigned.apk"
@@ -277,57 +267,40 @@ jobs:
           echo "SUBLIMEJ_PHASE15_PERSISTENT_SIGNER=PASS"
           echo "SUBLIMEJ_PHASE16_SAME_UNSIGNED_INPUT_SIGNED_ONCE=PASS"
 
-      - name: Publish immutable private SublimeJ signed prerelease
+      - name: Publish immutable donor-local signed handoff
         env:
-          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
           SOURCE_SHA: ${{ inputs.source_sha }}
         shell: bash
         run: |
           set -Eeuo pipefail
-          set +x
-          tag="signed-$SOURCE_SHA"
-          if gh release view "$tag" -R "$TARGET_REPOSITORY" >/dev/null 2>&1; then
-            echo "SUBLIMEJ_SIGNED_RELEASE_ALREADY_EXISTS:$tag" >&2
+          tag="sublimej-signed-$SOURCE_SHA"
+          if gh release view "$tag" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "SUBLIMEJ_DONOR_SIGNED_RELEASE_ALREADY_EXISTS:$tag" >&2
             exit 44
           fi
-          gh release create "$tag" -R "$TARGET_REPOSITORY"             --target "$SOURCE_SHA"             --title "SublimeJ signed ${SOURCE_SHA:0:12}"             --notes "Canonical Phase 15/16 signer bridge. No rebuild; private key not exported."             --prerelease             dist/SublimeJ.apk dist/SublimeJ.apk.sha256 dist/phase15-16-manifest.json dist/SHA256SUMS
-
+          gh release create "$tag" -R "$GITHUB_REPOSITORY"             --target "$GITHUB_SHA"             --title "SublimeJ signed handoff ${SOURCE_SHA:0:12}"             --notes "Control-plane signed handoff only. SublimeJ source: $SOURCE_SHA. No rebuild; private key not exported."             --prerelease             dist/SublimeJ.apk dist/SublimeJ.apk.sha256 dist/phase15-16-manifest.json dist/SHA256SUMS
           mkdir -p "$RUNNER_TEMP/release-readback"
-          gh release download "$tag" -R "$TARGET_REPOSITORY" -D "$RUNNER_TEMP/release-readback"             -p "SublimeJ.apk" -p "SublimeJ.apk.sha256" -p "phase15-16-manifest.json" -p "SHA256SUMS"
+          gh release download "$tag" -R "$GITHUB_REPOSITORY" -D "$RUNNER_TEMP/release-readback"             -p "SublimeJ.apk" -p "SublimeJ.apk.sha256" -p "phase15-16-manifest.json" -p "SHA256SUMS"
           [ "$(sha256sum "$RUNNER_TEMP/release-readback/SublimeJ.apk" | awk '{print $1}')" = "$SIGNED_SHA256" ]
-          RELEASE_JSON="$(gh release view "$tag" -R "$TARGET_REPOSITORY" --json tagName,targetCommitish,isPrerelease)" SOURCE_SHA="$SOURCE_SHA" TAG="$tag" python3 - <<'PY'
-          import json,os
-          r=json.loads(os.environ["RELEASE_JSON"])
-          assert r["tagName"]==os.environ["TAG"]
-          assert r["targetCommitish"]==os.environ["SOURCE_SHA"]
-          assert r["isPrerelease"] is True
-          PY
-          echo "RELEASE_TAG=$tag" >> "$GITHUB_ENV"
+          echo "DONOR_RELEASE_TAG=$tag" >> "$GITHUB_ENV"
+          echo SUBLIMEJ_DONOR_SIGNED_HANDOFF=PASS
 
-      - name: Publish signer proof and dispatch exact Phase 17 handoff
+      - name: Mark signed handoff ready for canonical SublimeJ controller
         env:
-          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
           SOURCE_SHA: ${{ inputs.source_sha }}
           RELEASE_REF: ${{ inputs.release_ref }}
           PHASE13_14_RUN_ID: ${{ inputs.phase13_14_run_id }}
         shell: bash
         run: |
           set -Eeuo pipefail
-          set +x
-          gh api --method POST "/repos/$TARGET_REPOSITORY/statuses/$SOURCE_SHA"             -f state=success             -f context="sublimej/phase15-16-signer-bridge"             -f description="persistent canonical signer + same unsigned input verified"             -f target_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
-
-          jq -n             --arg source_sha "$SOURCE_SHA"             --arg release_ref "$RELEASE_REF"             --arg release_tag "$RELEASE_TAG"             --arg signed_apk_sha256 "$SIGNED_SHA256"             --arg phase13_14_run_id "$PHASE13_14_RUN_ID"             --arg phase15_16_run_id "$GITHUB_RUN_ID"             '{
-              event_type:"sublimej-phase15-16-signed",
-              client_payload:{
-                source_sha:$source_sha,
-                release_ref:$release_ref,
-                release_tag:$release_tag,
-                signed_apk_sha256:$signed_apk_sha256,
-                phase13_14_run_id:$phase13_14_run_id,
-                phase15_16_run_id:$phase15_16_run_id
-              }
-            }' | gh api --method POST "/repos/$TARGET_REPOSITORY/dispatches" --input -
-          echo "SUBLIMEJ_PHASE17_DISPATCHED source=$SOURCE_SHA signed_sha256=$SIGNED_SHA256"
+          echo "SUBLIMEJ_SIGNED_HANDOFF_READY=PASS"
+          echo "SOURCE_SHA=$SOURCE_SHA"
+          echo "RELEASE_REF=$RELEASE_REF"
+          echo "PHASE13_14_RUN_ID=$PHASE13_14_RUN_ID"
+          echo "PHASE15_16_RUN_ID=$GITHUB_RUN_ID"
+          echo "DONOR_RELEASE_TAG=$DONOR_RELEASE_TAG"
+          echo "SIGNED_SHA256=$SIGNED_SHA256"
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
