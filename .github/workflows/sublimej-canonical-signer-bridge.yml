@@ -17,7 +17,7 @@ on:
         required: true
         type: string
       phase13_artifact_digest:
-        description: Exact Phase 13 artifact/release-asset digest including sha256: prefix
+        description: "Exact Phase 13 artifact/release-asset digest including sha256: prefix"
         required: true
         type: string
 
