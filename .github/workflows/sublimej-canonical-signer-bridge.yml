@@ -1,0 +1,335 @@
+name: SublimeJ Canonical Signer Bridge
+# UNIFIED_AUTHORITY: signer bridge only; never rebuilds SublimeJ product bytes and never exports the canonical private key.
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact frozen SublimeJ source SHA
+        required: true
+        type: string
+      release_ref:
+        description: Exact immutable release/final-* branch
+        required: true
+        type: string
+      phase13_14_run_id:
+        description: Exact successful Phase 13-14 Build Once run ID
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sublimej-canonical-signer-${{ inputs.source_sha }}
+  cancel-in-progress: false
+
+env:
+  TARGET_REPOSITORY: sublimedeaf-design/Sublimej
+  EXPECTED_FINGERPRINT: 0738b245ec8a557edc0600a6961d7bb2586cc22f886ed5273560ce6ab2db447f
+
+jobs:
+  sign-and-handoff:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Validate immutable SublimeJ handoff identity
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          RELEASE_REF: ${{ inputs.release_ref }}
+          PHASE13_14_RUN_ID: ${{ inputs.phase13_14_run_id }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          set +x
+          [ -n "${GH_TOKEN:-}" ] || { echo SUBLIMEJ_SIGNER_PRIVATE_AUTH_MISSING >&2; exit 77; }
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo SUBLIMEJ_SIGNER_SOURCE_INVALID >&2; exit 64; }
+          [[ "$RELEASE_REF" == release/final-* ]] || { echo SUBLIMEJ_SIGNER_RELEASE_REF_INVALID >&2; exit 65; }
+          [[ "$PHASE13_14_RUN_ID" =~ ^[0-9]+$ ]] || { echo SUBLIMEJ_SIGNER_PHASE13_RUN_INVALID >&2; exit 66; }
+
+          ref_sha="$(gh api "/repos/$TARGET_REPOSITORY/git/ref/heads/$RELEASE_REF" --jq .object.sha)"
+          [ "$ref_sha" = "$SOURCE_SHA" ] || { echo SUBLIMEJ_SIGNER_RELEASE_REF_MISMATCH >&2; exit 67; }
+
+          signer_fp="$(gh api "/repos/$TARGET_REPOSITORY/contents/android/signer.sha256?ref=$SOURCE_SHA" --jq .content | tr -d '\n' | base64 -d | tr -d '[:space:]' | tr -d ':' | tr 'A-F' 'a-f')"
+          [ "$signer_fp" = "$EXPECTED_FINGERPRINT" ] || { echo SUBLIMEJ_SIGNER_EXPECTED_FINGERPRINT_MISMATCH >&2; exit 68; }
+
+          run="$(gh api "/repos/$TARGET_REPOSITORY/actions/runs/$PHASE13_14_RUN_ID")"
+          RUN_JSON="$run" SOURCE_SHA="$SOURCE_SHA" python3 - <<'PY'
+          import json,os
+          r=json.loads(os.environ["RUN_JSON"])
+          assert r.get("name")=="Phase 13-14 Build Once and Provenance", r.get("name")
+          assert r.get("status")=="completed" and r.get("conclusion")=="success", (r.get("status"),r.get("conclusion"))
+          assert r.get("head_sha")==os.environ["SOURCE_SHA"], (r.get("head_sha"),os.environ["SOURCE_SHA"])
+          PY
+
+      - name: Download exact Phase 13-14 artifact
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          PHASE13_14_RUN_ID: ${{ inputs.phase13_14_run_id }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          set +x
+          name="phase13-14-candidate-$SOURCE_SHA"
+          payload="$(gh api "/repos/$TARGET_REPOSITORY/actions/runs/$PHASE13_14_RUN_ID/artifacts?per_page=100")"
+          artifact_id="$(PAYLOAD="$payload" NAME="$name" python3 - <<'PY'
+          import json,os
+          p=json.loads(os.environ["PAYLOAD"]); name=os.environ["NAME"]
+          rows=[a for a in p.get("artifacts",[]) if a.get("name")==name and not a.get("expired")]
+          if len(rows)!=1: raise SystemExit("SUBLIMEJ_SIGNER_PHASE13_ARTIFACT_NOT_UNIQUE")
+          print(rows[0]["id"])
+          PY
+          )"
+          mkdir -p "$RUNNER_TEMP/phase13" dist
+          gh api "/repos/$TARGET_REPOSITORY/actions/artifacts/$artifact_id/zip" > "$RUNNER_TEMP/phase13.zip"
+          unzip -q "$RUNNER_TEMP/phase13.zip" -d "$RUNNER_TEMP/phase13"
+          test -s "$RUNNER_TEMP/phase13/sublimej-phase13-unsigned.apk"
+          test -s "$RUNNER_TEMP/phase13/phase13-14-manifest.json"
+          test -s "$RUNNER_TEMP/phase13/SHA256SUMS"
+          (cd "$RUNNER_TEMP/phase13" && sha256sum --check SHA256SUMS)
+
+      - name: Verify Phase 13-14 manifest and unchanged unsigned bytes
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          RELEASE_REF: ${{ inputs.release_ref }}
+          PHASE13_14_RUN_ID: ${{ inputs.phase13_14_run_id }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          SOURCE_SHA="$SOURCE_SHA" RELEASE_REF="$RELEASE_REF" PHASE13_14_RUN_ID="$PHASE13_14_RUN_ID" python3 - <<'PY'
+          import hashlib,json,os,pathlib
+          root=pathlib.Path(os.environ["RUNNER_TEMP"])/"phase13"
+          m=json.loads((root/"phase13-14-manifest.json").read_text())
+          apk=root/"sublimej-phase13-unsigned.apk"
+          digest=hashlib.sha256(apk.read_bytes()).hexdigest()
+          checks={
+            "source":m.get("source_sha")==os.environ["SOURCE_SHA"],
+            "release_ref":m.get("release_ref")==os.environ["RELEASE_REF"],
+            "run":str(m.get("phase13_14_run_id"))==os.environ["PHASE13_14_RUN_ID"],
+            "phase13":m.get("phase13_verdict")=="BUILD_ONCE_UNSIGNED_CANDIDATE_PASS",
+            "phase14":m.get("phase14_verdict")=="PROVENANCE_SBOM_PASS",
+            "unsigned":m.get("unsigned_apk_sha256")==digest,
+            "signing_state":m.get("signing_state")=="UNSIGNED_AWAITING_PHASE15_PERSISTENT_SIGNER",
+            "no_rebuild":m.get("rebuild_performed") is False,
+          }
+          bad=[k for k,v in checks.items() if not v]
+          if bad: raise SystemExit("SUBLIMEJ_SIGNER_PHASE13_BINDING_FAILED:"+",".join(bad))
+          (pathlib.Path(os.environ["RUNNER_TEMP"])/"unsigned.sha256").write_text(digest+"\n")
+          print("SUBLIMEJ_PHASE13_IMMUTABLE_HANDOFF=PASS sha256="+digest)
+          PY
+
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install exact Android signing tools
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "build-tools;36.0.0"
+
+      - name: Use fingerprint-bound hosted escrow when available
+        id: hosted
+        env:
+          OMEGA_ANDROID_KEYSTORE_B64: ${{ secrets.OMEGA_ANDROID_KEYSTORE_B64 }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          set +x
+          echo "available=false" >> "$GITHUB_OUTPUT"
+          [ -n "${OMEGA_ANDROID_KEYSTORE_B64:-}" ] || { echo SUBLIMEJ_HOSTED_SIGNER_ESCROW_NOT_CONFIGURED; exit 0; }
+          key="$(mktemp)"
+          trap 'rm -f "$key"' EXIT
+          umask 077
+          printf '%s' "$OMEGA_ANDROID_KEYSTORE_B64" | base64 -d > "$key"
+          actual="$(keytool -list -v -keystore "$key" -storepass android -alias androiddebugkey 2>/dev/null | sed -n 's/.*SHA256: //p' | head -1 | tr -d ':' | tr 'A-F' 'a-f' || true)"
+          if [ "$actual" != "$EXPECTED_FINGERPRINT" ]; then
+            echo SUBLIMEJ_HOSTED_SIGNER_FINGERPRINT_MISMATCH_FALLBACK
+            exit 0
+          fi
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" sign             --ks "$key" --ks-key-alias androiddebugkey             --ks-pass pass:android --key-pass pass:android             --out dist/SublimeJ.apk "$RUNNER_TEMP/phase13/sublimej-phase13-unsigned.apk"
+          echo "available=true" >> "$GITHUB_OUTPUT"
+          echo "backend=hosted-fingerprint-bound-escrow" >> "$GITHUB_OUTPUT"
+          echo SUBLIMEJ_HOSTED_CANONICAL_SIGN=PASS
+
+      - name: Discover isolated canonical signer runtime when hosted escrow is unavailable
+        id: wake
+        if: steps.hosted.outputs.available != 'true'
+        env:
+          OMEGA_CODESPACE_LIFECYCLE_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          OMEGA_FORCE_RESTART: "0"
+        shell: bash
+        run: python3 bootstrap/omega/codespace_wake.py
+
+      - name: Sign exact unsigned bytes inside isolated canonical signer runtime
+        id: remote
+        if: steps.hosted.outputs.available != 'true' && steps.wake.outputs.runtime_available == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          OMEGA_CODESPACE_NAME: ${{ steps.wake.outputs.codespace_name }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          set +x
+          unsigned="$RUNNER_TEMP/phase13/sublimej-phase13-unsigned.apk"
+          base64 -w0 "$unsigned" | timeout 120s gh codespace ssh -c "$OMEGA_CODESPACE_NAME" -- bash -c 'base64 -d > /tmp/sublimej-release-unsigned.apk'
+          {
+            printf 'export SUBLIMEJ_EXPECTED_SIGNER=%q\n' "$EXPECTED_FINGERPRINT"
+            cat <<'REMOTE'
+          set -Eeuo pipefail
+          set +x
+          key="$HOME/.android/debug.keystore"
+          [ -s "$key" ] || { echo SUBLIMEJ_REMOTE_SIGNER_KEY_MISSING >&2; exit 37; }
+          actual="$(keytool -list -v -keystore "$key" -storepass android -alias androiddebugkey 2>/dev/null | sed -n 's/.*SHA256: //p' | head -1 | tr -d ':' | tr 'A-F' 'a-f')"
+          [ "$actual" = "$SUBLIMEJ_EXPECTED_SIGNER" ] || { echo SUBLIMEJ_REMOTE_SIGNER_FINGERPRINT_MISMATCH >&2; exit 38; }
+          apksigner="${ANDROID_HOME:-$HOME/android-sdk}/build-tools/36.0.0/apksigner"
+          if [ ! -x "$apksigner" ]; then
+            apksigner="$(find "${ANDROID_HOME:-$HOME/android-sdk}/build-tools" -type f -name apksigner 2>/dev/null | sort -V | tail -1)"
+          fi
+          [ -x "$apksigner" ] || { echo SUBLIMEJ_REMOTE_APKSIGNER_MISSING >&2; exit 39; }
+          rm -f /tmp/sublimej-release-signed.apk
+          "$apksigner" sign             --ks "$key" --ks-key-alias androiddebugkey             --ks-pass pass:android --key-pass pass:android             --out /tmp/sublimej-release-signed.apk /tmp/sublimej-release-unsigned.apk
+          "$apksigner" verify --verbose --print-certs /tmp/sublimej-release-signed.apk > /tmp/sublimej-signer-verify.txt
+          signed="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' /tmp/sublimej-signer-verify.txt | head -1 | tr -d ':' | tr 'A-F' 'a-f')"
+          [ "$signed" = "$SUBLIMEJ_EXPECTED_SIGNER" ] || { echo SUBLIMEJ_REMOTE_SIGNED_CERT_MISMATCH >&2; exit 40; }
+          echo SUBLIMEJ_REMOTE_CANONICAL_SIGN=PASS
+          REMOTE
+          } | timeout 120s gh codespace ssh -c "$OMEGA_CODESPACE_NAME" -- bash -s
+          timeout 120s gh codespace ssh -c "$OMEGA_CODESPACE_NAME" -- bash -c 'base64 -w0 /tmp/sublimej-release-signed.apk' > "$RUNNER_TEMP/sublimej-signed.b64"
+          base64 -d "$RUNNER_TEMP/sublimej-signed.b64" > dist/SublimeJ.apk
+          rm -f "$RUNNER_TEMP/sublimej-signed.b64"
+          timeout 30s gh codespace ssh -c "$OMEGA_CODESPACE_NAME" -- bash -c 'rm -f /tmp/sublimej-release-unsigned.apk /tmp/sublimej-release-signed.apk /tmp/sublimej-signer-verify.txt' || true
+          echo "available=true" >> "$GITHUB_OUTPUT"
+          echo "backend=isolated-private-signer-runtime" >> "$GITHUB_OUTPUT"
+
+      - name: Fail closed when no canonical signer backend is available
+        if: steps.hosted.outputs.available != 'true' && steps.wake.outputs.runtime_available != 'true'
+        shell: bash
+        run: |
+          echo SUBLIMEJ_CANONICAL_SIGNER_UNAVAILABLE >&2
+          exit 41
+
+      - name: Independently verify signed APK and build Phase 15-16 manifest
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          RELEASE_REF: ${{ inputs.release_ref }}
+          PHASE13_14_RUN_ID: ${{ inputs.phase13_14_run_id }}
+          HOSTED_AVAILABLE: ${{ steps.hosted.outputs.available }}
+          HOSTED_BACKEND: ${{ steps.hosted.outputs.backend }}
+          REMOTE_BACKEND: ${{ steps.remote.outputs.backend }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -s dist/SublimeJ.apk
+          out="$("$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs dist/SublimeJ.apk)"
+          actual="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' <<<"$out" | head -1 | tr -d ':' | tr 'A-F' 'a-f')"
+          [ "$actual" = "$EXPECTED_FINGERPRINT" ] || { echo SUBLIMEJ_SIGNED_APK_CERT_MISMATCH >&2; exit 42; }
+          "$ANDROID_HOME/build-tools/36.0.0/zipalign" -c -P 16 -v 4 dist/SublimeJ.apk >/dev/null
+
+          unsigned_now="$(sha256sum "$RUNNER_TEMP/phase13/sublimej-phase13-unsigned.apk" | awk '{print $1}')"
+          unsigned_expected="$(cat "$RUNNER_TEMP/unsigned.sha256")"
+          [ "$unsigned_now" = "$unsigned_expected" ] || { echo SUBLIMEJ_UNSIGNED_INPUT_MUTATED >&2; exit 43; }
+          signed_sha="$(sha256sum dist/SublimeJ.apk | awk '{print $1}')"
+          printf '%s  %s\n' "$signed_sha" "SublimeJ.apk" > dist/SublimeJ.apk.sha256
+          backend="$REMOTE_BACKEND"
+          [ "$HOSTED_AVAILABLE" = true ] && backend="$HOSTED_BACKEND"
+          SOURCE_SHA="$SOURCE_SHA" RELEASE_REF="$RELEASE_REF" PHASE13_14_RUN_ID="$PHASE13_14_RUN_ID" UNSIGNED_SHA="$unsigned_expected" SIGNED_SHA="$signed_sha" BACKEND="$backend" python3 - <<'PY'
+          import json,os,pathlib
+          payload={
+            "schema_version":1,
+            "project":"omega-sublimej-unified",
+            "source_sha":os.environ["SOURCE_SHA"],
+            "release_ref":os.environ["RELEASE_REF"],
+            "phase13_14_run_id":int(os.environ["PHASE13_14_RUN_ID"]),
+            "phase15_16_run_id":int(os.environ["GITHUB_RUN_ID"]),
+            "unsigned_apk_sha256":os.environ["UNSIGNED_SHA"],
+            "signed_apk_sha256":os.environ["SIGNED_SHA"],
+            "signer_certificate_sha256":os.environ["EXPECTED_FINGERPRINT"],
+            "signer_backend":os.environ["BACKEND"],
+            "signing_operation_count":1,
+            "phase15_verdict":"PERSISTENT_SIGNER_PASS",
+            "phase16_verdict":"SAME_UNSIGNED_INPUT_SIGNED_ONCE_PASS",
+            "rebuild_performed":False,
+            "private_key_exported":False,
+          }
+          pathlib.Path("dist/phase15-16-manifest.json").write_text(json.dumps(payload,indent=2,sort_keys=True)+"\n")
+          PY
+          (
+            cd dist
+            sha256sum SublimeJ.apk SublimeJ.apk.sha256 phase15-16-manifest.json > SHA256SUMS
+            sha256sum --check SHA256SUMS
+          )
+          echo "SIGNED_SHA256=$signed_sha" >> "$GITHUB_ENV"
+          echo "SUBLIMEJ_PHASE15_PERSISTENT_SIGNER=PASS"
+          echo "SUBLIMEJ_PHASE16_SAME_UNSIGNED_INPUT_SIGNED_ONCE=PASS"
+
+      - name: Publish immutable private SublimeJ signed prerelease
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          set +x
+          tag="signed-$SOURCE_SHA"
+          if gh release view "$tag" -R "$TARGET_REPOSITORY" >/dev/null 2>&1; then
+            echo "SUBLIMEJ_SIGNED_RELEASE_ALREADY_EXISTS:$tag" >&2
+            exit 44
+          fi
+          gh release create "$tag" -R "$TARGET_REPOSITORY"             --target "$SOURCE_SHA"             --title "SublimeJ signed ${SOURCE_SHA:0:12}"             --notes "Canonical Phase 15/16 signer bridge. No rebuild; private key not exported."             --prerelease             dist/SublimeJ.apk dist/SublimeJ.apk.sha256 dist/phase15-16-manifest.json dist/SHA256SUMS
+
+          mkdir -p "$RUNNER_TEMP/release-readback"
+          gh release download "$tag" -R "$TARGET_REPOSITORY" -D "$RUNNER_TEMP/release-readback"             -p "SublimeJ.apk" -p "SublimeJ.apk.sha256" -p "phase15-16-manifest.json" -p "SHA256SUMS"
+          [ "$(sha256sum "$RUNNER_TEMP/release-readback/SublimeJ.apk" | awk '{print $1}')" = "$SIGNED_SHA256" ]
+          RELEASE_JSON="$(gh release view "$tag" -R "$TARGET_REPOSITORY" --json tagName,targetCommitish,isPrerelease)" SOURCE_SHA="$SOURCE_SHA" TAG="$tag" python3 - <<'PY'
+          import json,os
+          r=json.loads(os.environ["RELEASE_JSON"])
+          assert r["tagName"]==os.environ["TAG"]
+          assert r["targetCommitish"]==os.environ["SOURCE_SHA"]
+          assert r["isPrerelease"] is True
+          PY
+          echo "RELEASE_TAG=$tag" >> "$GITHUB_ENV"
+
+      - name: Publish signer proof and dispatch exact Phase 17 handoff
+        env:
+          GH_TOKEN: ${{ secrets.OMEGA_BOOTSTRAP_TOKEN }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          RELEASE_REF: ${{ inputs.release_ref }}
+          PHASE13_14_RUN_ID: ${{ inputs.phase13_14_run_id }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          set +x
+          gh api --method POST "/repos/$TARGET_REPOSITORY/statuses/$SOURCE_SHA"             -f state=success             -f context="sublimej/phase15-16-signer-bridge"             -f description="persistent canonical signer + same unsigned input verified"             -f target_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
+
+          jq -n             --arg source_sha "$SOURCE_SHA"             --arg release_ref "$RELEASE_REF"             --arg release_tag "$RELEASE_TAG"             --arg signed_apk_sha256 "$SIGNED_SHA256"             --arg phase13_14_run_id "$PHASE13_14_RUN_ID"             --arg phase15_16_run_id "$GITHUB_RUN_ID"             '{
+              event_type:"sublimej-phase15-16-signed",
+              client_payload:{
+                source_sha:$source_sha,
+                release_ref:$release_ref,
+                release_tag:$release_tag,
+                signed_apk_sha256:$signed_apk_sha256,
+                phase13_14_run_id:$phase13_14_run_id,
+                phase15_16_run_id:$phase15_16_run_id
+              }
+            }' | gh api --method POST "/repos/$TARGET_REPOSITORY/dispatches" --input -
+          echo "SUBLIMEJ_PHASE17_DISPATCHED source=$SOURCE_SHA signed_sha256=$SIGNED_SHA256"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: SublimeJ-Phase15-16-${{ inputs.source_sha }}
+          retention-days: 90
+          if-no-files-found: error
+          path: |
+            dist/SublimeJ.apk.sha256
+            dist/phase15-16-manifest.json
+            dist/SHA256SUMS
