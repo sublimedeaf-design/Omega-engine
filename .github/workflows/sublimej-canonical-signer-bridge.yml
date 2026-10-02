@@ -22,7 +22,7 @@ on:
         type: string
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: sublimej-canonical-signer-${{ inputs.source_sha }}
@@ -42,7 +42,8 @@ jobs:
           persist-credentials: false
           fetch-depth: 1
 
-      - name: Validate immutable SublimeJ handoff identity
+      - name: Validate byte-identical private Phase 13 handoff
+        id: handoff
         env:
           GH_TOKEN: ${{ github.token }}
           SOURCE_SHA: ${{ inputs.source_sha }}
@@ -57,38 +58,72 @@ jobs:
           [[ "$PHASE13_14_RUN_ID" =~ ^[0-9]+$ ]] || { echo SUBLIMEJ_SIGNER_PHASE13_RUN_INVALID >&2; exit 66; }
           [[ "$PHASE13_ARTIFACT_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo SUBLIMEJ_SIGNER_ARTIFACT_DIGEST_INVALID >&2; exit 67; }
 
-          tag="sublimej-unsigned-$SOURCE_SHA"
-          release="$(gh api "/repos/$GITHUB_REPOSITORY/releases/tags/$tag")"
-          RELEASE_JSON="$release" SOURCE_SHA="$SOURCE_SHA" ARTIFACT_DIGEST="$PHASE13_ARTIFACT_DIGEST" python3 - <<'PY'
+          receipt="handoff/sublimej/$SOURCE_SHA-phase13.json"
+          test -s "$receipt" || { echo SUBLIMEJ_SIGNER_HANDOFF_RECEIPT_MISSING >&2; exit 68; }
+          RECEIPT="$receipt" SOURCE_SHA="$SOURCE_SHA" RELEASE_REF="$RELEASE_REF" PHASE13_14_RUN_ID="$PHASE13_14_RUN_ID" PHASE13_ARTIFACT_DIGEST="$PHASE13_ARTIFACT_DIGEST" python3 - <<'PY'
+          import json,os,pathlib
+          r=json.loads(pathlib.Path(os.environ["RECEIPT"]).read_text())
+          expected={
+            "source_repository":"sublimedeaf-design/Sublimej",
+            "source_sha":os.environ["SOURCE_SHA"],
+            "release_ref":os.environ["RELEASE_REF"],
+            "phase13_14_run_id":int(os.environ["PHASE13_14_RUN_ID"]),
+            "source_artifact_digest":os.environ["PHASE13_ARTIFACT_DIGEST"],
+            "control_artifact_digest":os.environ["PHASE13_ARTIFACT_DIGEST"],
+            "control_repository":"sublimedeaf-design/Omega-engine",
+            "control_release_draft":True,
+            "signer_certificate_sha256":"0738b245ec8a557edc0600a6961d7bb2586cc22f886ed5273560ce6ab2db447f",
+            "verdict":"BYTE_IDENTICAL_PRIVATE_DRAFT_HANDOFF_PASS",
+          }
+          bad=[k for k,v in expected.items() if r.get(k)!=v]
+          if bad: raise SystemExit("SUBLIMEJ_SIGNER_HANDOFF_RECEIPT_MISMATCH:"+",".join(bad))
+          if not isinstance(r.get("control_release_id"),int) or not isinstance(r.get("control_asset_id"),int):
+              raise SystemExit("SUBLIMEJ_SIGNER_HANDOFF_RECEIPT_IDS_INVALID")
+          PY
+
+          release_id="$(jq -r .control_release_id "$receipt")"
+          asset_id="$(jq -r .control_asset_id "$receipt")"
+          asset_name="$(jq -r .control_asset_name "$receipt")"
+          release="$(gh api "/repos/$GITHUB_REPOSITORY/releases/$release_id")"
+          RELEASE_JSON="$release" python3 - <<'PY'
           import json,os
           r=json.loads(os.environ["RELEASE_JSON"])
-          source=os.environ["SOURCE_SHA"]
-          name=f"phase13-14-candidate-{source}.zip"
-          assert r.get("tag_name")==f"sublimej-unsigned-{source}"
-          assert r.get("prerelease") is True and r.get("draft") is False
-          rows=[a for a in (r.get("assets") or []) if a.get("name")==name and a.get("state")=="uploaded"]
-          assert len(rows)==1, "SUBLIMEJ_UNSIGNED_HANDOFF_ASSET_NOT_UNIQUE"
-          assert rows[0].get("digest")==os.environ["ARTIFACT_DIGEST"], (rows[0].get("digest"),os.environ["ARTIFACT_DIGEST"])
+          assert r.get("draft") is True, "SUBLIMEJ_HANDOFF_RELEASE_NOT_DRAFT"
+          assert r.get("published_at") is None, "SUBLIMEJ_HANDOFF_RELEASE_WAS_PUBLISHED"
           PY
-          echo SUBLIMEJ_SIGNER_IMMUTABLE_HANDOFF_IDENTITY=PASS
+          asset="$(gh api "/repos/$GITHUB_REPOSITORY/releases/assets/$asset_id")"
+          ASSET_JSON="$asset" ASSET_NAME="$asset_name" DIGEST="$PHASE13_ARTIFACT_DIGEST" python3 - <<'PY'
+          import json,os
+          a=json.loads(os.environ["ASSET_JSON"])
+          assert a.get("name")==os.environ["ASSET_NAME"], (a.get("name"),os.environ["ASSET_NAME"])
+          assert a.get("state")=="uploaded", a.get("state")
+          assert a.get("digest")==os.environ["DIGEST"], (a.get("digest"),os.environ["DIGEST"])
+          PY
+          echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
+          echo "asset_id=$asset_id" >> "$GITHUB_OUTPUT"
+          echo "asset_name=$asset_name" >> "$GITHUB_OUTPUT"
+          echo SUBLIMEJ_SIGNER_PRIVATE_HANDOFF_IDENTITY=PASS
 
-      - name: Download exact Phase 13-14 artifact
+      - name: Download exact Phase 13-14 draft asset
         env:
           GH_TOKEN: ${{ github.token }}
-          SOURCE_SHA: ${{ inputs.source_sha }}
+          PHASE13_ARTIFACT_DIGEST: ${{ inputs.phase13_artifact_digest }}
+          ASSET_ID: ${{ steps.handoff.outputs.asset_id }}
+          ASSET_NAME: ${{ steps.handoff.outputs.asset_name }}
         shell: bash
         run: |
           set -Eeuo pipefail
-          name="phase13-14-candidate-$SOURCE_SHA.zip"
-          tag="sublimej-unsigned-$SOURCE_SHA"
           mkdir -p "$RUNNER_TEMP/phase13" "$RUNNER_TEMP/handoff" dist
-          gh release download "$tag" -R "$GITHUB_REPOSITORY" -p "$name" -D "$RUNNER_TEMP/handoff"
-          test -s "$RUNNER_TEMP/handoff/$name"
-          unzip -q "$RUNNER_TEMP/handoff/$name" -d "$RUNNER_TEMP/phase13"
+          gh api -H "Accept: application/octet-stream" "/repos/$GITHUB_REPOSITORY/releases/assets/$ASSET_ID" > "$RUNNER_TEMP/handoff/$ASSET_NAME"
+          test -s "$RUNNER_TEMP/handoff/$ASSET_NAME"
+          actual="sha256:$(sha256sum "$RUNNER_TEMP/handoff/$ASSET_NAME" | awk '{print $1}')"
+          [ "$actual" = "$PHASE13_ARTIFACT_DIGEST" ] || { echo SUBLIMEJ_SIGNER_HANDOFF_ZIP_DIGEST_MISMATCH >&2; exit 69; }
+          unzip -q "$RUNNER_TEMP/handoff/$ASSET_NAME" -d "$RUNNER_TEMP/phase13"
           test -s "$RUNNER_TEMP/phase13/sublimej-phase13-unsigned.apk"
           test -s "$RUNNER_TEMP/phase13/phase13-14-manifest.json"
           test -s "$RUNNER_TEMP/phase13/SHA256SUMS"
           (cd "$RUNNER_TEMP/phase13" && sha256sum --check SHA256SUMS)
+          echo SUBLIMEJ_PHASE13_PRIVATE_DRAFT_DOWNLOAD=PASS
 
       - name: Verify Phase 13-14 manifest and unchanged unsigned bytes
         env:
@@ -267,24 +302,36 @@ jobs:
           echo "SUBLIMEJ_PHASE15_PERSISTENT_SIGNER=PASS"
           echo "SUBLIMEJ_PHASE16_SAME_UNSIGNED_INPUT_SIGNED_ONCE=PASS"
 
-      - name: Publish immutable donor-local signed handoff
+      - name: Publish private donor-local signed draft handoff
         env:
           GH_TOKEN: ${{ github.token }}
           SOURCE_SHA: ${{ inputs.source_sha }}
         shell: bash
         run: |
           set -Eeuo pipefail
-          tag="sublimej-signed-$SOURCE_SHA"
-          if gh release view "$tag" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "SUBLIMEJ_DONOR_SIGNED_RELEASE_ALREADY_EXISTS:$tag" >&2
-            exit 44
-          fi
-          gh release create "$tag" -R "$GITHUB_REPOSITORY"             --target "$GITHUB_SHA"             --title "SublimeJ signed handoff ${SOURCE_SHA:0:12}"             --notes "Control-plane signed handoff only. SublimeJ source: $SOURCE_SHA. No rebuild; private key not exported."             --prerelease             dist/SublimeJ.apk dist/SublimeJ.apk.sha256 dist/phase15-16-manifest.json dist/SHA256SUMS
-          mkdir -p "$RUNNER_TEMP/release-readback"
-          gh release download "$tag" -R "$GITHUB_REPOSITORY" -D "$RUNNER_TEMP/release-readback"             -p "SublimeJ.apk" -p "SublimeJ.apk.sha256" -p "phase15-16-manifest.json" -p "SHA256SUMS"
-          [ "$(sha256sum "$RUNNER_TEMP/release-readback/SublimeJ.apk" | awk '{print $1}')" = "$SIGNED_SHA256" ]
+          tag="sublimej-signed-handoff-${SOURCE_SHA:0:8}-$GITHUB_RUN_ID"
+          gh release create "$tag" -R "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "SublimeJ signed private handoff ${SOURCE_SHA:0:12}" \
+            --notes "DRAFT ONLY. Signed Phase 15/16 handoff. Never publish. SublimeJ source: $SOURCE_SHA. No rebuild; private key not exported." \
+            --draft --prerelease \
+            dist/SublimeJ.apk dist/SublimeJ.apk.sha256 dist/phase15-16-manifest.json dist/SHA256SUMS
+          release_id="$(gh api --paginate "/repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq '.[] | select(.draft==true and .tag_name=="'"$tag"'") | .id')"
+          [ "$(printf '%s\n' "$release_id" | sed '/^$/d' | wc -l)" -eq 1 ] || { echo SUBLIMEJ_SIGNED_DRAFT_RELEASE_NOT_UNIQUE >&2; exit 44; }
+          release="$(gh api "/repos/$GITHUB_REPOSITORY/releases/$release_id")"
+          RELEASE_JSON="$release" SOURCE_SHA="$SOURCE_SHA" SIGNED_SHA256="$SIGNED_SHA256" python3 - <<'PY'
+          import json,os
+          r=json.loads(os.environ["RELEASE_JSON"])
+          assert r.get("draft") is True and r.get("published_at") is None
+          names={a.get("name"):a for a in (r.get("assets") or [])}
+          for name in ("SublimeJ.apk","SublimeJ.apk.sha256","phase15-16-manifest.json","SHA256SUMS"):
+              assert name in names and names[name].get("state")=="uploaded", name
+          digest=names["SublimeJ.apk"].get("digest")
+          assert digest=="sha256:"+os.environ["SIGNED_SHA256"], (digest,os.environ["SIGNED_SHA256"])
+          PY
+          echo "SIGNED_DRAFT_RELEASE_ID=$release_id" >> "$GITHUB_ENV"
           echo "DONOR_RELEASE_TAG=$tag" >> "$GITHUB_ENV"
-          echo SUBLIMEJ_DONOR_SIGNED_HANDOFF=PASS
+          echo SUBLIMEJ_DONOR_SIGNED_PRIVATE_HANDOFF=PASS
 
       - name: Mark signed handoff ready for canonical SublimeJ controller
         env:
@@ -305,9 +352,10 @@ jobs:
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: SublimeJ-Phase15-16-${{ inputs.source_sha }}
-          retention-days: 90
+          retention-days: 1
           if-no-files-found: error
           path: |
+            dist/SublimeJ.apk
             dist/SublimeJ.apk.sha256
             dist/phase15-16-manifest.json
             dist/SHA256SUMS
