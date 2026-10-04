@@ -121,30 +121,60 @@ def _bootstrap_runner_worker(token):
 
         env = os.environ.copy()
         env["RUNNER_ALLOW_RUNASROOT"] = "1"
-        # Provision GitHub CLI without root/sudo into this runner only.
-        if shutil.which("gh", path=env.get("PATH")) is None:
-            tool_root = root / "_toolroot"
-            tool_root.mkdir(parents=True, exist_ok=True)
-            with tempfile.TemporaryDirectory(prefix="sublimej-gh-") as gh_tmp:
-                subprocess.run(
-                    ["apt-get", "download", "gh"],
-                    cwd=gh_tmp,
-                    check=True,
-                    timeout=180,
-                )
-                debs = list(pathlib.Path(gh_tmp).glob("gh_*.deb"))
-                if len(debs) != 1:
-                    raise RuntimeError(f"GH_DEB_COUNT_INVALID:{len(debs)}")
-                subprocess.run(
-                    ["dpkg-deb", "-x", str(debs[0]), str(tool_root)],
-                    check=True,
-                    timeout=60,
-                )
-            gh_bin = tool_root / "usr" / "bin" / "gh"
-            if not gh_bin.is_file():
-                raise RuntimeError("GH_ROOTLESS_INSTALL_MISSING")
-            env["PATH"] = f"{gh_bin.parent}:{env.get('PATH', '')}"
-            print("SUBLIMEJ_BOOTSTRAP_GH=ROOTLESS_READY", flush=True)
+
+        # Pin the official immutable GitHub CLI release in user space. Never use
+        # apt/sudo or an unverified system binary for release-critical gates.
+        gh_version = "2.102.0"
+        gh_expected = "bb766f710eef8ede859c18578c72c327597cd4c8a85b06001b1f3843c6019386"
+        gh_url = (
+            f"https://github.com/cli/cli/releases/download/v{gh_version}/"
+            f"gh_{gh_version}_linux_amd64.tar.gz"
+        )
+        tool_root = root / "_toolroot"
+        gh_extract = tool_root / "extract"
+        gh_bin_dir = tool_root / "bin"
+        gh_extract.mkdir(parents=True, exist_ok=True)
+        gh_bin_dir.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(suffix=".tar.gz", delete=False) as fh:
+            gh_archive = pathlib.Path(fh.name)
+        try:
+            req = urllib.request.Request(
+                gh_url, headers={"User-Agent": "SublimeJ-Runner-Recovery/1"}
+            )
+            digest = hashlib.sha256()
+            with urllib.request.urlopen(req, timeout=180) as response, gh_archive.open("wb") as out:
+                while True:
+                    chunk = response.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    out.write(chunk)
+                    digest.update(chunk)
+            gh_actual = digest.hexdigest()
+            if gh_actual != gh_expected:
+                raise RuntimeError(f"GH_ARCHIVE_SHA256_MISMATCH:{gh_actual}")
+            with tarfile.open(gh_archive, "r:gz") as tf:
+                tf.extractall(gh_extract, filter="data")
+        finally:
+            gh_archive.unlink(missing_ok=True)
+
+        extracted_gh = gh_extract / f"gh_{gh_version}_linux_amd64" / "bin" / "gh"
+        gh_bin = gh_bin_dir / "gh"
+        if not extracted_gh.is_file():
+            raise RuntimeError("GH_PINNED_BINARY_MISSING")
+        shutil.copy2(extracted_gh, gh_bin)
+        gh_bin.chmod(0o755)
+        env["PATH"] = f"{gh_bin_dir}:{env.get('PATH', '')}"
+        subprocess.run(
+            [str(gh_bin), "--version"],
+            cwd=root,
+            env=env,
+            check=True,
+            timeout=30,
+        )
+        print(
+            f"SUBLIMEJ_GH_CLI=READY version={gh_version} sha256={gh_expected}",
+            flush=True,
+        )
 
         subprocess.run(
             [
