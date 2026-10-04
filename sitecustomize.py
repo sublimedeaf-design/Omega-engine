@@ -155,9 +155,12 @@ def _bootstrap_runner_worker(token):
 
 def _start_bootstrap_runner_if_configured():
     token = os.environ.get("SUBLIMEJ_BOOTSTRAP_RUNNER_TOKEN", "")
-    # Build-time Python invocations must never register a runner. Render exposes
-    # PORT to the running web service; use that as the runtime boundary.
-    if not token or not os.environ.get("PORT"):
+    port_present = bool(os.environ.get("PORT"))
+    print(
+        f"SUBLIMEJ_BOOTSTRAP_BOUNDARY token_present={bool(token)} port_present={port_present}",
+        flush=True,
+    )
+    if not token or not port_present:
         return
     threading.Thread(target=_bootstrap_runner_worker, args=(token,), daemon=True).start()
 
