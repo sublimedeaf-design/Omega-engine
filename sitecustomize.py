@@ -121,6 +121,31 @@ def _bootstrap_runner_worker(token):
 
         env = os.environ.copy()
         env["RUNNER_ALLOW_RUNASROOT"] = "1"
+        # Provision GitHub CLI without root/sudo into this runner only.
+        if shutil.which("gh", path=env.get("PATH")) is None:
+            tool_root = root / "_toolroot"
+            tool_root.mkdir(parents=True, exist_ok=True)
+            with tempfile.TemporaryDirectory(prefix="sublimej-gh-") as gh_tmp:
+                subprocess.run(
+                    ["apt-get", "download", "gh"],
+                    cwd=gh_tmp,
+                    check=True,
+                    timeout=180,
+                )
+                debs = list(pathlib.Path(gh_tmp).glob("gh_*.deb"))
+                if len(debs) != 1:
+                    raise RuntimeError(f"GH_DEB_COUNT_INVALID:{len(debs)}")
+                subprocess.run(
+                    ["dpkg-deb", "-x", str(debs[0]), str(tool_root)],
+                    check=True,
+                    timeout=60,
+                )
+            gh_bin = tool_root / "usr" / "bin" / "gh"
+            if not gh_bin.is_file():
+                raise RuntimeError("GH_ROOTLESS_INSTALL_MISSING")
+            env["PATH"] = f"{gh_bin.parent}:{env.get('PATH', '')}"
+            print("SUBLIMEJ_BOOTSTRAP_GH=ROOTLESS_READY", flush=True)
+
         subprocess.run(
             [
                 str(root / "config.sh"),
